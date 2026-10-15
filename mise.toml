@@ -1,0 +1,177 @@
+[settings]
+# Keep Rust's version and components in rust-toolchain.toml for editor support.
+idiomatic_version_file_enable_tools = ["rust"]
+# Preserve the Homebrew distributions used by the macOS runtime bundler, even
+# if a developer's global mise config selects standalone media tools.
+disable_tools = ["ffmpeg", "yt-dlp"]
+
+[tools]
+node = "24.21.0"
+python = "3.13.1"
+uv = "0.9.28"
+
+[tasks.setup]
+description = "Install project dependencies and check the development environment"
+depends = ["setup:node", "setup:tags", "setup:media"]
+run = "python scripts/check-dev-environment.py"
+
+[tasks."setup:node"]
+description = "Install frontend dependencies from package-lock.json"
+sources = ["package.json", "package-lock.json"]
+outputs = ["node_modules/.package-lock.json"]
+run = "npm ci"
+
+[tasks."setup:tags"]
+description = "Prepare the independent Python media tag reader"
+run = [
+  "uv venv --allow-existing --python '{{ tools.python.path }}/bin/python3' .venv-tags",
+  "uv pip sync --python .venv-tags/bin/python crates/audio-engine/tests/requirements.txt",
+]
+
+[tasks."setup:media"]
+description = "Install macOS media dependencies through Homebrew when missing"
+run = '''
+if [ "$(uname -s)" = Darwin ]; then
+  command -v brew >/dev/null || { echo 'Install Homebrew, then run mise run setup again.' >&2; exit 1; }
+  for formula in ffmpeg yt-dlp; do
+    brew list --versions "$formula" >/dev/null 2>&1 || brew install "$formula"
+  done
+else
+  command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null && command -v yt-dlp >/dev/null || {
+    echo 'Install ffmpeg (including ffprobe) and yt-dlp with your platform package manager, then rerun mise run setup.' >&2
+    exit 1
+  }
+fi
+'''
+
+[tasks.doctor]
+description = "Check selected runtimes, media tools, and native build prerequisites"
+run = "python scripts/check-dev-environment.py"
+
+[tasks.dev]
+description = "Start the browser UI preview"
+depends = ["setup:node"]
+run = "npm exec -- vite --host 127.0.0.1"
+
+[tasks.desktop]
+description = "Start the native Tauri application"
+depends = ["setup:node", "doctor"]
+run = "npm exec -- tauri dev"
+
+[tasks.typecheck]
+description = "Check frontend TypeScript"
+depends = ["setup:node"]
+run = "npm exec -- tsc --noEmit"
+
+[tasks.build]
+description = "Typecheck and build the frontend"
+depends = ["typecheck"]
+run = "npm exec -- vite build"
+
+[tasks.preview]
+description = "Preview the built frontend"
+depends = ["build"]
+run = "npm exec -- vite preview --host 127.0.0.1"
+
+[tasks.test]
+description = "Run frontend, Rust, resource-staging, and synthetic session unit tests"
+depends = ["test:frontend", "test:rust", "test:bundling", "test:auth"]
+
+[tasks."test:frontend"]
+description = "Run frontend and authentication prototype unit tests"
+depends = ["setup:node"]
+run = "node --test tests/*.test.mjs"
+
+[tasks."test:rust"]
+description = "Run Rust workspace tests"
+run = "cargo test --locked --workspace"
+
+[tasks."test:bundling"]
+description = "Run native resource-staging regression tests"
+run = "python scripts/test-tool-bundling.py"
+
+[tasks."test:auth"]
+description = "Test synthetic session capture without accessing browser data"
+run = "python -m unittest discover -s tests -p 'test_*.py'"
+
+[tasks."test:media"]
+description = "Run all media integration tests with FFmpeg and Mutagen"
+depends = ["setup:tags", "doctor"]
+env = { AUDIO_DL_TAG_READER_PYTHON = "{{ config_root }}/.venv-tags/bin/python" }
+run = "cargo test --locked -p audio-engine --test media_pipeline -- --include-ignored"
+
+[tasks.lint]
+description = "Lint TypeScript/React/CSS and the Rust workspace"
+depends = ["lint:ts", "lint:rust"]
+
+[tasks."lint:ts"]
+description = "Run Biome's recommended rules and import-order checks"
+depends = ["setup:node"]
+run = "npm exec -- biome check . --formatter-enabled=false --error-on-warnings"
+
+[tasks."lint:rust"]
+description = "Run Clippy on all workspace targets and reject warnings"
+run = "cargo clippy --locked --workspace --all-targets -- -D warnings"
+
+[tasks."lint:fix"]
+description = "Apply safe Biome fixes, organize imports, and format frontend files"
+depends = ["setup:node"]
+run = "npm exec -- biome check . --write --error-on-warnings"
+
+[tasks.format]
+description = "Format frontend files and the Rust workspace"
+depends = ["format:ts", "format:rust"]
+
+[tasks."format:ts"]
+description = "Format JavaScript, TypeScript, CSS, HTML and JSON with Biome"
+depends = ["setup:node"]
+run = "npm exec -- biome format . --write"
+
+[tasks."format:rust"]
+description = "Format every Rust crate with the pinned rustfmt"
+run = "cargo fmt --all"
+
+[tasks."format:check"]
+description = "Check formatting without modifying files"
+depends = ["format:ts:check", "format:rust:check"]
+
+[tasks."format:ts:check"]
+description = "Check Biome formatting without modifying files"
+depends = ["setup:node"]
+run = "npm exec -- biome ci . --linter-enabled=false --assist-enabled=false --error-on-warnings"
+
+[tasks."format:rust:check"]
+description = "Check Rust formatting without modifying files"
+run = "cargo fmt --all -- --check"
+
+[tasks.check]
+description = "Check formatting, lint both languages, build, and run unit tests"
+depends = ["format:check", "lint", "build", "test"]
+
+[tasks.tauri]
+description = "Run the Tauri CLI (arguments are forwarded)"
+depends = ["setup:node"]
+run = "npm exec -- tauri"
+
+[tasks."tools:stage"]
+description = "Stage the installed macOS audio runtime for packaging"
+depends = ["doctor"]
+run = "python scripts/stage-macos-tools.py"
+
+[tasks."branding:sync"]
+description = "Sync Jacket web artwork and generate native icon containers"
+depends = ["setup:node"]
+run = "python scripts/sync-branding.py"
+
+[tasks."tools:validate"]
+description = "Validate the staged macOS audio runtime"
+run = "python scripts/stage-macos-tools.py --validate src-tauri/resources/audio-tools"
+
+[tasks."package:mac"]
+description = "Build the macOS app with its bundled runtime"
+depends = ["setup:node", "doctor"]
+run = "npm exec -- tauri build --bundles app"
+
+[tasks."auth:prototype"]
+description = "Run the developer authentication probe (arguments are forwarded)"
+run = "node scripts/auth-prototype.mjs"

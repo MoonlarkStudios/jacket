@@ -1,0 +1,61 @@
+{
+  "name": "Jacket",
+  "descriptor": "Download and package albums and playlists.",
+  "tagline": "From link to neatly packed.",
+  "colors": {
+    "ink": "#282725",
+    "paper": "#F4EFE5",
+    "copper": "#D47749",
+    "groove": "#595B58",
+    "muted": "#787369"
+  },
+  "typography": {
+    "wordmark": "Outlined Avenir Next Demi Bold; supplied SVG is font independent.",
+    "ui": "System sans-serif (-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif)"
+  },
+  "icon": {
+    "canvas": {
+      "width": 1254,
+      "height": 1254
+    },
+    "tile": {
+      "x": 80,
+      "y": 86,
+      "width": 1094,
+      "height": 1070,
+      "radius": 174
+    },
+    "sleeve": {
+      "x": 246,
+      "y": 313,
+      "width": 528,
+      "height": 560
+    },
+    "band": {
+      "x": 366,
+      "y": 310,
+      "width": 85,
+      "height": 566,
+      "widthRatio": 0.16098484848484848
+    },
+    "record": {
+      "centerX": 760,
+      "centerY": 600,
+      "radius": 266,
+      "grooveRadius": 197,
+      "labelRadius": 86
+    },
+    "smallVariant": {
+      "maximumSize": 32,
+      "bandWidth": 89,
+      "labelRadius": 91,
+      "holeRadius": 22,
+      "grooves": 0
+    }
+  },
+  "usage": {
+    "clearspace": "At least one band width around the visible logo artwork.",
+    "minimumLogoWidth": 180,
+    "minimumSymbolWidth": 32
+  }
+}

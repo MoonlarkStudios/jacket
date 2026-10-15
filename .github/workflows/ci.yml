@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: macOS quality and media tests
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          version: 2026.9.12
+      - name: Run formatting, lint, build, and unit tests
+        run: mise run check
+      - name: Install media tools
+        run: mise run setup:media
+      - name: Verify real audio, metadata, and archives offline
+        run: mise run test:media
+
+  security:
+    name: Dependency and secret checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          version: 2026.9.12
+      - name: Install locked frontend dependencies
+        run: mise run setup:node
+      - name: Audit JavaScript dependencies
+        run: mise exec -- npm audit
+      - name: Install Rust dependency auditor
+        run: mise exec -- cargo install cargo-audit --locked --version 0.22.2
+      # Known informational upstream warnings are recorded in the release review;
+      # do not suppress vulnerability advisories or treat Linux as validated.
+      - name: Audit Rust dependencies
+        run: mise exec -- cargo audit
+      - name: Scan Git history for secrets
+        run: mise exec gitleaks@8.24.3 -- gitleaks git --redact --no-banner

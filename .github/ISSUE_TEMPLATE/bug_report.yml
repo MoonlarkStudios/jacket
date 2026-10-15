@@ -1,0 +1,45 @@
+name: Bug report
+description: Report a reproducible problem with Jacket.
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        For security issues, use SECURITY.md. Do not include cookies, browser
+        databases, private links, account details, or unredacted local paths.
+  - type: input
+    id: version
+    attributes:
+      label: Jacket version or commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and architecture
+      placeholder: macOS 26, Apple Silicon
+    validations:
+      required: true
+  - type: input
+    id: downloader
+    attributes:
+      label: yt-dlp version and mode
+      description: Available in Settings → Audio downloader.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include a public reproduction link only if it is safe to share.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and redacted error
+    validations:
+      required: true

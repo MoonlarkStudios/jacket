@@ -1,0 +1,23 @@
+node_modules/
+dist/
+target/
+src-tauri/gen/schemas/
+.DS_Store
+*.log
+*.zip
+!branding/jacket/jacket-brand-kit.zip
+*.cookies.txt
+cookies.txt
+.env
+.env.*
+!.env.example
+!.env.sample
+mise.local.toml
+.mise.local.toml
+.venv/
+.venv-tags/
+__pycache__/
+
+# Generated native runtime resources (staged from installed trusted tools).
+src-tauri/resources/audio-tools/
+src-tauri/resources/audio-tools.staging/

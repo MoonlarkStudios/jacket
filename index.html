@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <meta
+      name="description"
+      content="Jacket — download and package audio albums and playlists with tagged tracks and artwork."
+    />
+    <meta name="theme-color" content="#F4EFE5" />
+    <link rel="icon" type="image/svg+xml" href="/branding/jacket-favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/branding/favicon-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/branding/apple-touch-icon.png" />
+    <title>Jacket</title>
+    <style>
+      .startup-recovery { padding: 20px 24px; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #282725; background: #f4efe5; min-height: 100%; box-sizing: border-box; }
+      .startup-recovery p { margin: 0 0 10px; }
+      .startup-recovery button { font: inherit; padding: 6px 12px; border: 1px solid #d9d2c6; border-radius: 7px; color: inherit; background: #fffcf7; cursor: pointer; }
+      html, body, #root { margin: 0; height: 100%; }
+    </style>
+  </head>
+  <body>
+    <div id="root"><main id="startup-recovery" class="startup-recovery" role="status"><p id="startup-message">Opening Jacket…</p><button type="button" id="startup-retry" hidden>Reload Jacket</button></main></div>
+    <script type="module" src="/src/bootstrap.ts"></script>
+  </body>
+</html>

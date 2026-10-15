@@ -1,0 +1,26 @@
+{
+  "header": {
+    "musicDetailHeaderRenderer": {
+      "title": {
+        "runs": [
+          {
+            "text": "Jaco Pastorius"
+          }
+        ]
+      },
+      "subtitle": {
+        "runs": [
+          {
+            "text": "Album"
+          },
+          {
+            "text": " \u2022 "
+          },
+          {
+            "text": "1976"
+          }
+        ]
+      }
+    }
+  }
+}

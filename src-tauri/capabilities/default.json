@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window",
+  "description": "Jacket main window events and native dialogs",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:allow-save", "dialog:allow-open"]
+}

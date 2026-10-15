@@ -1,0 +1,74 @@
+{
+  "contents": {
+    "twoColumnBrowseResultsRenderer": {
+      "secondaryContents": {
+        "sectionListRenderer": {
+          "contents": [
+            {
+              "musicPlaylistShelfRenderer": {
+                "contents": [
+                  {
+                    "musicResponsiveListItemRenderer": {
+                      "flexColumns": [
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "Jaco Pastorius",
+                                  "navigationEndpoint": {
+                                    "browseEndpoint": {
+                                      "browseId": "MPREb_MPwPsljX6n0",
+                                      "browseEndpointContextSupportedConfigs": {
+                                        "browseEndpointContextMusicConfig": {
+                                          "pageType": "MUSIC_PAGE_TYPE_ALBUM"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_MEDIUM"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "musicResponsiveListItemRenderer": {
+                      "flexColumns": [
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "Jaco Pastorius",
+                                  "navigationEndpoint": {
+                                    "browseEndpoint": {
+                                      "browseId": "MPREb_MPwPsljX6n0",
+                                      "browseEndpointContextSupportedConfigs": {
+                                        "browseEndpointContextMusicConfig": {
+                                          "pageType": "MUSIC_PAGE_TYPE_ALBUM"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_MEDIUM"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

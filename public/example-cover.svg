@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="480" viewBox="0 0 480 480">
+ <title>A Quiet Afternoon by Juniper — example album artwork</title>
+ <defs><linearGradient id="paper" x2="1" y2="1"><stop stop-color="#e8dfc6"/><stop offset="1" stop-color="#d4c7a8"/></linearGradient><linearGradient id="glass" x2="0" y2="1"><stop stop-color="#88967a"/><stop offset="1" stop-color="#b6c2a0"/></linearGradient></defs>
+ <path fill="url(#paper)" d="M0 0h480v480H0z"/>
+ <text x="39" y="57" font-family="Georgia,serif" font-size="28" fill="#3a4938">A Quiet Afternoon</text>
+ <path fill="#687660" d="M96 338V195a144 144 0 0 1 288 0v143z"/>
+ <path fill="url(#glass)" d="M111 323V196a129 129 0 0 1 258 0v127z"/>
+ <circle cx="284" cy="154" r="44" fill="#e4d0a1"/>
+ <path d="M111 285q96-67 258-33v71H111z" fill="#91a081"/><path d="M111 309q113-82 258-21v35H111z" fill="#6b7c5b"/>
+ <path stroke="#e0d5b9" stroke-width="10" d="M240 65v260M111 205h258"/>
+ <path d="M81 338h318v13H81z" fill="#58684d"/>
+ <text x="240" y="421" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" letter-spacing="8" fill="#46533f">JUNIPER</text>
+</svg>

@@ -1,0 +1,52 @@
+{
+  "name": "jacket",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Turn YouTube albums and playlists into tagged audio archives.",
+  "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MoonlarkStudios/jacket.git"
+  },
+  "bugs": "https://github.com/MoonlarkStudios/jacket/issues",
+  "type": "module",
+  "scripts": {
+    "dev": "mise run dev",
+    "build": "mise run build",
+    "typecheck": "mise run typecheck",
+    "test": "mise run test:frontend",
+    "preview": "mise run preview",
+    "tauri": "mise run tauri",
+    "desktop": "mise run desktop",
+    "tools:stage": "mise run tools:stage",
+    "tools:validate": "mise run tools:validate",
+    "branding:sync": "mise run branding:sync",
+    "package:mac": "mise run package:mac",
+    "auth:prototype": "mise run auth:prototype",
+    "lint": "mise run lint",
+    "lint:fix": "mise run lint:fix",
+    "format": "mise run format",
+    "format:check": "mise run format:check",
+    "check": "mise run check"
+  },
+  "dependencies": {
+    "@mantine/core": "^9.7.2",
+    "@mantine/hooks": "^9.7.2",
+    "@tabler/icons-react": "^3.0.0",
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@tauri-apps/cli": "^2.12.2",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "esbuild": "0.28.2",
+    "typescript": "^5.9.0",
+    "vite": "^7.3.0"
+  }
+}
