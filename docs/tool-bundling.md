@@ -14,7 +14,9 @@ mise run package:mac --debug
 
 Mise selects the pinned Node and Rust tools; `setup:media` installs missing Homebrew media formulae. The media distributions remain Homebrew-managed because this bundler requires their Python runtime and dynamic library closure.
 
-`tauri build` also stages tools automatically through `beforeBuildCommand`. Staging uses installed `yt-dlp`, `ffmpeg`, `ffprobe`, and `node`, resolves their real paths, and never downloads executables. The current script expects the Homebrew Python-based yt-dlp distribution. Other distributions fail with an explanation rather than being silently mispackaged.
+`mise run package:mac` merges `src-tauri/tauri.bundle.macos.json`, which stages tools automatically through `beforeBuildCommand` and includes them as bundle resources. The automatically loaded `tauri.macos.conf.json` contains only platform settings, so ordinary development, tests, and lint work in a fresh checkout without generated resources. Direct Tauri builds need the additional bundling configuration to produce a self-contained runtime; use the packaging task above.
+
+Staging uses installed `yt-dlp`, `ffmpeg`, `ffprobe`, and `node`, resolves their real paths, and never downloads executables. The current script expects the Homebrew Python-based yt-dlp distribution. Other distributions fail with an explanation rather than being silently mispackaged.
 
 Generated resources go to `src-tauri/resources/audio-tools/`, mapped to `Contents/Resources/audio-tools/` in the app. `manifest.json` records versions, source locations, architecture, minimum macOS version, and SHA-256 hashes of every staged file. Staging is repeatable from the same installed inputs; this is not a byte-identical build guarantee (native tool signatures and upstream installs may change). Updating installed tools produces a different manifest and requires a new app build.
 

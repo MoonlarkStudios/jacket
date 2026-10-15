@@ -170,7 +170,7 @@ run = "python scripts/stage-macos-tools.py --validate src-tauri/resources/audio-
 [tasks."package:mac"]
 description = "Build the macOS app with its bundled runtime"
 depends = ["setup:node", "doctor"]
-run = "npm exec -- tauri build --bundles app"
+run = "npm exec -- tauri build --config src-tauri/tauri.bundle.macos.json --bundles app"
 
 [tasks."auth:prototype"]
 description = "Run the developer authentication probe (arguments are forwarded)"
