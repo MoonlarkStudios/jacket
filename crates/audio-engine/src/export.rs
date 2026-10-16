@@ -47,7 +47,7 @@ pub fn sanitize_component(input: &str) -> String {
 }
 
 fn hash_bytes(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    hex::encode(Sha256::digest(bytes))
 }
 
 pub fn hash_file(path: &Path) -> Result<String> {
@@ -61,7 +61,7 @@ pub fn hash_file(path: &Path) -> Result<String> {
         }
         digest.update(&buffer[..count]);
     }
-    Ok(format!("{:x}", digest.finalize()))
+    Ok(hex::encode(digest.finalize()))
 }
 
 fn codec(tools: &Toolchain, path: &Path, cancel: &Cancellation) -> Result<String> {
@@ -661,6 +661,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sha256_keeps_the_existing_lowercase_receipt_format() {
+        for (input, expected) in [
+            (
+                b"".as_slice(),
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            ),
+            (
+                b"abc".as_slice(),
+                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            ),
+        ] {
+            assert_eq!(hash_bytes(input), expected);
+            let file = tempfile::NamedTempFile::new().unwrap();
+            fs::write(file.path(), input).unwrap();
+            assert_eq!(hash_file(file.path()).unwrap(), expected);
+        }
+    }
+
+    #[test]
     fn recovery_distinguishes_network_failures_from_access_and_source_failures() {
         for detail in [
             "ERROR: unable to download video data: HTTP Error 403: Forbidden",
@@ -949,7 +968,10 @@ exit 1
         )
         .unwrap();
         let mut archive = zip::ZipArchive::new(fs::File::open(zip).unwrap()).unwrap();
-        assert_eq!(archive.by_index(0).unwrap().name(), "My mix/01 - Song.mp3");
+        assert_eq!(
+            archive.by_index(0).unwrap().name().unwrap(),
+            "My mix/01 - Song.mp3"
+        );
         assert!(write_archive(
             "My mix",
             &[("../escape".into(), file)],
