@@ -9,13 +9,13 @@ Published previews appear on [GitHub Releases](https://github.com/MoonlarkStudio
 Ubuntu / Debian:
 
 ```sh
-sudo apt install ./Jacket_0.1.0_amd64.deb
+sudo apt install ./Jacket_0.1.0-beta.1_amd64.deb
 ```
 
 Fedora:
 
 ```sh
-sudo dnf install ./Jacket-0.1.0-1.x86_64.rpm
+sudo dnf install ./Jacket-0.1.0-0.beta.1.x86_64.rpm
 ```
 
 Use the actual filename from your download. Launch **Jacket** from your application menu. The package manager installs system dependencies. No Node, FFmpeg, yt-dlp, pip, Homebrew, or developer tools need to be installed by the user. New versions are installed with the same package-manager command. SemVer prereleases such as `0.1.0-beta.1` use Debian metadata `0.1.0~beta.1` and RPM version/release `0.1.0-0.beta.1`, so the final `0.1.0` sorts later. Whole-app automatic updates and signed package repositories are not configured.

@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
-  dispatchReleaseChecks,
   selectDraft,
   uploadDraft,
   validateTitle,
@@ -177,36 +176,6 @@ test('missing server digests prevent a draft from being marked ready', async () 
   } finally {
     await rm(directory, { recursive: true });
   }
-});
-
-test('bot release PRs explicitly dispatch both CI and title checks', async () => {
-  const calls = [];
-  const github = {
-    rest: {
-      pulls: {
-        get: async () => ({
-          data: {
-            base: { ref: 'main' },
-            head: {
-              ref: 'release-please--branches--main',
-              repo: { full_name: 'MoonlarkStudios/jacket' },
-            },
-          },
-        }),
-      },
-      actions: {
-        createWorkflowDispatch: async (options) => calls.push(options),
-      },
-    },
-  };
-  await dispatchReleaseChecks({ github, context, prs: [{ number: 15 }] });
-  assert.deepEqual(
-    calls.map(({ workflow_id, ref }) => [workflow_id, ref]),
-    [
-      ['ci.yml', 'release-please--branches--main'],
-      ['pr-title.yml', 'main'],
-    ],
-  );
 });
 
 test('release configuration keeps every Rust and frontend version in one release', async () => {

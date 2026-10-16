@@ -31,38 +31,6 @@ export async function checkTitle({ github, context, core }) {
   core.info(`Conventional Commit title accepted for PR #${number}`);
 }
 
-export async function dispatchReleaseChecks({ github, context, prs }) {
-  for (const pr of prs) {
-    const { data: current } = await github.rest.pulls.get({
-      ...context.repo,
-      pull_number: pr.number,
-    });
-    if (
-      current.base.ref !== 'main' ||
-      current.head.repo.full_name.toLowerCase() !==
-        `${context.repo.owner}/${context.repo.repo}`.toLowerCase() ||
-      !current.head.ref.startsWith('release-please--')
-    ) {
-      throw new Error(
-        'Refusing to dispatch checks for an unexpected release PR',
-      );
-    }
-    // GITHUB_TOKEN does not generate ordinary PR/push workflow events.
-    // workflow_dispatch is an explicit exception and runs checks on the bot SHA.
-    await github.rest.actions.createWorkflowDispatch({
-      ...context.repo,
-      workflow_id: 'ci.yml',
-      ref: current.head.ref,
-    });
-    await github.rest.actions.createWorkflowDispatch({
-      ...context.repo,
-      workflow_id: 'pr-title.yml',
-      ref: 'main',
-      inputs: { pr_number: String(pr.number) },
-    });
-  }
-}
-
 export async function selectDraft({ github, context, tag, expectedSha }) {
   if (!tagPattern.test(tag)) throw new Error(`Invalid release tag: ${tag}`);
   const { data: release } = await github.rest.repos.getReleaseByTag({

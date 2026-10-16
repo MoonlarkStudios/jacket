@@ -16,11 +16,22 @@ Jacket uses one release version for the desktop app, Rust workspace, npm package
 
 Only Linux x86_64 installers are currently released. macOS checks protect the source, but macOS distribution awaits Developer ID signing, notarization and clean-machine acceptance. This pipeline does not enable application updates or package repositories.
 
-### Repository configuration
+### Release App and credential storage
 
-GitHub Actions must be allowed to **create and approve pull requests** in Settings → Actions → General → Workflow permissions (GitHub combines these in one setting; the bot never approves PRs). Workflow permissions are limited per job. No PAT, GitHub App, signing key, or additional secret is required: Release Please uses the repository `GITHUB_TOKEN`.
+Use a private, organization-owned GitHub App installed on **MoonlarkStudios/jacket only**. Give it repository **Contents: read/write**, **Pull requests: read/write**, and the automatically required **Metadata: read**. No organization permissions, Actions permission, user OAuth, webhook, callback URL, or hosted server is needed. Do not grant it branch-protection bypass. The workflow contains no PR approval or merge step.
 
-Bot-created PRs do not emit normal CI events with that token. The workflow explicitly dispatches both CI and the PR-title check on each created/updated release PR. Release builds call the CI workflow directly using the resolved commit, rather than depending on a bot-created tag to trigger another workflow.
+Create the App under MoonlarkStudios → Settings → Developer settings → GitHub Apps. Use the Jacket repository as its homepage, disable webhooks, and allow installation only on the owning organization. Install it using **Only select repositories → jacket**. Create its private key and configure these repository Actions values:
+
+| Kind | Name | Value |
+| --- | --- | --- |
+| Variable | `RELEASE_APP_ID` | The App ID from its GitHub settings. |
+| Secret | `RELEASE_APP_PRIVATE_KEY` | The complete PEM private key. |
+
+Back up the private key in the **Moonlark Studios vault in 1Password**, with the App name, App ID, installation/repository links, and the GitHub secret name. Never commit it, put it in a plain-text note, or leave a persistent unencrypted copy outside GitHub. Temporary setup files must be removed after the GitHub secret and 1Password backup have been verified. Key recovery/rotation should update both GitHub and 1Password.
+
+The workflow mints a short-lived installation token restricted to Jacket and those two write permissions. The action revokes it when the planning job finishes. The regular workflow token stays read-only in that job; only the separate asset-upload job can write release assets. Missing App configuration fails with a setup message.
+
+App-authored release PRs trigger ordinary CI and title checks. CI runs on PRs, pushes to `main`, manual dispatch and direct reusable calls; release branches and tags do not start duplicate push builds. Exact release builds call CI directly, and publication remains manual. The organization's policy blocking PR creation/approval by the built-in Actions token can stay disabled. No personal access token is used.
 
 Require the Conventional Commit title and CI checks before merging, and use the PR title as the squash commit title. The title checker reads PR metadata and executes only trusted base-branch code; it never checks out fork code in `pull_request_target`.
 
