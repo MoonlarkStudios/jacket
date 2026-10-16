@@ -13,7 +13,11 @@ environment = dict(os.environ, WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS='1',
                    WEBKIT_DISABLE_DMABUF_RENDERER='1', LIBGL_ALWAYS_SOFTWARE='1')
 with (evidence / f'{label}.log').open('w') as log:
     manager = subprocess.Popen(['openbox'], stdout=log, stderr=log)
-    time.sleep(1)
+    deadline = time.monotonic() + 10
+    while subprocess.run(['wmctrl', '-m'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:
+        if manager.poll() is not None or time.monotonic() >= deadline:
+            raise RuntimeError('Openbox never advertised a ready window manager')
+        time.sleep(0.1)
     app = subprocess.Popen(['/usr/bin/jacket'], env=environment, stdout=log, stderr=log, start_new_session=True)
     try:
         deadline = time.monotonic() + 45
@@ -32,10 +36,15 @@ with (evidence / f'{label}.log').open('w') as log:
         if app.poll() is not None:
             raise RuntimeError('Jacket exited after opening its window')
         subprocess.run(['import', '-window', window, str(evidence / f'{label}.png')], check=True)
-        subprocess.run(['xdotool', 'windowactivate', '--sync', window, 'key', 'alt+F4'], check=True)
+        # Ask the window manager to deliver WM_DELETE_WINDOW, the same native
+        # close request as its close button. Keyboard focus timing under Xvfb
+        # can drop Alt+F4 even after the active-window property has changed.
+        subprocess.run(['wmctrl', '-ic', hex(int(window))], check=True)
         try:
             app.wait(timeout=15)
         except subprocess.TimeoutExpired as error:
+            subprocess.run(['wmctrl', '-lpG'], stdout=log, stderr=log)
+            subprocess.run(['import', '-window', 'root', str(evidence / f'{label}-close-failure.png')], stdout=log, stderr=log)
             raise RuntimeError('Idle window close did not exit Jacket') from error
         if app.returncode != 0:
             raise RuntimeError(f'Jacket failed on idle close: {app.returncode}')
