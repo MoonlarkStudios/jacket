@@ -174,7 +174,7 @@ This preview does not include macOS or Windows installers, signed APT/DNF reposi
   )
     throw new Error('Draft identity changed while updating release notes');
   core.summary.addRaw(
-    `Draft release assets verified: [${tag}](${release.html_url}). Publication requires a maintainer.\n`,
+    `Draft release assets verified: [${tag}](${updated.html_url}). Publication requires a maintainer.\n`,
   );
   await core.summary.write();
 }
