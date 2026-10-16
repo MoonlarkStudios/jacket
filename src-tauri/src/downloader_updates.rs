@@ -13,7 +13,17 @@ use std::{
 
 const MAX_BINARY: u64 = 128 * 1024 * 1024;
 const DAY: u64 = 24 * 60 * 60;
-const ASSET: &str = "yt-dlp_macos";
+const ASSET: &str = if cfg!(target_os = "macos") {
+    "yt-dlp_macos"
+} else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+    "yt-dlp_linux"
+} else {
+    "unsupported"
+};
+
+fn updates_supported() -> bool {
+    ASSET != "unsupported"
+}
 
 #[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -434,7 +444,7 @@ fn release_from_json(value: &Value, channel: Channel) -> Result<Release, String>
                 .iter()
                 .find(|item| item.get("name").and_then(Value::as_str) == Some(ASSET))
         })
-        .ok_or("This release has no macOS downloader.")?;
+        .ok_or("This release has no downloader for your platform.")?;
     let mut release = Release {
         channel,
         version,
@@ -570,6 +580,9 @@ fn check_with_fetch(
     channel: Option<Channel>,
     fetch: impl FnOnce(Channel) -> Result<Release, String>,
 ) -> Result<Status, String> {
+    if !updates_supported() && preferences(root)?.mode == Mode::Managed {
+        return Err("Automatic downloader updates support macOS and x86_64 Linux. Choose a local yt-dlp executable on this platform.".into());
+    }
     let mut check: Check = load(&root.join("check.json")).unwrap_or_default();
     if preferences(root)?.mode == Mode::Local {
         return status(root, base, &check);
@@ -632,13 +645,19 @@ fn stage(
             .set_permissions(fs::Permissions::from_mode(0o700))
             .map_err(|error| error.to_string())?;
     }
-    let actual = version(file.path(), cancel)?;
+    // Linux refuses to execute a file while a writable descriptor is open
+    // (ETXTBSY). Keep the temporary path, closing the writer before validation.
+    file.as_file()
+        .sync_all()
+        .map_err(|error| error.to_string())?;
+    let file = file.into_temp_path();
+    let actual = version(&file, cancel)?;
     if version_parts(&actual) != version_parts(&release.version) {
         return Err(
             "The download reported the wrong version. Your current version is unchanged.".into(),
         );
     }
-    youtube_support(file.path(), cancel)?;
+    youtube_support(&file, cancel)?;
     cancel.check().map_err(|error| error.to_string())?;
     private_directory(&root.join("versions"))?;
     let directory = root.join("versions").join(release.directory());
@@ -716,8 +735,8 @@ pub fn install(
     activate_if_idle: impl FnOnce(&mut dyn FnMut() -> Result<(), String>) -> Result<bool, String>,
     progress: impl Fn(&str),
 ) -> Result<Status, String> {
-    if !cfg!(target_os = "macos") {
-        return Err("Downloader updates currently support the macOS app.".into());
+    if !updates_supported() {
+        return Err("Downloader updates support macOS and x86_64 Linux.".into());
     }
     cancel.check().map_err(|error| error.to_string())?;
     if preferences(root)?.mode != Mode::Managed {
@@ -827,6 +846,17 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    fn installed_fixture(root: &Path, version: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let (file, _) = fixture(root, version);
+        file.as_file()
+            .set_permissions(fs::Permissions::from_mode(0o700))
+            .unwrap();
+        // Installed executables have no open writer, including in Linux tests.
+        file.into_temp_path().keep().unwrap()
+    }
+
     #[test]
     #[cfg(unix)]
     fn file_picker_resolution_retains_the_upgradable_symlink_only_for_the_same_file() {
@@ -852,15 +882,13 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn local_install_preserves_package_manager_symlinks_and_never_checks_github() {
-        use std::os::unix::{fs::symlink, fs::PermissionsExt};
+        use std::os::unix::fs::symlink;
         let root = tempfile::tempdir().unwrap();
-        let (file, release) = fixture(root.path(), "2026.08.19");
-        file.as_file()
-            .set_permissions(fs::Permissions::from_mode(0o700))
-            .unwrap();
+        let file = installed_fixture(root.path(), "2026.08.19");
+        let original_hash = hash(&file).unwrap();
         let local = root.path().join("homebrew-yt-dlp");
-        symlink(file.path(), &local).unwrap();
-        let tools = fixture_tools(file.path().to_owned());
+        symlink(&file, &local).unwrap();
+        let tools = fixture_tools(file.clone());
         let prefs = Preferences {
             mode: Mode::Local,
             auto_update: true,
@@ -875,9 +903,9 @@ mod tests {
         })
         .unwrap();
         assert!(checked.latest_version.is_none());
-        assert_eq!(hash(file.path()).unwrap(), release.sha256);
+        assert_eq!(hash(&file).unwrap(), original_hash);
         // An external package-manager update is observed through the same link.
-        fs::write(file.path(), "#!/bin/sh\ncase \"$*\" in *--version*) echo 2026.10.10.233141;; *) echo youtube;; esac\n").unwrap();
+        fs::write(&file, "#!/bin/sh\ncase \"$*\" in *--version*) echo 2026.10.10.233141;; *) echo youtube;; esac\n").unwrap();
         assert_eq!(
             check_with_fetch(root.path(), &tools, false, None, |_| panic!())
                 .unwrap()
@@ -895,13 +923,9 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn invalid_local_selection_and_busy_configuration_leave_current_settings_unchanged() {
-        use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();
-        let (file, _) = fixture(root.path(), "2026.08.19");
-        file.as_file()
-            .set_permissions(fs::Permissions::from_mode(0o700))
-            .unwrap();
-        let tools = fixture_tools(file.path().to_owned());
+        let file = installed_fixture(root.path(), "2026.08.19");
+        let tools = fixture_tools(file.clone());
         let prefs = Preferences {
             mode: Mode::Local,
             auto_update: true,
@@ -911,7 +935,7 @@ mod tests {
         let prefs = Preferences {
             mode: Mode::Local,
             auto_update: true,
-            local_path: Some(file.path().to_string_lossy().into_owned()),
+            local_path: Some(file.to_string_lossy().into_owned()),
         };
         assert!(configure(root.path(), &tools, prefs, |_| Err(
             "An album is running".into()
@@ -922,7 +946,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", all(target_os = "linux", target_arch = "x86_64")))]
     fn prepared_updates_wait_for_idle_and_reuse_the_verified_candidate_after_restart() {
         let root = tempfile::tempdir().unwrap();
         let (file, previous) = fixture(root.path(), "2026.08.19");
@@ -978,14 +1002,9 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn explicit_fallback_pauses_automatic_updates_and_returns_to_included_tools() {
-        use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();
-        let (included, _) = fixture(root.path(), "2026.08.19");
-        included
-            .as_file()
-            .set_permissions(fs::Permissions::from_mode(0o700))
-            .unwrap();
-        let tools = fixture_tools(included.path().to_owned());
+        let included = installed_fixture(root.path(), "2026.08.19");
+        let tools = fixture_tools(included);
         let (file, release) = fixture(root.path(), "2026.10.10.233141");
         commit(root.path(), &release, file, &Cancellation::default()).unwrap();
         use_bundled(root.path()).unwrap();
@@ -1037,7 +1056,7 @@ mod tests {
 
     #[test]
     fn official_release_and_checksum_are_bound_to_the_channel_asset_and_version() {
-        let value = json!({"tag_name":"2026.10.10.233141", "draft":false, "assets":[{"name":ASSET,"size":42,"digest":format!("sha256:{}", "a".repeat(64)),"browser_download_url":"https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/2026.10.10.233141/yt-dlp_macos"}]});
+        let value = json!({"tag_name":"2026.10.10.233141", "draft":false, "assets":[{"name":ASSET,"size":42,"digest":format!("sha256:{}", "a".repeat(64)),"browser_download_url":format!("https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/2026.10.10.233141/{ASSET}")}]});
         assert!(release_from_json(&value, Channel::Nightly).unwrap().valid());
         assert!(release_from_json(&value, Channel::Stable).is_err());
         let mut bad = value.clone();
@@ -1050,12 +1069,27 @@ mod tests {
             &reqwest::Url::parse("https://github.com.evil.test/file").unwrap()
         ));
         assert_eq!(
-            checksum_from_manifest(format!("{} *yt-dlp_macos\n", "a".repeat(64)).as_bytes()),
+            checksum_from_manifest(format!("{} *{ASSET}\n", "a".repeat(64)).as_bytes()),
             Some("a".repeat(64))
         );
         assert!(
             checksum_from_manifest(format!("{} yt-dlp.exe\n", "a".repeat(64)).as_bytes()).is_none()
         );
+        let wrong_platform = if ASSET == "yt-dlp_linux" {
+            "yt-dlp_macos"
+        } else {
+            "yt-dlp_linux"
+        };
+        assert!(checksum_from_manifest(
+            format!("{} {wrong_platform}\n", "a".repeat(64)).as_bytes()
+        )
+        .is_none());
+        let mut wrong_asset =
+            json!({"tag_name":"2026.10.10.233141", "assets":[{"name":wrong_platform,"size":42}]});
+        assert!(release_from_json(&wrong_asset, Channel::Nightly).is_err());
+        wrong_asset["assets"][0]["name"] = json!(ASSET);
+        wrong_asset["assets"][0]["browser_download_url"] = json!(format!("https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/2026.10.10.233141/{wrong_platform}"));
+        assert!(release_from_json(&wrong_asset, Channel::Nightly).is_err());
     }
 
     #[test]

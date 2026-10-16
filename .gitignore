@@ -21,3 +21,4 @@ __pycache__/
 # Generated native runtime resources (staged from installed trusted tools).
 src-tauri/resources/audio-tools/
 src-tauri/resources/audio-tools.staging/
+src-tauri/resources/linux/

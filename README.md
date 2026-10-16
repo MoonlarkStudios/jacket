@@ -31,7 +31,7 @@ Jacket is a focused desktop app from [Moonlark Studios](https://github.com/Moonl
 
 ## Get started
 
-**Jacket is an early source release.** Signed, notarized installers and automatic whole-app updates are not configured yet. The current macOS packaging target is **Apple Silicon on macOS 26 or later**. Windows, Linux, Intel Macs, and older macOS versions have not been validated for release.
+**Jacket is an early source release.** Linux CI produces **x86_64 DEB and RPM preview candidates** with bundled audio tools; see the [Linux preview guide](docs/linux-preview.md) for installation, tested distributions, and remaining desktop acceptance. The macOS packaging target is **Apple Silicon on macOS 26 or later**; public macOS signing/notarization is not configured. Windows, Intel Macs, and older macOS versions have not been validated for release. Automatic whole-app updates are not configured.
 
 ### Run the desktop app from source
 

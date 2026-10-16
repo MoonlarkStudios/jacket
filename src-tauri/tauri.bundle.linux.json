@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeBuildCommand": "mise run tools:stage:linux && mise run build"
+  },
+  "bundle": {
+    "targets": ["deb", "rpm"],
+    "homepage": "https://github.com/MoonlarkStudios/jacket",
+    "license": "GPL-3.0-or-later",
+    "licenseFile": "../LICENSE",
+    "resources": {
+      "resources/linux/audio-tools/": "audio-tools/"
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "python3 (>= 3.10)",
+          "ca-certificates",
+          "xdg-utils",
+          "libstdc++6",
+          "libgcc-s1"
+        ],
+        "section": "sound",
+        "files": {
+          "/usr/share/doc/jacket/LICENSE": "../LICENSE",
+          "/usr/share/doc/jacket/THIRD_PARTY_NOTICES.md": "../THIRD_PARTY_NOTICES.md"
+        }
+      },
+      "rpm": {
+        "depends": [
+          "python3",
+          "ca-certificates",
+          "xdg-utils",
+          "gtk3",
+          "webkit2gtk4.1",
+          "libxdo",
+          "libstdc++",
+          "libgcc"
+        ],
+        "files": {
+          "/usr/share/licenses/jacket/LICENSE": "../LICENSE",
+          "/usr/share/doc/jacket/THIRD_PARTY_NOTICES.md": "../THIRD_PARTY_NOTICES.md"
+        }
+      }
+    }
+  }
+}

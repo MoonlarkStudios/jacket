@@ -88,7 +88,7 @@ run = "cargo test --locked --workspace"
 
 [tasks."test:bundling"]
 description = "Run native resource-staging regression tests"
-run = "python scripts/test-tool-bundling.py"
+run = ["python scripts/test-tool-bundling.py", "python scripts/test-linux-bundling.py"]
 
 [tasks."test:auth"]
 description = "Test synthetic session capture without accessing browser data"
@@ -171,6 +171,15 @@ run = "python scripts/stage-macos-tools.py --validate src-tauri/resources/audio-
 description = "Build the macOS app with its bundled runtime"
 depends = ["setup:node", "doctor"]
 run = "npm exec -- tauri build --config src-tauri/tauri.bundle.macos.json --bundles app"
+
+[tasks."tools:stage:linux"]
+description = "Build and verify the pinned x86_64 Linux audio runtime and source companion"
+run = "python scripts/stage-linux-tools.py"
+
+[tasks."package:linux"]
+description = "Build x86_64 Linux preview DEB and RPM packages"
+depends = ["setup:node"]
+run = "npm exec -- tauri build --config src-tauri/tauri.bundle.linux.json --bundles deb,rpm -- --locked"
 
 [tasks."auth:prototype"]
 description = "Run the developer authentication probe (arguments are forwarded)"

@@ -55,3 +55,104 @@ jobs:
         run: mise exec -- cargo audit
       - name: Scan Git history for secrets
         run: mise exec gitleaks@8.24.3 -- gitleaks git --redact --no-banner
+
+  linux:
+    name: Linux x86_64 quality and packages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: 2
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+      AUDIO_DL_TEST_RESOURCES: ${{ github.workspace }}/src-tauri/resources/linux
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl wget file libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev pkg-config nasm autoconf automake libtool rpm desktop-file-utils
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          version: 2026.9.12
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: target/linux-runtime-downloads
+          key: linux-runtime-inputs-${{ hashFiles('scripts/linux-runtime.lock.json') }}
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+            target/release
+          key: linux-rust-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'vendor/glib/src/variant_iter.rs') }}
+          restore-keys: linux-rust-
+      - name: Build and verify the pinned audio runtime and source companion
+        run: |
+          mise run tools:stage:linux
+          echo "$GITHUB_WORKSPACE/src-tauri/resources/linux/audio-tools/bin" >> "$GITHUB_PATH"
+      - name: Run Linux formatting, lint, build and unit tests
+        run: mise run check
+      - name: Verify real audio using the staged Linux runtime
+        run: mise run test:media
+      - name: Exercise the GLib safety backport with optimizations
+        run: mise exec -- cargo test --locked --release -p audio-dl-desktop --test glib_variant
+      - name: Build DEB and RPM preview installers
+        run: mise run package:linux
+      - name: Collect packages, exact sources and checksums
+        run: mise exec -- python scripts/collect-linux-preview.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-preview-x86_64
+          path: target/linux-preview/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  linux-install:
+    name: Install Linux preview (${{ matrix.label }})
+    needs: linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: ubuntu-24.04
+            image: ubuntu:24.04
+          - label: debian-13
+            image: debian:13
+          - label: fedora-44
+            image: fedora:44
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: linux-preview-x86_64
+          path: preview-packages
+      - name: Verify artifact checksums
+        working-directory: preview-packages
+        run: sha256sum -c SHA256SUMS
+      - name: Install, launch, reinstall and remove the real package
+        env:
+          PREVIEW_IMAGE: ${{ matrix.image }}
+          PREVIEW_LABEL: ${{ matrix.label }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/linux-evidence"
+          docker run --rm --platform linux/amd64 \
+            -v "$GITHUB_WORKSPACE:/workspace:ro" \
+            -v "$GITHUB_WORKSPACE/preview-packages:/packages:ro" \
+            -v "$RUNNER_TEMP/linux-evidence:/evidence" \
+            -e PREVIEW_LABEL \
+            "$PREVIEW_IMAGE" bash /workspace/scripts/test-linux-package.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: linux-evidence-${{ matrix.label }}
+          path: ${{ runner.temp }}/linux-evidence/
+          if-no-files-found: warn
+          retention-days: 14

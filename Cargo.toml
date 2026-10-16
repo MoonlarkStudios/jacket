@@ -1,6 +1,12 @@
 [workspace]
 members = ["crates/audio-engine", "src-tauri"]
 resolver = "2"
+exclude = ["vendor/glib"]
+
+# GTK3 still requires GLib 0.18. Backport the upstream VariantStrIter fix
+# instead of suppressing RUSTSEC-2024-0429. See vendor/README.md.
+[patch.crates-io]
+glib = { path = "vendor/glib" }
 
 [workspace.package]
 version = "0.1.0"

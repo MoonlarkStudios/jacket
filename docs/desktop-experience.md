@@ -27,7 +27,7 @@ The standalone flow is **paste link → review album → choose destination → 
 | Explicit Quit | Cancel operations; retain unfinished-export recovery | Same | Same |
 | Save/reveal | Native save dialog / Finder | Native save dialog / Explorer | Native save dialog / default file manager |
 
-No tray host, icon geometry, indicator extension, floating launcher or absolute positioning is required. Linux and Windows packaging remain unverified; their current runtime uses locally installed media tools. The managed downloader updater currently supports macOS only. macOS retains its separate packaging configuration and bundled runtime.
+No tray host, icon geometry, indicator extension, floating launcher or absolute positioning is required. Linux has an explicit x86_64 [preview packaging and acceptance path](linux-preview.md), including private audio tools and platform-specific managed downloader updates. Real GNOME/KDE Wayland/X11 acceptance remains required. Windows packaging remains unverified and uses locally installed media tools. macOS retains its separate packaging configuration and bundled runtime.
 
 ## Screenshots
 

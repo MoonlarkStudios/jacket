@@ -8,6 +8,12 @@ The Rust and JavaScript dependency graphs are recorded in `Cargo.lock` and `pack
 
 ## Audio runtime
 
+Linux preview packages build FFmpeg 8.1.3, LAME 3.100 and Opus 1.5.2 from hash-pinned source archives, and include Node 24.21.0 plus the pure Python yt-dlp 2026.8.19 and matching yt-dlp-ejs 0.8.0 packages. Python, GTK and WebKit are installed as system dependencies rather than copied into Jacket. FFmpeg optional host-library discovery, networking, GPL and nonfree build options are not enabled. LAME and Opus are linked statically into FFmpeg/FFprobe; notices and build settings are retained under `audio-tools/share/licenses` and `build-info.json`. Python wheel distribution metadata retains the downloader/EJS notices. The exact inputs and hashes are in [the Linux runtime lock](scripts/linux-runtime.lock.json).
+
+Distribute the generated `jacket-linux-runtime-sources.tar.gz` with Linux installers. It contains the exact FFmpeg/LAME/Opus/Node/downloader/EJS source archives and runtime build recipe, including the LGPL-covered sources. The application source companion identifies the same commit. Review the complete binary dependency inventory before a broadly recommended release; these companions do not turn this overview into a complete license audit. See the [Linux preview guide](docs/linux-preview.md).
+
+The Linux GTK dependency uses a local MIT-licensed GLib 0.18.5 safety backport. Its original license/copyright and the upstream patch reference are retained in [vendor](vendor/README.md).
+
 Packaged macOS builds stage installed copies of [yt-dlp](https://github.com/yt-dlp/yt-dlp), [FFmpeg and FFprobe](https://ffmpeg.org), [Node.js](https://nodejs.org), [Python](https://www.python.org), and their required libraries and Python packages. Development builds can use locally installed copies instead.
 
 Staging retains available license files, Python distribution metadata, Homebrew receipts, recipes, and software bills of materials under the bundled runtime. Its manifest records installed sources, tool versions, and hashes. These records help identify what is shipped; they do not by themselves satisfy every license or corresponding-source requirement.
