@@ -33,6 +33,8 @@ fn make_audio(tools: &Toolchain, path: &Path, codec: &str) {
             "2",
             "-strict",
             "experimental",
+            "-threads",
+            "1",
         ])
         .arg(path)
         .output()
@@ -125,11 +127,17 @@ fn make_cover(tools: &Toolchain, path: &Path) {
             "testsrc=size=96x64",
             "-frames:v",
             "1",
+            "-threads",
+            "1",
         ])
         .arg(path)
         .output()
         .unwrap();
-    assert!(output.status.success());
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
@@ -464,11 +472,17 @@ fn compatible_output_preserves_aac_and_embeds_cover_and_real_tags() {
             "color=c=green:s=32x32",
             "-frames:v",
             "1",
+            "-threads",
+            "1",
         ])
         .arg(&cover)
         .output()
         .unwrap();
-    assert!(generated.status.success());
+    assert!(
+        generated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&generated.stderr)
+    );
     for (format, filename, expected) in [
         (AudioFormat::Compatible, "result.m4a", "aac"),
         (AudioFormat::Mp3, "result.mp3", "mp3"),

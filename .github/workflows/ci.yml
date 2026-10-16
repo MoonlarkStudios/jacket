@@ -2,17 +2,46 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact commit to build and test
+        type: string
+        default: ""
+      release_tag:
+        description: Require every application version to match this release tag
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ inputs.ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  version:
+    name: Application version and release integrity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.sha }}
+      - name: Check synchronized versions and release regressions
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          python3 scripts/check-release.py
+          if [ -n "$RELEASE_TAG" ]; then python3 scripts/check-release.py --tag "$RELEASE_TAG"; fi
+          python3 scripts/test-release.py
+          node --test tests/releases.test.mjs
+
   quality:
     name: macOS quality and media tests
     runs-on: macos-26
@@ -21,6 +50,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.ref || github.sha }}
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
         with:
           version: 2026.9.12
@@ -40,6 +70,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ inputs.ref || github.sha }}
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
         with:
           version: 2026.9.12
@@ -49,9 +80,151 @@ jobs:
         run: mise exec -- npm audit
       - name: Install Rust dependency auditor
         run: mise exec -- cargo install cargo-audit --locked --version 0.22.2
-      # Known informational upstream warnings are recorded in the release review;
-      # do not suppress vulnerability advisories or treat Linux as validated.
+      # Review audit findings with the release checklist in docs/releasing.md;
+      # do not suppress vulnerability advisories or equate headless checks with desktop acceptance.
       - name: Audit Rust dependencies
         run: mise exec -- cargo audit
       - name: Scan Git history for secrets
         run: mise exec gitleaks@8.24.3 -- gitleaks git --redact --no-banner
+
+  linux:
+    name: Linux x86_64 quality and packages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: 2
+      CARGO_HTTP_MULTIPLEXING: "false"
+      CARGO_NET_RETRY: 5
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+      AUDIO_DL_TEST_RESOURCES: ${{ github.workspace }}/src-tauri/resources/linux
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.sha }}
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl wget file libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev pkg-config nasm autoconf automake libtool rpm desktop-file-utils
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+        with:
+          version: 2026.9.12
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: runtime-cache
+        with:
+          path: |
+            target/linux-runtime-downloads
+            src-tauri/resources/linux/audio-tools
+            target/linux-preview/jacket-linux-runtime-sources.tar.gz
+            target/linux-preview/jacket-linux-runtime-sources.tar.gz.sha256
+          key: linux-runtime-v2-${{ hashFiles('scripts/linux-runtime.lock.json', 'scripts/stage-linux-tools.py', 'docs/linux-preview.md', 'THIRD_PARTY_NOTICES.md') }}
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: rust-cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+            target/release
+          key: linux-rust-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'vendor/glib/src/variant_iter.rs') }}
+          restore-keys: linux-rust-
+      - name: Fetch locked Rust dependencies before compiling
+        run: mise exec -- cargo fetch --locked
+      - name: Build and verify the pinned audio runtime and source companion
+        id: stage-runtime
+        run: |
+          mise run tools:stage:linux
+          echo "$GITHUB_WORKSPACE/src-tauri/resources/linux/audio-tools/bin" >> "$GITHUB_PATH"
+      - name: Run Linux formatting, lint, build and unit tests
+        run: mise run check
+      - name: Verify real audio using the staged Linux runtime
+        run: mise run test:media
+      - name: Exercise the GLib safety backport with optimizations
+        run: mise exec -- cargo test --locked --release -p audio-dl-desktop --test glib_variant
+      - name: Build DEB and RPM preview installers
+        run: mise run package:linux
+      - name: Collect packages, exact sources and checksums
+        run: mise exec -- python scripts/collect-linux-preview.py
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-preview-x86_64
+          path: target/linux-preview/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: linux-runtime-diagnostics
+          path: |
+            src-tauri/resources/linux/audio-tools/
+            target/linux-preview/jacket-linux-runtime-sources.tar.gz
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 0
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: always() && steps.stage-runtime.outcome == 'success' && steps.runtime-cache.outputs.cache-hit != 'true' && steps.runtime-cache.outputs.cache-primary-key != ''
+        with:
+          path: |
+            target/linux-runtime-downloads
+            src-tauri/resources/linux/audio-tools
+            target/linux-preview/jacket-linux-runtime-sources.tar.gz
+            target/linux-preview/jacket-linux-runtime-sources.tar.gz.sha256
+          key: ${{ steps.runtime-cache.outputs.cache-primary-key }}
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: always() && steps.rust-cache.outputs.cache-hit != 'true' && steps.rust-cache.outputs.cache-primary-key != ''
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+            target/release
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+
+  linux-install:
+    name: Install Linux preview (${{ matrix.label }})
+    needs: linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: ubuntu-24.04
+            image: ubuntu:24.04
+          - label: debian-13
+            image: debian:13
+          - label: fedora-44
+            image: fedora:44
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: linux-preview-x86_64
+          path: preview-packages
+      - name: Verify artifact checksums
+        working-directory: preview-packages
+        run: sha256sum -c SHA256SUMS
+      - name: Install, launch, reinstall and remove the real package
+        env:
+          PREVIEW_IMAGE: ${{ matrix.image }}
+          PREVIEW_LABEL: ${{ matrix.label }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/linux-evidence"
+          docker run --rm --platform linux/amd64 \
+            -v "$GITHUB_WORKSPACE:/workspace:ro" \
+            -v "$GITHUB_WORKSPACE/preview-packages:/packages:ro" \
+            -v "$RUNNER_TEMP/linux-evidence:/evidence" \
+            -e PREVIEW_LABEL \
+            "$PREVIEW_IMAGE" bash /workspace/scripts/test-linux-package.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: linux-evidence-${{ matrix.label }}
+          path: ${{ runner.temp }}/linux-evidence/
+          if-no-files-found: warn
+          retention-days: 14

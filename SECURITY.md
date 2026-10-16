@@ -8,7 +8,7 @@ If private reporting is unavailable, open an issue asking for a private contact 
 
 ## Supported versions
 
-Security fixes currently target the latest code on the default branch. There is no long-term support policy for older snapshots. The initial distribution target is Apple Silicon macOS; other operating systems have not been validated for release.
+Security fixes currently target the latest code on the default branch. There is no long-term support policy for older snapshots. The initial macOS distribution target is Apple Silicon; Linux x86_64 builds are preview candidates with separate desktop acceptance requirements. See the [release checklist](docs/releasing.md).
 
 ## Security boundaries
 
@@ -16,8 +16,8 @@ The native application accepts supported HTTPS YouTube URLs and restricts artwor
 
 Browser cookies remain local and are read only for explicitly selected browser sessions. Cookie values and credential paths are excluded from the webview transport, export manifests, and recovery records. Failed or cancelled jobs retain media locally for recovery; their cache can contain private media and source details.
 
-Managed macOS downloader updates come from official yt-dlp GitHub releases and are checked against release size and SHA-256 metadata before activation. A local executable selected in Settings is trusted code and runs with the user’s permissions. Whole-application signed updates are not implemented.
+Managed macOS and Linux x86_64 downloader updates come from official yt-dlp GitHub releases and are checked against release size and SHA-256 metadata before activation. A local executable selected in Settings is trusted code and runs with the user’s permissions. Whole-application signed updates are not implemented.
 
 The app-owned authentication experiment is disabled in production and gated behind a macOS debug build plus `JACKET_AUTH_PROTOTYPE=1`. Do not rely on it for production account access.
 
-See [third-party notices](THIRD_PARTY_NOTICES.md) and the [release review](docs/release-readiness.md) for known upstream and distribution limitations.
+See [third-party notices](THIRD_PARTY_NOTICES.md), [release acceptance requirements](docs/releasing.md), and [tracked issues](https://github.com/MoonlarkStudios/jacket/issues) for distribution requirements and known limitations.

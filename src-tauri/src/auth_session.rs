@@ -825,6 +825,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     #[ignore = "Explicit local Keychain integration; writes and deletes only a synthetic test item"]
     fn real_keychain_roundtrip_uses_a_separate_synthetic_item() {
         use security_framework::passwords::*;

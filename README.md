@@ -31,7 +31,7 @@ Jacket is a focused desktop app from [Moonlark Studios](https://github.com/Moonl
 
 ## Get started
 
-**Jacket is an early source release.** Signed, notarized installers and automatic whole-app updates are not configured yet. The current macOS packaging target is **Apple Silicon on macOS 26 or later**. Windows, Linux, Intel Macs, and older macOS versions have not been validated for release.
+**Jacket is an early source release.** Linux CI produces **x86_64 DEB and RPM preview candidates** with bundled audio tools; see the [Linux preview guide](docs/linux-preview.md) for installation, tested distributions, and remaining desktop acceptance. The macOS packaging target is **Apple Silicon on macOS 26 or later**; public macOS signing/notarization is not configured. Windows, Intel Macs, and older macOS versions have not been validated for release. The release workflow prepares Linux GitHub Release drafts for maintainer review; no binary release is available until one is published. Automatic whole-app updates are not configured.
 
 ### Run the desktop app from source
 
@@ -54,7 +54,7 @@ For a local macOS app bundle:
 mise run package:mac
 ```
 
-Open `target/release/bundle/macos/Jacket.app`. The bundle includes its audio tools, so it does not need separate runtime installations. Local bundles are ad-hoc signed; [public distribution still needs additional work](docs/tool-bundling.md#distribution-prerequisites).
+Open `target/release/bundle/macos/Jacket.app`. The bundle includes its audio tools, so it does not need separate runtime installations. Local bundles are ad-hoc signed; [public distribution still needs additional work](docs/packaging-macos.md#distribution-prerequisites).
 
 ### Just explore the interface
 
@@ -128,7 +128,7 @@ mise run check       # Formatting, lint, strict types, UI build, and unit tests
 mise run test:media  # Offline audio integration tests with FFmpeg and Mutagen
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), [implementation notes](docs/implementation.md), [desktop behavior](docs/desktop-experience.md), and [tool bundling](docs/tool-bundling.md). The [release review](docs/release-readiness.md) tracks remaining distribution work. The [brand kit](branding/jacket/README.md) contains the logo and icon sources.
+See [CONTRIBUTING.md](CONTRIBUTING.md), [architecture](docs/architecture.md), [macOS packaging](docs/packaging-macos.md), and the [Linux preview guide](docs/linux-preview.md). Use the [release checklist](docs/releasing.md) when preparing a distribution. The [brand kit](branding/jacket/README.md) contains the logo and icon sources.
 
 ## License
 

@@ -12,6 +12,8 @@
       "!!src-tauri/gen",
       "!!src-tauri/resources/audio-tools",
       "!!src-tauri/resources/audio-tools.staging",
+      "!!src-tauri/resources/linux",
+      "!!vendor",
       "!!package-lock.json"
     ]
   },

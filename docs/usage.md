@@ -76,7 +76,7 @@ To reconnect, sign in normally in the selected browser profile, return to Jacket
 
 Advanced settings let you select a release channel or return to the bundled version and pause updates. **Local install** lets you choose your own yt-dlp executable; Jacket validates its version and YouTube support and does not manage that executable. Only select a file you trust.
 
-These updates affect yt-dlp, not Jacket, FFmpeg, or Node. Managed downloader updates currently support macOS only.
+These updates affect yt-dlp, not Jacket, FFmpeg, or Node. Managed downloader updates support macOS and Linux x86_64.
 
 ## Local data and cleanup
 

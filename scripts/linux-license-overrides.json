@@ -1,0 +1,59 @@
+{
+  "Rust:alloc-stdlib@0.3.0": {
+    "file": "rust-alloc-stdlib-0.3.0-LICENSE",
+    "url": "https://raw.githubusercontent.com/dropbox/rust-alloc-no-stdlib/0a81fd6928ea3b33c8cd484aa4575d50ffb98012/LICENSE",
+    "sha256": "c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae"
+  },
+  "Rust:defmt-parser@1.0.0": {
+    "file": "rust-defmt-parser-1.0.0-LICENSE-MIT",
+    "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/LICENSE-MIT",
+    "sha256": "2710a622a896bba67356913d4d0492cab5465f61b2ecce6d880aeb483834fb50"
+  },
+  "Rust:dlopen2@0.8.2": {
+    "file": "rust-dlopen2-0.8.2-LICENSE",
+    "url": "https://raw.githubusercontent.com/OpenByteDev/dlopen2/cc80e4a0a90d499b677fdf7743699b4b3a43a989/LICENSE",
+    "sha256": "39fa265207450e77c62e90c5594a06c085b655d8374c7ced4bf7894b6bd95dd2"
+  },
+  "Rust:dlopen2_derive@0.4.3": {
+    "file": "rust-dlopen2_derive-0.4.3-LICENSE",
+    "url": "https://raw.githubusercontent.com/OpenByteDev/dlopen2/cc80e4a0a90d499b677fdf7743699b4b3a43a989/LICENSE",
+    "sha256": "39fa265207450e77c62e90c5594a06c085b655d8374c7ced4bf7894b6bd95dd2"
+  },
+  "Rust:libappindicator-sys@0.9.0": {
+    "file": "rust-libappindicator-sys-0.9.0-LICENSE-MIT",
+    "url": "https://raw.githubusercontent.com/tauri-apps/libappindicator-rs/eafd1e3682a1247f595410266091e9684021cb6f/LICENSE-MIT",
+    "sha256": "eb227437252b2a7a9c1fc342c93ade1f3d7ce38cc6dd754f613db07d53ceff0b"
+  },
+  "Rust:lofty@0.25.4": {
+    "file": "rust-lofty-0.25.4-LICENSE-MIT",
+    "url": "https://raw.githubusercontent.com/Serial-ATA/lofty-rs/618731cee7aac784f5f08643bd5d8d005f3c01d6/LICENSE-MIT",
+    "sha256": "0884e92e74c08412d08bb7cbd121e3c09cbf2ae357972440b06f81b3305b0176"
+  },
+  "Rust:lofty_attr@0.13.0": {
+    "file": "rust-lofty_attr-0.13.0-LICENSE-MIT",
+    "url": "https://raw.githubusercontent.com/Serial-ATA/lofty-rs/5affdd9aea68e7b06d5e1a651bec7814882f44c7/LICENSE-MIT",
+    "sha256": "0884e92e74c08412d08bb7cbd121e3c09cbf2ae357972440b06f81b3305b0176"
+  },
+  "Rust:ogg_pager@0.7.2": {
+    "file": "rust-ogg_pager-0.7.2-LICENSE-MIT",
+    "url": "https://raw.githubusercontent.com/Serial-ATA/lofty-rs/76ff7093a1f6a98c60297de4695709d04c8c1f47/LICENSE-MIT",
+    "sha256": "0884e92e74c08412d08bb7cbd121e3c09cbf2ae357972440b06f81b3305b0176"
+  },
+  "Rust:tauri-plugin@2.7.1": {
+    "file": "rust-tauri-plugin-2.7.1-LICENSE-MIT",
+    "url": "https://raw.githubusercontent.com/tauri-apps/tauri/30da1fd6e17de6107ecc850c95dfb16b5729f2dd/LICENSE-MIT",
+    "sha256": "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d"
+  },
+  "Rust:selectors@0.38.0": {
+    "file": "rust-selectors-0.38.0-LICENSE-MPL-2.0",
+    "url": "https://www.mozilla.org/media/MPL/2.0/index.txt",
+    "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+    "note": "The published crate declares MPL-2.0 and retains MPL source headers. Include the canonical Mozilla license text, omitted from the crate archive."
+  },
+  "npm:react-remove-scroll-bar@2.3.8": {
+    "file": "npm-react-remove-scroll-bar-2.3.8-LICENSE",
+    "url": "https://raw.githubusercontent.com/theKashey/react-remove-scroll-bar/8ca9ba5ea52de03308fe8ced94f7b159a44d28ff/LICENSE",
+    "sha256": "a79aae0c0f21990d9d963bb3c5a79cdcea9a46f8523ba55c58d7fe776b6ebc84",
+    "note": "The published package and README declare MIT but omit its license file. Retain the official repository license at this immutable upstream commit; the registry gitHead is unavailable."
+  }
+}

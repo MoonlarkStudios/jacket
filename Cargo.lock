@@ -209,9 +209,10 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "audio-dl-desktop"
-version = "0.1.0"
+version = "0.1.0-beta.0"
 dependencies = [
  "audio-engine",
+ "glib",
  "hex",
  "libc",
  "reqwest 0.12.28",
@@ -228,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "audio-engine"
-version = "0.1.0"
+version = "0.1.0-beta.0"
 dependencies = [
  "hex",
  "libc",
@@ -1402,8 +1403,6 @@ dependencies = [
 [[package]]
 name = "glib"
 version = "0.18.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "233daaf6e83ae6a12a52055f568f9d7cf4671dabb78ff9560ab6da230ce00ee5"
 dependencies = [
  "bitflags 2.13.2",
  "futures-channel",
