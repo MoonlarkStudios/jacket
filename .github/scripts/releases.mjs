@@ -33,10 +33,18 @@ export async function checkTitle({ github, context, core }) {
 
 export async function selectDraft({ github, context, tag, expectedSha }) {
   if (!tagPattern.test(tag)) throw new Error(`Invalid release tag: ${tag}`);
-  const { data: release } = await github.rest.repos.getReleaseByTag({
+  // The tag endpoint returns published releases only. Authenticated listings
+  // include drafts; paginate so older drafts remain recoverable.
+  const releases = await github.paginate(github.rest.repos.listReleases, {
     ...context.repo,
-    tag,
+    per_page: 100,
   });
+  const matches = releases.filter((release) => release.tag_name === tag);
+  if (matches.length !== 1)
+    throw new Error(
+      `Expected exactly one release for ${tag}, found ${matches.length}`,
+    );
+  const [release] = matches;
   if (!release.draft)
     throw new Error(
       'Published releases are immutable to this workflow; choose a new version',
@@ -148,15 +156,25 @@ This preview does not include macOS or Windows installers, signed APT/DNF reposi
       '',
     )
     .trim();
-  await github.rest.repos.updateRelease({
+  const { data: updated } = await github.rest.repos.updateRelease({
     ...context.repo,
     release_id: release.id,
+    // Preserve identity explicitly: draft edits can otherwise use an untagged
+    // placeholder even when the real release tag already exists.
+    tag_name: tag,
+    target_commitish: sha,
     body: `${original}\n\n${notes}`,
     draft: true,
     prerelease: tag.includes('-'),
   });
+  if (
+    !updated.draft ||
+    updated.tag_name !== tag ||
+    updated.target_commitish !== sha
+  )
+    throw new Error('Draft identity changed while updating release notes');
   core.summary.addRaw(
-    `Draft release assets verified: [${tag}](${release.html_url}). Publication requires a maintainer.\n`,
+    `Draft release assets verified: [${tag}](${updated.html_url}). Publication requires a maintainer.\n`,
   );
   await core.summary.write();
 }

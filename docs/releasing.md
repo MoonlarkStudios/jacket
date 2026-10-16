@@ -39,6 +39,8 @@ Require the Conventional Commit title and CI checks before merging, and use the 
 
 On the **Prepare release** Actions page, choose **Run workflow**, select `main`, and enter the existing draft tag (for example `v0.1.0-beta.1`). It rebuilds and validates that exact tag commit, then resumes/replaces draft assets. Leaving the tag empty refreshes the release PR. Published releases, moved tags and commits outside `main` are rejected. Never reuse a published version or replace its installers; release a new version for a fix.
 
+Recovery runs use release-control scripts from the workflow’s current `main` commit, so fixes to draft handling can recover an older tag without moving it. The application build and artifact checks still target the original tag commit.
+
 Re-running the original workflow is also safe, but an existing draft may no longer appear as a newly created Release Please output. Use the explicit tag input when recovering an incomplete draft. A failed run leaves the release unpublished; never publish a draft whose build did not finish and whose complete assets have not been verified.
 
 ## Version policy

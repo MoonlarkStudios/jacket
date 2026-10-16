@@ -20,6 +20,7 @@ const context = {
 function fixture() {
   const release = {
     id: 1,
+    tag_name: tag,
     draft: true,
     target_commitish: sha,
     html_url: 'https://example.test/draft',
@@ -28,7 +29,7 @@ function fixture() {
   };
   const writes = [];
   const repos = {
-    getReleaseByTag: async () => ({ data: release }),
+    listReleases: async () => ({ data: [release] }),
     getCommit: async () => ({ data: { sha } }),
     compareCommitsWithBasehead: async () => ({ data: { status: 'ahead' } }),
     getRelease: async () => ({ data: release }),
@@ -47,14 +48,33 @@ function fixture() {
     },
     updateRelease: async (options) => {
       assert.equal(options.draft, true, 'automation must never publish');
+      assert.equal(
+        options.tag_name,
+        tag,
+        'draft edits must retain the actual release tag',
+      );
+      assert.equal(
+        options.target_commitish,
+        sha,
+        'draft edits must retain the exact release commit',
+      );
       writes.push('update');
       Object.assign(release, options);
+      return { data: release };
     },
   };
   const core = {
     summary: { addRaw() {}, async write() {} },
   };
-  return { release, writes, repos, github: { rest: { repos } }, core };
+  const github = {
+    rest: { repos },
+    async paginate(method, options) {
+      assert.equal(method, repos.listReleases);
+      assert.deepEqual(options, { ...context.repo, per_page: 100 });
+      return (await method(options)).data;
+    },
+  };
+  return { release, writes, repos, github, core };
 }
 
 test('Conventional Commit titles allow scopes and breaking changes', () => {
@@ -73,6 +93,38 @@ test('Conventional Commit titles allow scopes and breaking changes', () => {
   ]) {
     assert.throws(() => validateTitle(title), /Conventional Commit/);
   }
+});
+
+test('draft lookup uses authenticated pagination instead of the published-tag endpoint', async () => {
+  const state = fixture();
+  state.repos.getReleaseByTag = async () => {
+    throw new Error('Published-tag endpoint cannot locate drafts');
+  };
+  state.github.paginate = async (method, options) => {
+    assert.equal(method, state.repos.listReleases);
+    assert.deepEqual(options, { ...context.repo, per_page: 100 });
+    return [{ tag_name: 'v0.2.0', draft: true }, state.release];
+  };
+  const selected = await selectDraft({
+    ...state,
+    context,
+    tag,
+    expectedSha: sha,
+  });
+  assert.equal(selected.release, state.release);
+  assert.equal(selected.sha, sha);
+});
+
+test('missing and ambiguous release listings are rejected without mutations', async () => {
+  const state = fixture();
+  for (const releases of [[], [state.release, { ...state.release, id: 2 }]]) {
+    state.repos.listReleases = async () => ({ data: releases });
+    await assert.rejects(
+      selectDraft({ ...state, context, tag }),
+      /exactly one release/,
+    );
+  }
+  assert.deepEqual(state.writes, []);
 });
 
 test('published releases, moved tags, and commits outside main are rejected', async () => {
@@ -136,6 +188,31 @@ test('draft uploads verify server digests and safely resume partial uploads', as
     state.writes.length = 0;
     await uploadDraft({ ...state, context, tag, sha, directory });
     assert.deepEqual(state.writes, ['delete', 'upload', 'update']);
+  } finally {
+    await rm(directory, { recursive: true });
+  }
+});
+
+test('server changes to draft identity prevent a ready summary', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'jacket-release-'));
+  try {
+    await writeFile(join(directory, 'asset'), 'fixture');
+    for (const change of [
+      { tag_name: 'untagged-placeholder' },
+      { target_commitish: 'main' },
+      { draft: false },
+    ]) {
+      const state = fixture();
+      state.repos.updateRelease = async () => ({
+        data: { ...state.release, ...change },
+      });
+      state.core.summary.addRaw = () =>
+        assert.fail('An invalid draft must not be marked ready');
+      await assert.rejects(
+        uploadDraft({ ...state, context, tag, sha, directory }),
+        /Draft identity changed/,
+      );
+    }
   } finally {
     await rm(directory, { recursive: true });
   }
