@@ -12,6 +12,8 @@ label = os.environ.get('PREVIEW_LABEL', 'linux')
 environment = dict(os.environ, WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS='1',
                    WEBKIT_DISABLE_DMABUF_RENDERER='1', LIBGL_ALWAYS_SOFTWARE='1')
 with (evidence / f'{label}.log').open('w') as log:
+    manager = subprocess.Popen(['openbox'], stdout=log, stderr=log)
+    time.sleep(1)
     app = subprocess.Popen(['/usr/bin/jacket'], env=environment, stdout=log, stderr=log, start_new_session=True)
     try:
         deadline = time.monotonic() + 45
@@ -30,7 +32,7 @@ with (evidence / f'{label}.log').open('w') as log:
         if app.poll() is not None:
             raise RuntimeError('Jacket exited after opening its window')
         subprocess.run(['import', '-window', window, str(evidence / f'{label}.png')], check=True)
-        subprocess.run(['xdotool', 'windowclose', window], check=True)
+        subprocess.run(['xdotool', 'windowactivate', '--sync', window, 'key', 'alt+F4'], check=True)
         try:
             app.wait(timeout=15)
         except subprocess.TimeoutExpired as error:
@@ -41,4 +43,6 @@ with (evidence / f'{label}.log').open('w') as log:
         if app.poll() is None:
             os.killpg(app.pid, signal.SIGKILL)
             app.wait()
+        manager.terminate()
+        manager.wait(timeout=5)
 print(f'{label}: installed release window opened and closed successfully')

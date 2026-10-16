@@ -17,6 +17,10 @@
           "python3 (>= 3.10)",
           "ca-certificates",
           "xdg-utils",
+          "libc6 (>= 2.39)",
+          "libgtk-3-0t64",
+          "libwebkit2gtk-4.1-0",
+          "libxdo3",
           "libstdc++6",
           "libgcc-s1"
         ],

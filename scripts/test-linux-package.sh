@@ -6,12 +6,12 @@ if command -v apt-get >/dev/null; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
   package=$(find /packages -maxdepth 1 -name '*.deb' -print -quit)
-  apt-get install -y "$package" xvfb xauth xdotool imagemagick dbus-x11 desktop-file-utils
+  apt-get install -y "$package" xvfb xauth xdotool imagemagick dbus-x11 desktop-file-utils openbox
   test "$(dpkg-query -W -f='${Architecture}' jacket)" = amd64
   apt-get install -y --reinstall "$package"
 else
   package=$(find /packages -maxdepth 1 -name '*.rpm' -print -quit)
-  dnf install -y "$package" xorg-x11-server-Xvfb xorg-x11-xauth xdotool ImageMagick dbus-daemon util-linux shadow-utils desktop-file-utils
+  dnf install -y "$package" xorg-x11-server-Xvfb xorg-x11-xauth xdotool ImageMagick dbus-daemon util-linux shadow-utils desktop-file-utils openbox
   test "$(rpm -q --queryformat '%{ARCH}' jacket)" = x86_64
   rpm -U --replacepkgs "$package"
 fi
