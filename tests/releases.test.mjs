@@ -48,8 +48,19 @@ function fixture() {
     },
     updateRelease: async (options) => {
       assert.equal(options.draft, true, 'automation must never publish');
+      assert.equal(
+        options.tag_name,
+        tag,
+        'draft edits must retain the actual release tag',
+      );
+      assert.equal(
+        options.target_commitish,
+        sha,
+        'draft edits must retain the exact release commit',
+      );
       writes.push('update');
       Object.assign(release, options);
+      return { data: release };
     },
   };
   const core = {
@@ -177,6 +188,31 @@ test('draft uploads verify server digests and safely resume partial uploads', as
     state.writes.length = 0;
     await uploadDraft({ ...state, context, tag, sha, directory });
     assert.deepEqual(state.writes, ['delete', 'upload', 'update']);
+  } finally {
+    await rm(directory, { recursive: true });
+  }
+});
+
+test('server changes to draft identity prevent a ready summary', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'jacket-release-'));
+  try {
+    await writeFile(join(directory, 'asset'), 'fixture');
+    for (const change of [
+      { tag_name: 'untagged-placeholder' },
+      { target_commitish: 'main' },
+      { draft: false },
+    ]) {
+      const state = fixture();
+      state.repos.updateRelease = async () => ({
+        data: { ...state.release, ...change },
+      });
+      state.core.summary.addRaw = () =>
+        assert.fail('An invalid draft must not be marked ready');
+      await assert.rejects(
+        uploadDraft({ ...state, context, tag, sha, directory }),
+        /Draft identity changed/,
+      );
+    }
   } finally {
     await rm(directory, { recursive: true });
   }

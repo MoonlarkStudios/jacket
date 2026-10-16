@@ -156,13 +156,23 @@ This preview does not include macOS or Windows installers, signed APT/DNF reposi
       '',
     )
     .trim();
-  await github.rest.repos.updateRelease({
+  const { data: updated } = await github.rest.repos.updateRelease({
     ...context.repo,
     release_id: release.id,
+    // Preserve identity explicitly: draft edits can otherwise use an untagged
+    // placeholder even when the real release tag already exists.
+    tag_name: tag,
+    target_commitish: sha,
     body: `${original}\n\n${notes}`,
     draft: true,
     prerelease: tag.includes('-'),
   });
+  if (
+    !updated.draft ||
+    updated.tag_name !== tag ||
+    updated.target_commitish !== sha
+  )
+    throw new Error('Draft identity changed while updating release notes');
   core.summary.addRaw(
     `Draft release assets verified: [${tag}](${release.html_url}). Publication requires a maintainer.\n`,
   );
