@@ -33,10 +33,18 @@ export async function checkTitle({ github, context, core }) {
 
 export async function selectDraft({ github, context, tag, expectedSha }) {
   if (!tagPattern.test(tag)) throw new Error(`Invalid release tag: ${tag}`);
-  const { data: release } = await github.rest.repos.getReleaseByTag({
+  // The tag endpoint returns published releases only. Authenticated listings
+  // include drafts; paginate so older drafts remain recoverable.
+  const releases = await github.paginate(github.rest.repos.listReleases, {
     ...context.repo,
-    tag,
+    per_page: 100,
   });
+  const matches = releases.filter((release) => release.tag_name === tag);
+  if (matches.length !== 1)
+    throw new Error(
+      `Expected exactly one release for ${tag}, found ${matches.length}`,
+    );
+  const [release] = matches;
   if (!release.draft)
     throw new Error(
       'Published releases are immutable to this workflow; choose a new version',
