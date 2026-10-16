@@ -14,10 +14,15 @@ export default defineConfig({
   envPrefix: ['VITE_', 'TAURI_ENV_'],
   build: {
     target: 'es2022',
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom', '@mantine/core', '@mantine/hooks'],
+        codeSplitting: {
+          groups: [
+            {
+              name: 'vendor',
+              test: /[\\/]node_modules[\\/](?:react(?:-dom)?|@mantine[\\/](?:core|hooks))[\\/]/,
+            },
+          ],
         },
       },
     },
