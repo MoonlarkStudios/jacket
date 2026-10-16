@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeBuildCommand": "mise run tools:stage && mise run build"
+  },
+  "bundle": {
+    "resources": {
+      "resources/audio-tools/": "audio-tools/"
+    }
+  }
+}
