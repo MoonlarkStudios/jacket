@@ -6,7 +6,7 @@ Thanks for helping make Jacket a dependable desktop utility. Bug reports, focuse
 
 For a substantial feature or a workflow change, open an issue first so we can agree on the user problem and scope. For a small fix, send a pull request with reproduction steps and relevant validation.
 
-The current validated development platform is macOS on Apple Silicon. Other platforms are welcome contributions, but require their own native testing before we claim support. See the [desktop acceptance matrix](docs/desktop-experience.md).
+The current validated development platform is macOS on Apple Silicon. Linux has a [preview build and installer-testing path](docs/linux-preview.md). Other platforms are welcome contributions, but require their own native testing before we claim support. See the [desktop acceptance matrix](docs/releasing.md#desktop-acceptance).
 
 ## Set up
 
@@ -25,7 +25,7 @@ Follow the [README setup](README.md#run-the-desktop-app-from-source). `mise.toml
 
 List individual tasks with `mise tasks`. `npm test` runs frontend tests only; use `mise run check` for the full quality gate. The checks do not modify source files. Python unit tests use synthetic session fixtures and never open a real browser database. Media integration tests generate their own audio and do not contact YouTube.
 
-GitHub Actions runs the quality gate and media integration tests on macOS. A separate job checks the dependency lockfiles and Git history for known vulnerabilities and secrets. The workflow does not publish apps or sign releases.
+GitHub Actions runs the quality gate and media integration tests on macOS and Linux. Linux jobs also build preview installers and test installation in disposable containers. A separate job checks the dependency lockfiles and Git history for known vulnerabilities and secrets. The workflow retains preview artifacts; it does not publish releases or configure distribution signing.
 
 ## Code boundaries
 
@@ -33,9 +33,9 @@ GitHub Actions runs the quality gate and media integration tests on macOS. A sep
 - `src-tauri`: desktop commands, native menus, browser-profile resolution, downloader updates, job ownership, and recovery.
 - `src`: review UI, editing drafts, preferences, and typed desktop transport. Keep process execution and cookie access out of the webview.
 - `tests`: frontend state and behavior tests, plus synthetic Python session tests.
-- `scripts`: development checks, brand synchronization, and macOS tool staging.
+- `scripts`: development checks, brand synchronization, platform runtime staging, and Linux package/source collection and verification.
 
-See [implementation notes](docs/implementation.md) and the [manifest contract](docs/manifest.md) before changing export behavior. Preserve original source metadata and repeated playlist entries. Keep recovery compatible where possible; handle incompatible records explicitly. Avoid changing the bundle identifier or preference namespace during branding changes.
+See [architecture](docs/architecture.md) and the [manifest contract](docs/manifest.md) before changing export behavior. Preserve original source metadata and repeated playlist entries. Keep recovery compatible where possible; handle incompatible records explicitly. Avoid changing the bundle identifier or preference namespace during branding changes.
 
 ## Validate the behavior you change
 
@@ -49,4 +49,4 @@ Do not use live accounts, browser cookies, or restricted media as automated fixt
 
 Explain the problem, the resulting behavior, and how you verified it. Keep changes focused; avoid unrelated formatting or dependency churn. For provider failures, include the downloader version and a public reproduction URL only if it is safe to share.
 
-By contributing, you agree that your contribution is licensed under Jacket’s [GPL-3.0-or-later license](LICENSE). Do not copy code or assets whose license is incompatible with that license. Third-party runtime distribution needs its own notices and source preparation; see [tool bundling](docs/tool-bundling.md#distribution-prerequisites).
+By contributing, you agree that your contribution is licensed under Jacket’s [GPL-3.0-or-later license](LICENSE). Do not copy code or assets whose license is incompatible with that license. Third-party runtime distribution needs its own notices and source preparation; see [third-party notices](THIRD_PARTY_NOTICES.md) and the [release checklist](docs/releasing.md).

@@ -1,6 +1,6 @@
-# Self-contained macOS audio tools
+# macOS packaging
 
-The packaged app now includes a complete local runtime. End users do not need Homebrew, Python, Node or FFmpeg. Development (`mise run desktop`) can still discover installed tools when no packaged resource directory exists.
+The packaged app includes a complete local runtime. End users do not need Homebrew, Python, Node or FFmpeg. Development (`mise run desktop`) can still discover installed tools when no packaged resource directory exists. Use the [release checklist](releasing.md) before distributing a build.
 
 ## Build and verify locally
 
@@ -20,7 +20,7 @@ Staging uses installed `yt-dlp`, `ffmpeg`, `ffprobe`, and `node`, resolves their
 
 Generated resources go to `src-tauri/resources/audio-tools/`, mapped to `Contents/Resources/audio-tools/` in the app. `manifest.json` records versions, source locations, architecture, minimum macOS version, and SHA-256 hashes of every staged file. Staging is repeatable from the same installed inputs; this is not a byte-identical build guarantee (native tool signatures and upstream installs may change). Updating installed tools produces a different manifest and requires a new app build.
 
-The current installed toolchain is Apple Silicon: yt-dlp 2026.8.19, FFmpeg/ffprobe 9.0.2, Node 24.21.0 and Python 3.14.7. FFmpeg was compiled for **macOS 26.0**, so this local bundle's minimum is 26.0. The staging step rejects a tool requiring a newer OS than the configured minimum, or a Mach-O that does not support the build host's architecture. It cannot cross-build an Intel or universal app from these arm64-only inputs. For broader distribution, build a smaller codec-focused FFmpeg/runtime set with the intended older deployment target, on each architecture.
+The configured distribution target is **Apple Silicon on macOS 26.0 or later**. Read exact tool versions and deployment requirements from each staged runtime's manifest rather than assuming the installed Homebrew inputs are fixed. Staging rejects tools requiring a newer OS than the configured minimum and Mach-O files that do not support the build host's architecture. It cannot create an Intel or universal app from arm64-only inputs. Broader support requires a compatible runtime built for each intended architecture and deployment target.
 
 ## What is bundled
 
@@ -55,10 +55,8 @@ Use `Toolchain::discover_with_resources(&app.path().resource_dir()?)` at each Ta
 
 ## Distribution prerequisites
 
-Local inspection found **zero valid code-signing identities**. Xcode's `codesign`, `install_name_tool` and `notarytool` are installed, but credentials were not provided or invented.
-
 A public macOS release needs an Apple Developer account, a **Developer ID Application** certificate/private key, and Apple notarization credentials. Native helper executables and libraries must be signed before the outer app with the hardened runtime and appropriate narrow entitlements (in particular Node's JIT requirements). The final archive must be notarized, stapled and verified on a clean Mac. Review resource helper signing explicitly; merely signing the outer app is insufficient. [Tauri macOS signing](https://v2.tauri.app/distribute/sign/macos/), [Apple notarization requirements](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
 
-Automatic updates additionally need an application-owned updater signing key pair, the public key embedded in the app, signed release artifacts and an HTTPS release feed. None are configured; adding a placeholder feed or silently generating production keys would not make updating functional. After release ownership and hosting are decided, add the Tauri updater plugin and publish authenticated update artifacts. [Tauri updater](https://v2.tauri.app/plugin/updater/).
+Whole-app automatic updates additionally need an application-owned updater signing key pair, the public key embedded in the app, signed release artifacts and an HTTPS release feed. These are not configured. Add the Tauri updater plugin and verify signed update delivery before advertising this feature. [Tauri updater](https://v2.tauri.app/plugin/updater/).
 
-The installed FFmpeg is compiled with GPL components (`--enable-gpl`, x264/x265). Retaining licenses and bottle recipes is useful provenance, but **does not itself fulfill corresponding-source distribution obligations**. Before public distribution, choose the intended FFmpeg build/licenses and provide the corresponding source and notices for the shipped components. No public release/upload is performed by these scripts. [FFmpeg license guidance](https://ffmpeg.org/legal.html).
+Inspect the staged FFmpeg build settings and dependency closure, including any GPL components. Retaining licenses and bottle recipes is useful provenance, but **does not itself fulfill corresponding-source distribution obligations**. Before public distribution, choose the intended FFmpeg build/licenses and provide the corresponding source and notices for the shipped components. No public release/upload is performed by these scripts. [FFmpeg license guidance](https://ffmpeg.org/legal.html).

@@ -54,7 +54,7 @@ For a local macOS app bundle:
 mise run package:mac
 ```
 
-Open `target/release/bundle/macos/Jacket.app`. The bundle includes its audio tools, so it does not need separate runtime installations. Local bundles are ad-hoc signed; [public distribution still needs additional work](docs/tool-bundling.md#distribution-prerequisites).
+Open `target/release/bundle/macos/Jacket.app`. The bundle includes its audio tools, so it does not need separate runtime installations. Local bundles are ad-hoc signed; [public distribution still needs additional work](docs/packaging-macos.md#distribution-prerequisites).
 
 ### Just explore the interface
 
@@ -128,7 +128,7 @@ mise run check       # Formatting, lint, strict types, UI build, and unit tests
 mise run test:media  # Offline audio integration tests with FFmpeg and Mutagen
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), [implementation notes](docs/implementation.md), [desktop behavior](docs/desktop-experience.md), and [tool bundling](docs/tool-bundling.md). The [release review](docs/release-readiness.md) tracks remaining distribution work. The [brand kit](branding/jacket/README.md) contains the logo and icon sources.
+See [CONTRIBUTING.md](CONTRIBUTING.md), [architecture](docs/architecture.md), [macOS packaging](docs/packaging-macos.md), and the [Linux preview guide](docs/linux-preview.md). Use the [release checklist](docs/releasing.md) when preparing a distribution. The [brand kit](branding/jacket/README.md) contains the logo and icon sources.
 
 ## License
 
