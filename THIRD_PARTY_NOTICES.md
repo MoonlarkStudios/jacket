@@ -18,7 +18,7 @@ Packaged macOS builds stage installed copies of [yt-dlp](https://github.com/yt-d
 
 Staging retains available license files, Python distribution metadata, Homebrew receipts, recipes, and software bills of materials under the bundled runtime. Its manifest records installed sources, tool versions, and hashes. These records help identify what is shipped; they do not by themselves satisfy every license or corresponding-source requirement.
 
-The current Homebrew FFmpeg runtime includes GPL components. Before publishing a bundled app, review every staged component, preserve its required notices, and prepare the corresponding sources and build information required by its license. Refer to [FFmpeg’s licensing guidance](https://ffmpeg.org/legal.html) and the [distribution prerequisites](docs/tool-bundling.md#distribution-prerequisites). A source-code release of Jacket does not include the ignored, generated audio runtime.
+Homebrew FFmpeg runtimes can include GPL components; inspect the exact staged build settings and dependency closure. Before publishing a bundled app, review every staged component, preserve its required notices, and prepare the corresponding sources and build information required by its license. Refer to [FFmpeg’s licensing guidance](https://ffmpeg.org/legal.html) and the [distribution prerequisites](docs/packaging-macos.md#distribution-prerequisites). A source-code release of Jacket does not include the ignored, generated audio runtime.
 
 ## Brand and example content
 

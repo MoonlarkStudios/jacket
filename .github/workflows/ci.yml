@@ -49,8 +49,8 @@ jobs:
         run: mise exec -- npm audit
       - name: Install Rust dependency auditor
         run: mise exec -- cargo install cargo-audit --locked --version 0.22.2
-      # Known informational upstream warnings are recorded in the release review;
-      # do not suppress vulnerability advisories or treat Linux as validated.
+      # Review audit findings with the release checklist in docs/releasing.md;
+      # do not suppress vulnerability advisories or equate headless checks with desktop acceptance.
       - name: Audit Rust dependencies
         run: mise exec -- cargo audit
       - name: Scan Git history for secrets
