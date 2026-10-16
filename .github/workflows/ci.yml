@@ -78,11 +78,17 @@ jobs:
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         with:
           version: 2026.9.12
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: runtime-cache
         with:
-          path: target/linux-runtime-downloads
-          key: linux-runtime-inputs-${{ hashFiles('scripts/linux-runtime.lock.json') }}
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+          path: |
+            target/linux-runtime-downloads
+            src-tauri/resources/linux/audio-tools
+            target/linux-preview/jacket-linux-runtime-sources.tar.gz
+            target/linux-preview/jacket-linux-runtime-sources.tar.gz.sha256
+          key: linux-runtime-v2-${{ hashFiles('scripts/linux-runtime.lock.json', 'scripts/stage-linux-tools.py', 'docs/linux-preview.md', 'THIRD_PARTY_NOTICES.md') }}
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: rust-cache
         with:
           path: |
             ~/.cargo/registry
@@ -94,6 +100,7 @@ jobs:
       - name: Fetch locked Rust dependencies before compiling
         run: mise exec -- cargo fetch --locked
       - name: Build and verify the pinned audio runtime and source companion
+        id: stage-runtime
         run: |
           mise run tools:stage:linux
           echo "$GITHUB_WORKSPACE/src-tauri/resources/linux/audio-tools/bin" >> "$GITHUB_PATH"
@@ -114,6 +121,34 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: linux-runtime-diagnostics
+          path: |
+            src-tauri/resources/linux/audio-tools/
+            target/linux-preview/jacket-linux-runtime-sources.tar.gz
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 0
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        if: always() && steps.stage-runtime.outcome == 'success' && steps.runtime-cache.outputs.cache-hit != 'true' && steps.runtime-cache.outputs.cache-primary-key != ''
+        with:
+          path: |
+            target/linux-runtime-downloads
+            src-tauri/resources/linux/audio-tools
+            target/linux-preview/jacket-linux-runtime-sources.tar.gz
+            target/linux-preview/jacket-linux-runtime-sources.tar.gz.sha256
+          key: ${{ steps.runtime-cache.outputs.cache-primary-key }}
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        if: always() && steps.rust-cache.outputs.cache-hit != 'true' && steps.rust-cache.outputs.cache-primary-key != ''
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+            target/release
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
 
   linux-install:
     name: Install Linux preview (${{ matrix.label }})

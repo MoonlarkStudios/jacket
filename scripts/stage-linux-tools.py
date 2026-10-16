@@ -100,11 +100,19 @@ def validate(directory):
     output = subprocess.check_output([str(directory / 'bin/node'), '--version'], text=True)
     if int(output.lstrip('v').split('.')[0]) < 22:
         raise RuntimeError('YouTube requires Node 22 or later')
+    # PNG codecs require zlib, which --disable-autodetect would otherwise omit.
+    # Exercise both encoding and decoding before spending time building the app.
+    with tempfile.TemporaryDirectory() as temporary:
+        png = Path(temporary) / 'cover.png'
+        jpeg = Path(temporary) / 'cover.jpg'
+        ffmpeg = directory / 'bin/ffmpeg'
+        run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=16x16', '-frames:v', '1', '-threads', '1', png])
+        run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-i', png, '-frames:v', '1', '-threads', '1', jpeg])
     # Verify that both the challenge solver and downloader import in isolated
     # system Python, without pip, user site packages, or a developer's venv.
     code = "import sys; sys.path.insert(0, sys.argv[1]); import yt_dlp, yt_dlp_ejs; from yt_dlp.extractor.youtube import YoutubeIE; print(YoutubeIE.IE_NAME)"
     run(['/usr/bin/python3', '-I', '-B', '-c', code, directory / 'lib/python'])
-    print('Linux runtime hashes, executables, imports, and shared libraries verified.', flush=True)
+    print('Linux runtime hashes, artwork codecs, executables, imports, and shared libraries verified.', flush=True)
 
 
 def source_archive(inputs, paths, runtime):
@@ -143,16 +151,18 @@ def stage():
     environment = dict(os.environ, CFLAGS='-O2 -fPIC', CXXFLAGS='-O2 -fPIC', PKG_CONFIG_PATH=str(prefix / 'lib/pkgconfig'))
     jobs = str(min(os.cpu_count() or 2, 4))
     configurations = {}
-    for key in ['lame', 'opus', 'ffmpeg']:
+    for key in ['zlib', 'lame', 'opus', 'ffmpeg']:
         extracted = BUILD / key
         unpack(paths[key], extracted)
         source = next(extracted.iterdir())
-        if key == 'lame':
+        if key == 'zlib':
+            options = ['--static']
+        elif key == 'lame':
             options = ['--disable-shared', '--enable-static', '--disable-frontend', '--disable-decoder', '--with-pic']
         elif key == 'opus':
             options = ['--disable-shared', '--enable-static', '--disable-extra-programs', '--disable-doc', '--with-pic']
         else:
-            options = ['--disable-autodetect', '--disable-debug', '--disable-doc', '--disable-ffplay', '--disable-network', '--disable-shared', '--enable-static', '--enable-libmp3lame', '--enable-libopus', '--pkg-config-flags=--static', f'--extra-cflags=-I{prefix}/include', f'--extra-ldflags=-L{prefix}/lib']
+            options = ['--disable-autodetect', '--disable-debug', '--disable-doc', '--disable-ffplay', '--disable-network', '--disable-shared', '--enable-static', '--enable-zlib', '--enable-libmp3lame', '--enable-libopus', '--pkg-config-flags=--static', f'--extra-cflags=-I{prefix}/include', f'--extra-ldflags=-L{prefix}/lib']
         command = ['./configure', f'--prefix={prefix}', *options]
         configurations[key] = command
         run(command, cwd=source, env=environment)
@@ -168,7 +178,7 @@ def stage():
     licenses = staging / 'share/licenses'
     licenses.mkdir(parents=True)
     shutil.copy2(node / 'LICENSE', licenses / 'Node-LICENSE')
-    for key, filename in [('ffmpeg', 'COPYING.LGPLv2.1'), ('ffmpeg', 'LICENSE.md'), ('lame', 'COPYING'), ('opus', 'COPYING')]:
+    for key, filename in [('ffmpeg', 'COPYING.LGPLv2.1'), ('ffmpeg', 'LICENSE.md'), ('zlib', 'LICENSE'), ('lame', 'COPYING'), ('opus', 'COPYING')]:
         source = next((BUILD / key).iterdir())
         shutil.copy2(source / filename, licenses / f'{key}-{filename}')
     for key in ['yt-dlp', 'yt-dlp-ejs']:
