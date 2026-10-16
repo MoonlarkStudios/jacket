@@ -127,7 +127,7 @@ def stage():
     lock = json.loads(LOCK.read_text())
     if OUTPUT.exists():
         manifest = verify_manifest(OUTPUT)
-        if manifest['lockSha256'] == digest(LOCK):
+        if manifest['lockSha256'] == digest(LOCK) and manifest.get('builderSha256') == digest(Path(__file__)):
             validate(OUTPUT)
             # A cached runtime without its source companion is not distributable.
             if (SOURCES / 'jacket-linux-runtime-sources.tar.gz').is_file():
@@ -174,11 +174,10 @@ def stage():
     for key in ['yt-dlp', 'yt-dlp-ejs']:
         unpack(paths[key], staging / 'lib/python')
     launcher = staging / 'bin/yt-dlp'
-    launcher.write_text('#!/bin/sh\nset -eu\nJACKET_RUNTIME_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\nexec /usr/bin/python3 -I "$JACKET_RUNTIME_DIR/lib/python/yt_dlp/__main__.py" "$@"\n')
+    launcher.write_text('#!/bin/sh\nset -eu\nJACKET_RUNTIME_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\nexec /usr/bin/python3 -I -B "$JACKET_RUNTIME_DIR/lib/python/yt_dlp/__main__.py" "$@"\n')
     launcher.chmod(0o755)
     # Python must not leave extra files in the package's read-only runtime.
     # -B also avoids modifying the hash manifest during package validation.
-    launcher.write_text(launcher.read_text().replace('python3 -I ', 'python3 -I -B '))
     info = {'target': lock['target'], 'inputs': inputs, 'configure': configurations,
             'compiler': subprocess.check_output(['cc', '--version'], text=True).splitlines()[0],
             'builder': Path('/etc/os-release').read_text(),
@@ -186,7 +185,7 @@ def stage():
     (staging / 'build-info.json').write_text(json.dumps(info, indent=2) + '\n')
     (staging / 'README.txt').write_text('Jacket Linux audio runtime. See build-info.json for exact inputs and build commands.\nThe matching jacket-linux-runtime-sources.tar.gz must accompany distributed installers.\nyt-dlp uses system Python in isolated mode. Node and FFmpeg are private to Jacket.\n')
     files = {path.relative_to(staging).as_posix(): digest(path) for path in sorted(staging.rglob('*')) if path.is_file()}
-    (staging / 'manifest.json').write_text(json.dumps({'target': lock['target'], 'lockSha256': digest(LOCK), 'files': files}, indent=2) + '\n')
+    (staging / 'manifest.json').write_text(json.dumps({'target': lock['target'], 'lockSha256': digest(LOCK), 'builderSha256': digest(Path(__file__)), 'files': files}, indent=2) + '\n')
     validate(staging)
     source_archive(inputs, paths, staging)
     if OUTPUT.exists():

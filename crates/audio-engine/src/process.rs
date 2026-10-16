@@ -229,11 +229,30 @@ fn run_with_stdout<T: Send>(
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
-    let mut child = command
+    command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+        .stderr(Stdio::piped());
+    #[cfg(target_os = "linux")]
+    let mut busy_retries = 0;
+    let mut child = loop {
+        cancel.check()?;
+        match command.spawn() {
+            Ok(child) => break child,
+            Err(error) => {
+                // Another thread's concurrent fork can briefly inherit a just-
+                // closed executable writer until its own exec closes CLOEXEC
+                // descriptors. No child has started when exec returns ETXTBSY.
+                #[cfg(target_os = "linux")]
+                if error.raw_os_error() == Some(libc::ETXTBSY) && busy_retries < 20 {
+                    busy_retries += 1;
+                    thread::sleep(Duration::from_millis(25));
+                    continue;
+                }
+                return Err(error.into());
+            }
+        }
+    };
     let _registration = RunningProcess(cancel);
     if let Ok(mut process) = cancel.0.process.lock() {
         *process = Some(child.id());
@@ -319,6 +338,58 @@ fn run_with_stdout<T: Send>(
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_busy_executable_can_start_after_its_writer_closes() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let executable = root.path().join("tool");
+        std::fs::write(&executable, "#!/bin/sh\nprintf ready").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let writer = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&executable)
+            .unwrap();
+        let closer = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            drop(writer);
+        });
+        let result = run(
+            &mut Command::new(&executable),
+            &Cancellation::default(),
+            Duration::from_secs(2),
+        );
+        closer.join().unwrap();
+        assert_eq!(result.unwrap(), b"ready");
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn cancellation_interrupts_busy_executable_retries() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let executable = root.path().join("tool");
+        std::fs::write(&executable, "#!/bin/sh\nexit 0").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _writer = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&executable)
+            .unwrap();
+        let cancel = Cancellation::default();
+        let trigger = cancel.clone();
+        let canceller = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            trigger.cancel();
+        });
+        let result = run(
+            &mut Command::new(&executable),
+            &cancel,
+            Duration::from_secs(2),
+        );
+        canceller.join().unwrap();
+        assert!(matches!(result, Err(EngineError::Cancelled)));
+    }
 
     #[test]
     fn expired_cookie_warning_cannot_succeed_as_an_anonymous_download() {

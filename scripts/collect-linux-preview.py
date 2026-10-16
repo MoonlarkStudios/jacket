@@ -12,17 +12,25 @@ OUTPUT = ROOT / 'target/linux-preview'
 
 def main():
     OUTPUT.mkdir(parents=True, exist_ok=True)
+    config = json.loads((ROOT / 'src-tauri/tauri.conf.json').read_text())
+    version = config['version']
+    # Cached build folders can contain older releases. Never collect them.
+    for old in [*OUTPUT.glob('*.deb'), *OUTPUT.glob('*.rpm')]:
+        old.unlink()
     for kind in ['deb', 'rpm']:
-        packages = list((ROOT / 'target/release/bundle' / kind).glob(f'*.{kind}'))
+        filename = f'Jacket_{version}_amd64.deb' if kind == 'deb' else f'Jacket-{version}-1.x86_64.rpm'
+        packages = list((ROOT / 'target/release/bundle' / kind).glob(filename))
         if len(packages) != 1:
             raise RuntimeError(f'Expected exactly one {kind} installer, found {packages}')
         package = packages[0]
         if kind == 'deb':
             fields = subprocess.check_output(['dpkg-deb', '-f', str(package), 'Package', 'Architecture'], text=True)
-            assert 'jacket' in fields and 'amd64' in fields, fields
+            if 'jacket' not in fields or 'amd64' not in fields:
+                raise RuntimeError(f'Unexpected DEB metadata: {fields}')
         else:
             fields = subprocess.check_output(['rpm', '-qp', '--queryformat', '%{NAME} %{ARCH} %{LICENSE}', str(package)], text=True)
-            assert fields == 'jacket x86_64 GPL-3.0-or-later', fields
+            if fields != 'jacket x86_64 GPL-3.0-or-later':
+                raise RuntimeError(f'Unexpected RPM metadata: {fields}')
         shutil.copy2(package, OUTPUT / package.name)
     source = OUTPUT / 'jacket-source.tar.gz'
     subprocess.run(['git', 'archive', '--format=tar.gz', f'--output={source}', 'HEAD'], cwd=ROOT, check=True)
