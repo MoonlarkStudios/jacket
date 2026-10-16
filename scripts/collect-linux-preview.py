@@ -28,8 +28,8 @@ def main():
             raise RuntimeError(f'Expected exactly one {kind} installer, found {packages}')
         package = packages[0]
         if kind == 'deb':
-            fields = subprocess.check_output(['dpkg-deb', '-f', str(package), 'Package', 'Architecture', 'Version'], text=True)
-            if set(fields.splitlines()) != {'jacket', 'amd64', versions['deb']}:
+            fields = subprocess.check_output(['dpkg-deb', '--show', '--showformat=${Package} ${Architecture} ${Version}', str(package)], text=True)
+            if fields != f"jacket amd64 {versions['deb']}":
                 raise RuntimeError(f'Unexpected DEB metadata: {fields}')
         else:
             fields = subprocess.check_output(['rpm', '-qp', '--queryformat', '%{NAME} %{ARCH} %{LICENSE} %{VERSION} %{RELEASE}', str(package)], text=True)
