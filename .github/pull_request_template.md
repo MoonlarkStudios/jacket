@@ -1,3 +1,5 @@
+Use a [Conventional Commit](https://www.conventionalcommits.org/en/v1.0.0/) title, such as `feat: add album search` or `fix(linux): preserve unfinished jobs`. The PR title becomes the squash commit.
+
 ## Change
 
 Describe the problem and resulting behavior. Link an issue if relevant.

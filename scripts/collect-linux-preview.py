@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+from release_support import check_versions, package_names, package_versions
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / 'target/linux-preview'
@@ -14,24 +15,25 @@ def main():
     if subprocess.run(['git', 'diff', '--quiet', 'HEAD', '--'], cwd=ROOT).returncode or subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard'], cwd=ROOT).strip():
         raise RuntimeError('Commit the release source before collecting preview installers')
     OUTPUT.mkdir(parents=True, exist_ok=True)
-    config = json.loads((ROOT / 'src-tauri/tauri.conf.json').read_text())
-    version = config['version']
+    version = check_versions()
+    versions = package_versions(version)
+    names = package_names(version)
     # Cached build folders can contain older releases. Never collect them.
     for old in [*OUTPUT.glob('*.deb'), *OUTPUT.glob('*.rpm')]:
         old.unlink()
     for kind in ['deb', 'rpm']:
-        filename = f'Jacket_{version}_amd64.deb' if kind == 'deb' else f'Jacket-{version}-1.x86_64.rpm'
+        filename = names[kind]
         packages = list((ROOT / 'target/release/bundle' / kind).glob(filename))
         if len(packages) != 1:
             raise RuntimeError(f'Expected exactly one {kind} installer, found {packages}')
         package = packages[0]
         if kind == 'deb':
-            fields = subprocess.check_output(['dpkg-deb', '-f', str(package), 'Package', 'Architecture'], text=True)
-            if 'jacket' not in fields or 'amd64' not in fields:
+            fields = subprocess.check_output(['dpkg-deb', '-f', str(package), 'Package', 'Architecture', 'Version'], text=True)
+            if set(fields.splitlines()) != {'jacket', 'amd64', versions['deb']}:
                 raise RuntimeError(f'Unexpected DEB metadata: {fields}')
         else:
-            fields = subprocess.check_output(['rpm', '-qp', '--queryformat', '%{NAME} %{ARCH} %{LICENSE}', str(package)], text=True)
-            if fields != 'jacket x86_64 GPL-3.0-or-later':
+            fields = subprocess.check_output(['rpm', '-qp', '--queryformat', '%{NAME} %{ARCH} %{LICENSE} %{VERSION} %{RELEASE}', str(package)], text=True)
+            if fields != f"jacket x86_64 GPL-3.0-or-later {versions['rpmVersion']} {versions['rpmRelease']}":
                 raise RuntimeError(f'Unexpected RPM metadata: {fields}')
         shutil.copy2(package, OUTPUT / package.name)
     source = OUTPUT / 'jacket-source.tar.gz'
@@ -42,7 +44,11 @@ def main():
         raise RuntimeError('Unreviewed missing dependency notices; refusing to collect installers')
     shutil.copy2(inventory, OUTPUT / 'dependency-inventory.json')
     shutil.copy2(ROOT / 'docs/linux-preview.md', OUTPUT / 'README.md')
-    identity = {'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(), 'target': 'x86_64-unknown-linux-gnu', 'status': 'preview-candidate', 'baseline': 'Ubuntu 24.04', 'desktopAcceptance': 'manual GNOME/KDE Wayland/X11 acceptance remains required'}
+    for name in ['LICENSE', 'THIRD_PARTY_NOTICES.md']:
+        shutil.copy2(ROOT / name, OUTPUT / name)
+    if json.loads((OUTPUT / 'package-versions.json').read_text()) != versions:
+        raise RuntimeError('Missing or mismatched native package versions')
+    identity = {'version': version, 'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(), 'target': 'x86_64-unknown-linux-gnu', 'status': 'preview-candidate', 'baseline': 'Ubuntu 24.04', 'desktopAcceptance': 'manual GNOME/KDE Wayland/X11 acceptance remains required'}
     (OUTPUT / 'build.json').write_text(json.dumps(identity, indent=2) + '\n')
     if not (OUTPUT / 'jacket-linux-runtime-sources.tar.gz').is_file():
         raise RuntimeError('Missing corresponding runtime sources; refusing to collect installers')

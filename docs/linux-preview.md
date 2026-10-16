@@ -4,7 +4,7 @@ Jacket's Linux preview targets **x86_64**. CI builds on **Ubuntu 24.04** and tes
 
 ## Install a preview candidate
 
-Download the `linux-preview-x86_64` artifact from a successful [CI run](https://github.com/MoonlarkStudios/jacket/actions). Extract it and verify `sha256sum -c SHA256SUMS` in that folder. GitHub Actions artifacts expire; a public release must retain both installers and their source companions together.
+Published previews appear on [GitHub Releases](https://github.com/MoonlarkStudios/jacket/releases), with separate `.deb` and `.rpm` downloads, source companions, notices, build information, and `SHA256SUMS`. Until the first draft has been reviewed and published, download the `linux-preview-x86_64` artifact from a successful [CI run](https://github.com/MoonlarkStudios/jacket/actions). Extract it and verify `sha256sum -c SHA256SUMS` in that folder. GitHub Actions artifacts expire; published releases retain the full asset set together. See the [release process](releasing.md#automated-release-process).
 
 Ubuntu / Debian:
 
@@ -18,7 +18,7 @@ Fedora:
 sudo dnf install ./Jacket-0.1.0-1.x86_64.rpm
 ```
 
-Use the actual filename from your download. Launch **Jacket** from your application menu. The package manager installs system dependencies. No Node, FFmpeg, yt-dlp, pip, Homebrew, or developer tools need to be installed by the user. New versions are installed with the same package-manager command. Whole-app automatic updates and signed package repositories are not configured.
+Use the actual filename from your download. Launch **Jacket** from your application menu. The package manager installs system dependencies. No Node, FFmpeg, yt-dlp, pip, Homebrew, or developer tools need to be installed by the user. New versions are installed with the same package-manager command. SemVer prereleases such as `0.1.0-beta.1` use Debian metadata `0.1.0~beta.1` and RPM version/release `0.1.0-0.beta.1`, so the final `0.1.0` sorts later. Whole-app automatic updates and signed package repositories are not configured.
 
 The preview's supported workflow is **public YouTube links**. Browser-account downloads are experimental and require separate live acceptance; encrypted Chromium profiles may need additional Python/keyring components. The owned-session prototype remains disabled on Linux.
 
@@ -43,7 +43,7 @@ python3 scripts/collect-linux-preview.py
 
 The staging script downloads only inputs named in the checked-in lock file and verifies SHA-256 before extraction or execution. C libraries are built from source without `-march=native`. Source archives and downloads are generated under `target/`; neither runtime nor installer bytes are committed. The packaging overlay is explicit so ordinary development and unit tests do not require generated resources.
 
-CI checks application formatting, lint, unit tests, a release-mode GLib iterator regression, and six offline media tests against the **staged Linux tools**. It builds both installers, then installs/reinstalls/removes them in disposable Ubuntu, Debian and Fedora containers. A non-root release process opens and closes a real GTK/WebKit window under Xvfb, with screenshots and logs retained as evidence. The WebKit sandbox and hardware renderer are disabled **only inside these disposable headless tests**; shipped app settings are unchanged.
+CI checks application formatting, lint, unit tests, a release-mode GLib iterator regression, and six offline media tests against the **staged Linux tools**. It builds both installers, checks native alpha/beta/rc-to-stable ordering, then upgrades from a disposable older package and reinstalls/removes the real installer in disposable Ubuntu, Debian and Fedora containers. The upgrade checks preserve sentinel files in application-owned config, data, and cache locations. This package-manager test does not establish compatibility with an older app’s actual preferences or recovery schema; those remain manual acceptance checks. A non-root release process opens and closes a real GTK/WebKit window under Xvfb, with screenshots and logs retained as evidence. The WebKit sandbox and hardware renderer are disabled **only inside these disposable headless tests**; shipped app settings are unchanged.
 
 The [GLib backport](../vendor/README.md) applies the upstream fix for RUSTSEC-2024-0429. The original 0.18.5 version remains visible to dependency auditors; the advisory is not suppressed.
 

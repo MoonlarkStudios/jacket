@@ -25,7 +25,7 @@ Follow the [README setup](README.md#run-the-desktop-app-from-source). `mise.toml
 
 List individual tasks with `mise tasks`. `npm test` runs frontend tests only; use `mise run check` for the full quality gate. The checks do not modify source files. Python unit tests use synthetic session fixtures and never open a real browser database. Media integration tests generate their own audio and do not contact YouTube.
 
-GitHub Actions runs the quality gate and media integration tests on macOS and Linux. Linux jobs also build preview installers and test installation in disposable containers. A separate job checks the dependency lockfiles and Git history for known vulnerabilities and secrets. The workflow retains preview artifacts; it does not publish releases or configure distribution signing.
+GitHub Actions runs the quality gate and media integration tests on macOS and Linux. Linux jobs also build preview installers and test installation in disposable containers. A separate job checks the dependency lockfiles and Git history for known vulnerabilities and secrets. CI retains temporary preview artifacts. The [release workflow](docs/releasing.md#automated-release-process) prepares a GitHub Release draft with permanent installers and corresponding sources after a release PR is merged. A maintainer publishes the draft after acceptance; distribution signing is separate.
 
 ## Code boundaries
 
@@ -46,6 +46,8 @@ The hook tests use a small controlled runtime to exercise state transitions; the
 Do not use live accounts, browser cookies, or restricted media as automated fixtures. Redact private URLs, account names, local paths, and cookie values from reports. Security reports belong in the [private reporting channel](SECURITY.md).
 
 ## Pull requests
+
+Use Conventional Commit PR titles and squash merging. `fix:` describes a bug fix, `feat:` adds a feature, and `!` marks an incompatible change; scopes such as `fix(linux):` are optional. Use `docs:`, `test:`, `ci:`, or `chore:` for maintenance. Individual development commits can be informal. Before merging, confirm the squash commit uses the reviewed PR title; it drives proposed versions and release notes. See the [version policy](docs/releasing.md#version-policy).
 
 Explain the problem, the resulting behavior, and how you verified it. Keep changes focused; avoid unrelated formatting or dependency churn. For provider failures, include the downloader version and a public reproduction URL only if it is safe to share.
 

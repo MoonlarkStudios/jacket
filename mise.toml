@@ -75,7 +75,7 @@ run = "npm exec -- vite preview --host 127.0.0.1"
 
 [tasks.test]
 description = "Run frontend, Rust, resource-staging, and synthetic session unit tests"
-depends = ["test:frontend", "test:rust", "test:bundling", "test:auth"]
+depends = ["test:frontend", "test:rust", "test:bundling", "test:auth", "test:release"]
 
 [tasks."test:frontend"]
 description = "Run frontend and authentication prototype unit tests"
@@ -179,7 +179,7 @@ run = "python scripts/stage-linux-tools.py"
 [tasks."package:linux"]
 description = "Build x86_64 Linux preview DEB and RPM packages"
 depends = ["setup:node"]
-run = "npm exec -- tauri build --config src-tauri/tauri.bundle.linux.json --bundles deb,rpm -- --locked"
+run = "python scripts/package-linux.py"
 
 [tasks."licenses:linux"]
 description = "Collect Linux dependency notices and exact application dependency sources"
@@ -189,3 +189,7 @@ run = "python scripts/collect-linux-licenses.py"
 [tasks."auth:prototype"]
 description = "Run the developer authentication probe (arguments are forwarded)"
 run = "node scripts/auth-prototype.mjs"
+
+[tasks."test:release"]
+description = "Verify application versions and release integrity regressions"
+run = ["python scripts/check-release.py", "python scripts/test-release.py", "node --test tests/releases.test.mjs"]

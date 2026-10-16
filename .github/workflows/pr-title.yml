@@ -1,0 +1,33 @@
+name: Pull request title
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Release PR number whose title should be checked
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  title:
+    name: Conventional Commit title
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # Use only the trusted base commit. Never check out or execute PR code
+      # in pull_request_target, including same-repository PRs.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const { checkTitle } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/releases.mjs`);
+            await checkTitle({ github, context, core });
