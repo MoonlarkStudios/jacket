@@ -10,11 +10,27 @@ Jacket uses one release version for the desktop app, Rust workspace, npm package
 
 1. Merge feature/fix PRs with reviewed Conventional Commit titles. The repository uses squash merges so this title is the commit automation reads.
 2. The **Prepare release** workflow refreshes the release PR. Review its version, changelog, compatibility implications, and bundled-tool changes. Do not auto-merge release PRs.
-3. Merging the release PR creates an immutable `v…` tag and an **unpublished GitHub Release draft** targeting that exact commit. It starts the same macOS quality/security checks, Linux runtime/media checks, installer builds and three-distribution install/upgrade/launch tests used by CI.
+3. Merging the release PR creates a `v…` tag and an **unpublished GitHub Release draft** targeting that exact commit. It starts the same macOS quality/security checks, Linux runtime/media checks, installer builds and three-distribution install/upgrade/launch tests used by CI.
 4. Only after every check succeeds does the workflow verify the commit, versions, asset inventory and checksums, then attach installers, sources and notices. GitHub verifies the uploaded asset digests. The workflow never publishes a release.
-5. Follow the checklist below, edit the user-facing release notes and acceptance results, then select **Publish release** in GitHub. Keep beta releases marked as prereleases and out of Latest.
+5. Follow the checklist below, edit the user-facing release notes and acceptance results, then select **Publish release** in GitHub. Publication is manual and locks the tag and assets through GitHub’s enabled immutable-release setting. Keep beta releases marked as prereleases and out of Latest.
 
 Only Linux x86_64 installers are currently released. macOS checks protect the source, but macOS distribution awaits Developer ID signing, notarization and clean-machine acceptance. This pipeline does not enable application updates or package repositories.
+
+### Release notes and download links
+
+The reviewed [release template](../.github/release-template.md) supplies the product introduction, screenshot, installer instructions, limitations, verification and support links. Release Please contributes the changelog. Filenames and source/build links are derived from the exact version and commit; maintainers review the highlights and record desktop acceptance before publication.
+
+The first successful artifact upload initializes the template. On rebuilds, only the `jacket-downloads` and `jacket-verification` sections belong to automation. Edit highlights, known limitations and acceptance results outside those marked sections; these edits survive rebuilds. Keep the managed section markers intact. Maintainer checkboxes live in the workflow summary rather than the public release notes.
+
+Download instructions use the release’s **Assets** section, with exact filenames in the table. This avoids hardcoding either unpublished `untagged-…` URLs or public URLs that return 404 while a draft is private to maintainers. Draft downloads require repository access. Publication makes the public asset URLs available; it does not start until a maintainer selects **Publish release**.
+
+### Verification after publication
+
+The read-only **Verify published release** workflow runs on `release: published` for stable releases and prereleases. It verifies the published/immutable flags, tag and exact source commit, full asset inventory and any explicit asset links in the notes. It downloads all assets **without an authorization header**, compares their sizes and GitHub digests, validates `SHA256SUMS`, package versions and application source identity, then removes its temporary downloads. Short CDN propagation delays are retried. It cannot publish, replace assets or roll a release back.
+
+It can also be run manually from `main` with an existing published tag. Tags created before the workflow was added, including `v0.1.0-beta.1`, need this manual check after publication; do not move an existing release tag to install newer workflow code. Future tagged release commits contain the publication trigger. A missing post-publication run is not a pass: run **Verify published release → Run workflow → main → tag** and inspect the result.
+
+A public download failure leaves the published release unchanged. Retry the read-only check for a transient delivery problem; investigate a persistent identity/hash failure and prepare a new version when an installer needs correction. Never replace published installers. The complete workflow is: **merge release PR → build/test/upload draft → review → publish manually → verify public downloads**.
 
 ### Release App and credential storage
 
@@ -111,6 +127,6 @@ Make account-access claims only for tested OS/browser/profile combinations. Publ
 
 ## Publication
 
-- [ ] Publish the tested artifacts with clear platform limits and known issues. Preview releases should name the desktop/account scenarios still awaiting acceptance.
+- [ ] Publish the tested artifacts with clear platform limits and known issues. Require a successful **Verify published release** run afterward (manually from `main` for older tags). Preview releases should name the desktop/account scenarios still awaiting acceptance.
 - [ ] Confirm the documented private security-reporting channel and repository dependency/secret protections are available, and protect the default branch with the required checks.
 - [ ] Do not advertise whole-app automatic updates until signed artifacts, an application updater key, and a release feed are configured and tested. yt-dlp updates are a separate feature.

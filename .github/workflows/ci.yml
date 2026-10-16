@@ -40,7 +40,8 @@ jobs:
           python3 scripts/check-release.py
           if [ -n "$RELEASE_TAG" ]; then python3 scripts/check-release.py --tag "$RELEASE_TAG"; fi
           python3 scripts/test-release.py
-          node --test tests/releases.test.mjs
+          python3 scripts/test-published-release.py
+          node --test tests/*release*.test.mjs
 
   quality:
     name: macOS quality and media tests

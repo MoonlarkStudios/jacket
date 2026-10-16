@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { renderReleaseNotes } from './release-notes.mjs';
 
 const tagPattern =
   /^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:alpha|beta|rc)\.[1-9]\d*)?$/;
@@ -132,30 +133,13 @@ export async function uploadDraft({
     throw new Error(
       'Draft contains unexpected assets; review them before retrying',
     );
-  const run = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-  const notes = `<!-- jacket-artifacts:start -->
-## Linux x86_64 preview
-
-Download the **.deb** for Ubuntu 24.04 / Debian 13, or the **.rpm** for Fedora 44. Install the new package through your package manager to update Jacket. Older distributions and Linux ARM are not supported by this preview.
-
-The accompanying source archives, dependency inventory, license notices, build information, and SHA256SUMS belong to these exact installers. Keep them together when redistributing.
-
-Build commit: \`${sha}\`. [Automated build and package checks](${run}) passed.
-
-### Maintainer acceptance before publishing
-
-- [ ] Inspect installer-test screenshots and complete the applicable [release checklist](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/${sha}/docs/releasing.md).
-- [ ] Record real GNOME/KDE Wayland/X11 and download/recovery results, or clearly list untested scenarios and known issues here.
-- [ ] Review these notes and confirm that all installers and source companions are attached.
-
-This preview does not include macOS or Windows installers, signed APT/DNF repositories, or whole-app automatic updates.
-<!-- jacket-artifacts:end -->`;
-  const original = (release.body || '')
-    .replace(
-      /\n?<!-- jacket-artifacts:start -->[\s\S]*?<!-- jacket-artifacts:end -->/g,
-      '',
-    )
-    .trim();
+  const body = await renderReleaseNotes({
+    body: release.body,
+    tag,
+    sha,
+    runId: context.runId,
+    repo: `${context.repo.owner}/${context.repo.repo}`,
+  });
   const { data: updated } = await github.rest.repos.updateRelease({
     ...context.repo,
     release_id: release.id,
@@ -163,7 +147,7 @@ This preview does not include macOS or Windows installers, signed APT/DNF reposi
     // placeholder even when the real release tag already exists.
     tag_name: tag,
     target_commitish: sha,
-    body: `${original}\n\n${notes}`,
+    body,
     draft: true,
     prerelease: tag.includes('-'),
   });
@@ -174,7 +158,7 @@ This preview does not include macOS or Windows installers, signed APT/DNF reposi
   )
     throw new Error('Draft identity changed while updating release notes');
   core.summary.addRaw(
-    `Draft release assets verified: [${tag}](${updated.html_url}). Publication requires a maintainer.\n`,
+    `Draft release assets verified: [${tag}](${updated.html_url}). Publication requires a maintainer.\n\n- [ ] Review highlights and known limitations in the draft.\n- [ ] Inspect installer screenshots and complete applicable [desktop acceptance](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/${sha}/docs/releasing.md).\n- [ ] Publish manually, then check the Verify published release workflow.\n`,
   );
   await core.summary.write();
 }

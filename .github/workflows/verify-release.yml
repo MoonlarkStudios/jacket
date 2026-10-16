@@ -1,0 +1,36 @@
+name: Verify published release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag to verify (this never publishes)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-release-${{ inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Public downloads and release integrity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Execute reviewed verification code, never code from a release asset.
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Verify anonymous downloads, checksums, sources and immutable identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: python3 scripts/check-published-release.py --repo "$RELEASE_REPOSITORY" --tag "$RELEASE_TAG"

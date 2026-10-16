@@ -181,7 +181,7 @@ test('draft uploads verify server digests and safely resume partial uploads', as
     await uploadDraft({ ...state, context, tag, sha, directory });
     assert.deepEqual(state.writes, ['update']);
     assert.equal(
-      state.release.body.split('<!-- jacket-artifacts:start -->').length,
+      state.release.body.split('<!-- jacket-release-template:v1 -->').length,
       2,
     );
     await writeFile(join(directory, 'SHA256SUMS'), 'replacement');
