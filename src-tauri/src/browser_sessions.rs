@@ -118,16 +118,16 @@ fn profile(
         return None;
     }
     let id = format!(
-        "{}-{:x}",
+        "{}-{}",
         browser.as_str(),
-        Sha256::digest(
+        hex::encode(Sha256::digest(
             format!(
                 "{}\0{text}\0{}",
                 browser.as_str(),
                 container.as_deref().unwrap_or("")
             )
             .as_bytes()
-        )
+        ))
     );
     Some(Profile {
         id,

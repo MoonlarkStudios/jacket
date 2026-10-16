@@ -325,7 +325,7 @@ fn hash(path: &Path) -> Option<String> {
         }
         hasher.update(&buffer[..count]);
     }
-    Some(format!("{:x}", hasher.finalize()))
+    Some(hex::encode(hasher.finalize()))
 }
 
 pub fn override_path(root: &Path) -> Option<PathBuf> {
@@ -831,7 +831,7 @@ mod tests {
         let release = Release {
             channel: Channel::Nightly,
             version: version.into(),
-            sha256: format!("{:x}", Sha256::digest(payload.as_bytes())),
+            sha256: hex::encode(Sha256::digest(payload.as_bytes())),
             size: payload.len() as u64,
         };
         (file, release)
@@ -1134,7 +1134,7 @@ mod tests {
         );
         let mut file = tempfile::NamedTempFile::new_in(root.path()).unwrap();
         file.write_all(payload).unwrap();
-        release.sha256 = format!("{:x}", Sha256::digest(payload));
+        release.sha256 = hex::encode(Sha256::digest(payload));
         commit(root.path(), &release, file, &Cancellation::default()).unwrap();
         let selected = override_path(root.path()).unwrap();
         assert_eq!(

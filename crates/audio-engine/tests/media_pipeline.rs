@@ -354,7 +354,7 @@ fn wav_export_warns_and_manifest_separates_requested_and_embedded_fields() {
     let source_dir = dir
         .path()
         .join("sources")
-        .join(format!("{:x}", Sha256::digest(url.as_bytes())));
+        .join(hex::encode(Sha256::digest(url.as_bytes())));
     fs::create_dir_all(&source_dir).unwrap();
     let source = source_dir.join("source.wav");
     make_audio(&tools, &source, "pcm_s16le");
@@ -561,7 +561,7 @@ fn archive_reuses_sources_preserves_repeats_and_records_original_metadata() {
     let source_dir = dir
         .path()
         .join("sources")
-        .join(format!("{:x}", Sha256::digest(url.as_bytes())));
+        .join(hex::encode(Sha256::digest(url.as_bytes())));
     fs::create_dir_all(&source_dir).unwrap();
     let source = source_dir.join("source.m4a");
     make_audio(&tools, &source, "aac");
