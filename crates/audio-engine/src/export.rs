@@ -949,7 +949,10 @@ exit 1
         )
         .unwrap();
         let mut archive = zip::ZipArchive::new(fs::File::open(zip).unwrap()).unwrap();
-        assert_eq!(archive.by_index(0).unwrap().name(), "My mix/01 - Song.mp3");
+        assert_eq!(
+            archive.by_index(0).unwrap().name().unwrap(),
+            "My mix/01 - Song.mp3"
+        );
         assert!(write_archive(
             "My mix",
             &[("../escape".into(), file)],
