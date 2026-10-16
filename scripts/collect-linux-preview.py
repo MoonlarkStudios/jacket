@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
-from release_support import check_versions, package_names, package_versions
+from release_support import check_versions, package_names, package_versions, verify_artifacts
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / 'target/linux-preview'
@@ -60,6 +60,7 @@ def main():
             with path.open('rb') as stream:
                 hashes.append(f"{hashlib.file_digest(stream, 'sha256').hexdigest()}  {path.name}\n")
     (OUTPUT / 'SHA256SUMS').write_text(''.join(hashes))
+    verify_artifacts(OUTPUT, identity['commit'], f'v{version}')
 
 
 if __name__ == '__main__':

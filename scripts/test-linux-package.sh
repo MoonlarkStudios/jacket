@@ -6,12 +6,10 @@ if command -v apt-get >/dev/null; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
   package=$(find /packages -maxdepth 1 -name '*.deb' -print -quit)
-  apt-get install -y xvfb xauth xdotool imagemagick dbus-x11 desktop-file-utils openbox
-
+  apt-get install -y python3 xvfb xauth xdotool imagemagick dbus-x11 desktop-file-utils openbox
 else
   package=$(find /packages -maxdepth 1 -name '*.rpm' -print -quit)
   dnf install -y rpm-build python3-rpm xorg-x11-server-Xvfb xorg-x11-xauth xdotool ImageMagick dbus-daemon util-linux shadow-utils desktop-file-utils openbox
-
 fi
 /usr/bin/python3 -B scripts/test-linux-package-versions.py
 /usr/bin/python3 -B scripts/install-linux-upgrade-baseline.py
