@@ -221,6 +221,7 @@ name = "audio-dl-desktop"
 version = "0.1.0"
 dependencies = [
  "audio-engine",
+ "hex",
  "libc",
  "reqwest 0.12.28",
  "security-framework",
@@ -238,6 +239,7 @@ dependencies = [
 name = "audio-engine"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "libc",
  "lofty",
  "reqwest 0.12.28",
