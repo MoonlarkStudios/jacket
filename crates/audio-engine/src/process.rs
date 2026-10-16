@@ -234,25 +234,28 @@ fn run_with_stdout<T: Send>(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     #[cfg(target_os = "linux")]
-    let mut busy_retries = 0;
-    let mut child = loop {
-        cancel.check()?;
-        match command.spawn() {
-            Ok(child) => break child,
-            Err(error) => {
-                // Another thread's concurrent fork can briefly inherit a just-
-                // closed executable writer until its own exec closes CLOEXEC
-                // descriptors. No child has started when exec returns ETXTBSY.
-                #[cfg(target_os = "linux")]
-                if error.raw_os_error() == Some(libc::ETXTBSY) && busy_retries < 20 {
-                    busy_retries += 1;
-                    thread::sleep(Duration::from_millis(25));
-                    continue;
+    let mut child = {
+        let mut busy_retries = 0;
+        loop {
+            cancel.check()?;
+            match command.spawn() {
+                Ok(child) => break child,
+                Err(error) => {
+                    // Another thread's concurrent fork can briefly inherit a just-
+                    // closed executable writer until its own exec closes CLOEXEC
+                    // descriptors. No child has started when exec returns ETXTBSY.
+                    if error.raw_os_error() == Some(libc::ETXTBSY) && busy_retries < 20 {
+                        busy_retries += 1;
+                        thread::sleep(Duration::from_millis(25));
+                        continue;
+                    }
+                    return Err(error.into());
                 }
-                return Err(error.into());
             }
         }
     };
+    #[cfg(not(target_os = "linux"))]
+    let mut child = command.spawn()?;
     let _registration = RunningProcess(cancel);
     if let Ok(mut process) = cancel.0.process.lock() {
         *process = Some(child.id());

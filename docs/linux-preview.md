@@ -27,7 +27,8 @@ The preview's supported workflow is **public YouTube links**. Browser-account do
 - System libraries: GTK3, WebKitGTK 4.1, Python 3.10 or later, CA certificates, xdg-utils, and the base C/C++ runtime. The Ubuntu 24.04 build baseline requires a compatible glibc (2.39 or later); older Ubuntu/Debian versions are outside this preview.
 - Private audio runtime under `/usr/lib/Jacket/audio-tools`: yt-dlp and matching EJS scripts, Node, FFmpeg/FFprobe, LAME and Opus. It uses isolated system Python without user site packages. Optional host media libraries are disabled during the FFmpeg build. The runtime includes its licenses, build settings and per-file hashes.
 - The bundled downloader starts at the pinned release in `scripts/linux-runtime.lock.json`. Automatic downloader updates use the official `yt-dlp_linux` asset, independently of app updates. Updated copies live in the user's data directory; Jacket never modifies `/usr/bin` or the package-managed runtime. Local-install mode remains available.
-- `jacket-linux-runtime-sources.tar.gz` contains exact upstream source archives and build recipes. `jacket-source.tar.gz` identifies the application source for the same commit. Distribute the installers with these companions, `runtime-build-info.json`, `build.json`, and `SHA256SUMS`.
+- `jacket-linux-runtime-sources.tar.gz` contains exact upstream source archives and build recipes. `jacket-source.tar.gz` identifies the application source for the same commit. `jacket-dependency-sources.tar.gz` retains the resolved Rust and frontend dependency sources, including build/test dependencies where applicable. Distribute the installers with these companions, `runtime-build-info.json`, `dependency-inventory.json`, `build.json`, and `SHA256SUMS`.
+- Application dependency notices and a version/license inventory are installed under `/usr/lib/Jacket/application-licenses`. Published packages that omit their separate license files use the [reviewed supplemental notices](../third-party/README.md); missing notices without a supplement stop packaging.
 
 ## Build and automated checks
 
@@ -52,7 +53,7 @@ The [GLib backport](../vendor/README.md) applies the upstream fix for RUSTSEC-20
 - On real GNOME and KDE desktops, verify Wayland and X11 rendering, scaling, keyboard access, native save/reveal dialogs, idle close, minimizing/reopening during downloads, cancellation, and restart/resume. Container/Xvfb checks do not establish this acceptance.
 - Complete a live public download, check every advertised output format and artwork, test an offline restart, and verify downloader updating/rollback on the installed app.
 - Test an upgrade from a previous preview version. CI currently proves installation, same-version reinstallation and removal with retained user data.
-- Review the exact binary dependency/license inventory and retain corresponding sources for the distributed artifacts. CI creates the runtime source companion; the project's third-party overview is not a complete license audit.
+- Review the generated dependency/license inventory and retain all corresponding-source companions for the distributed artifacts. The automated collection preserves sources and notices, but the project's third-party overview is not a legal compatibility assessment.
 - Keep browser-account reliability claims limited until Chromium/Firefox/keyring access, expiry and reconnect are tested on the supported distributions.
 
 An initial public prerelease can explicitly invite testing of these remaining desktop scenarios. Do not describe a green headless build as a fully validated Linux release.

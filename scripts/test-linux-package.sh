@@ -16,6 +16,7 @@ else
   rpm -U --replacepkgs "$package"
 fi
 test -x /usr/bin/jacket
+test -s /usr/lib/Jacket/application-licenses/inventory.json
 ldd /usr/bin/jacket | tee /evidence/"$PREVIEW_LABEL"-libraries.txt
 if ldd /usr/bin/jacket | grep -q 'not found'; then exit 1; fi
 desktop=$(find /usr/share/applications -iname '*jacket*.desktop' -print -quit)

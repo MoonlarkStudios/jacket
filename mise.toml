@@ -181,6 +181,11 @@ description = "Build x86_64 Linux preview DEB and RPM packages"
 depends = ["setup:node"]
 run = "npm exec -- tauri build --config src-tauri/tauri.bundle.linux.json --bundles deb,rpm -- --locked"
 
+[tasks."licenses:linux"]
+description = "Collect Linux dependency notices and exact application dependency sources"
+depends = ["setup:node"]
+run = "python scripts/collect-linux-licenses.py"
+
 [tasks."auth:prototype"]
 description = "Run the developer authentication probe (arguments are forwarded)"
 run = "node scripts/auth-prototype.mjs"

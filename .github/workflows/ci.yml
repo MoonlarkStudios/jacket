@@ -62,6 +62,8 @@ jobs:
     timeout-minutes: 60
     env:
       CARGO_BUILD_JOBS: 2
+      CARGO_HTTP_MULTIPLEXING: "false"
+      CARGO_NET_RETRY: 5
       CARGO_PROFILE_DEV_DEBUG: 0
       CARGO_PROFILE_TEST_DEBUG: 0
       AUDIO_DL_TEST_RESOURCES: ${{ github.workspace }}/src-tauri/resources/linux
@@ -89,6 +91,8 @@ jobs:
             target/release
           key: linux-rust-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'vendor/glib/src/variant_iter.rs') }}
           restore-keys: linux-rust-
+      - name: Fetch locked Rust dependencies before compiling
+        run: mise exec -- cargo fetch --locked
       - name: Build and verify the pinned audio runtime and source companion
         run: |
           mise run tools:stage:linux

@@ -11,6 +11,8 @@ OUTPUT = ROOT / 'target/linux-preview'
 
 
 def main():
+    if subprocess.run(['git', 'diff', '--quiet', 'HEAD', '--'], cwd=ROOT).returncode or subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard'], cwd=ROOT).strip():
+        raise RuntimeError('Commit the release source before collecting preview installers')
     OUTPUT.mkdir(parents=True, exist_ok=True)
     config = json.loads((ROOT / 'src-tauri/tauri.conf.json').read_text())
     version = config['version']
@@ -35,11 +37,17 @@ def main():
     source = OUTPUT / 'jacket-source.tar.gz'
     subprocess.run(['git', 'archive', '--format=tar.gz', f'--output={source}', 'HEAD'], cwd=ROOT, check=True)
     shutil.copy2(ROOT / 'src-tauri/resources/linux/audio-tools/build-info.json', OUTPUT / 'runtime-build-info.json')
+    inventory = ROOT / 'src-tauri/resources/linux/application-licenses/inventory.json'
+    if any(not package['notices'] for package in json.loads(inventory.read_text())):
+        raise RuntimeError('Unreviewed missing dependency notices; refusing to collect installers')
+    shutil.copy2(inventory, OUTPUT / 'dependency-inventory.json')
     shutil.copy2(ROOT / 'docs/linux-preview.md', OUTPUT / 'README.md')
     identity = {'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(), 'target': 'x86_64-unknown-linux-gnu', 'status': 'preview-candidate', 'baseline': 'Ubuntu 24.04', 'desktopAcceptance': 'manual GNOME/KDE Wayland/X11 acceptance remains required'}
     (OUTPUT / 'build.json').write_text(json.dumps(identity, indent=2) + '\n')
     if not (OUTPUT / 'jacket-linux-runtime-sources.tar.gz').is_file():
         raise RuntimeError('Missing corresponding runtime sources; refusing to collect installers')
+    if not (OUTPUT / 'jacket-dependency-sources.tar.gz').is_file():
+        raise RuntimeError('Missing application dependency sources; refusing to collect installers')
     hashes = []
     for path in sorted(OUTPUT.iterdir()):
         if path.is_file() and path.name != 'SHA256SUMS':
