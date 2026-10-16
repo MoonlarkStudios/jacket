@@ -38,7 +38,7 @@ On macOS, closing the window hides it while preserving edits and running jobs; t
 
 Startup retains a visible opening state and a Reload action if application modules fail, including stale development chunks. Rendering errors also receive a recovery screen. The main window is visible from startup, so these states remain accessible even if the interface cannot mount.
 
-The shared build configuration does not invoke macOS resource staging on Linux or Windows. `tauri.macos.conf.json` retains macOS signing, application-only bundling, and its bundled audio runtime. Other platforms currently use locally installed audio tools. Native Linux/Windows packaging and managed downloader updates still need platform validation.
+The shared build configuration does not invoke macOS resource staging on Linux or Windows. `tauri.macos.conf.json` retains macOS signing and application-only bundling. The explicit `tauri.bundle.macos.json` configuration, selected by `mise run package:mac`, stages and includes the audio runtime. Development, tests, and lint can run without generated runtime resources. Other platforms currently use locally installed audio tools. Native Linux/Windows packaging and managed downloader updates still need platform validation.
 
 The platform design and acceptance matrix are in [desktop experience](desktop-experience.md).
 
