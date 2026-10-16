@@ -192,4 +192,4 @@ run = "node scripts/auth-prototype.mjs"
 
 [tasks."test:release"]
 description = "Verify application versions and release integrity regressions"
-run = ["python scripts/check-release.py", "python scripts/test-release.py", "node --test tests/releases.test.mjs"]
+run = ["python scripts/check-release.py", "python scripts/test-release.py", "python scripts/test-published-release.py", "node --test tests/*release*.test.mjs"]
