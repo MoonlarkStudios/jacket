@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-beta.3](https://github.com/MoonlarkStudios/jacket/compare/v0.1.0-beta.2...v0.1.0-beta.3) (2026-10-17)
+
+
+### Fixes
+
+* **linux:** respect explicit EGL vendor selection ([#20](https://github.com/MoonlarkStudios/jacket/issues/20)) ([1e76b69](https://github.com/MoonlarkStudios/jacket/commit/1e76b6952ea43b2e9264652ffce1258724c860f5))
+
 ## [0.1.0-beta.2](https://github.com/MoonlarkStudios/jacket/compare/v0.1.0-beta.1...v0.1.0-beta.2) (2026-10-17)
 
 
