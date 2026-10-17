@@ -91,6 +91,7 @@ Follow the [macOS packaging runbook](packaging-macos.md). The configured target 
 Follow the [Linux preview guide](linux-preview.md), which defines the x86_64 Ubuntu 24.04 build baseline, installer test distributions, build commands, and source companions.
 
 - [ ] Pass the exact commit's Linux build, staged-runtime media tests, optimized GLib regression, and DEB/RPM install/reinstall/remove jobs. Inspect retained window screenshots and logs.
+- [ ] Before publishing Linux installers, pass the [native Wayland startup check](linux-preview.md#wayland-desktop-acceptance-and-nvidia-compatibility) on the exact installed artifact with production rendering settings and complete visible-content, resize, dialogs, download, close/reopen and restart acceptance. For graphics changes, include NVIDIA with explicit sync and an AMD/Intel desktop; retain traces, installer hashes and system versions. A headless pass does not satisfy this gate.
 - [ ] Retain all source companions and generated inventory/build/checksum files listed in the preview guide alongside the installers.
 - [ ] Test an upgrade from an earlier preview, including preservation of preferences and unfinished jobs. Same-version reinstallation is not upgrade acceptance.
 - [ ] Complete real GNOME/KDE Wayland/X11 and public-export checks. Container/Xvfb results alone support a preview candidate, not a fully validated desktop release.
