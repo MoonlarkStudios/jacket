@@ -47,6 +47,26 @@ CI checks application formatting, lint, unit tests, a release-mode GLib iterator
 
 The [GLib backport](../vendor/README.md) applies the upstream fix for RUSTSEC-2024-0429. The original 0.18.5 version remains visible to dependency auditors; the advisory is not suppressed.
 
+## Wayland desktop acceptance and NVIDIA compatibility
+
+Before publishing a Linux installer, run the installed app on a real Wayland desktop with its normal sandbox and hardware renderer. Close other Jacket instances, unset rendering overrides, and run:
+
+```sh
+python3 scripts/check-linux-wayland.py --binary /usr/bin/jacket
+```
+
+On an NVIDIA Wayland machine, add `--require-nvidia-sync`. The check forces the native Wayland backend, uses temporary application preferences, and retains `target/linux-wayland/wayland.log` and a startup result. It rejects compositor protocol errors and GBM allocation errors; NVIDIA acceptance also requires the compatibility hook and explicit-sync acquire points in the trace. A startup pass still requires the visible-content, resize, dialog, download, close/reopen and restart checks below. Record GPU, driver, GTK/WebKit versions, exact installer hash, and results. Include an AMD/Intel desktop as well as NVIDIA when validating graphics changes.
+
+GTK3/WebKitGTK can create a window's first OpenGL context during a shared-memory frame. On NVIDIA Wayland this enables explicit sync before GTK commits that frame, and the compositor disconnects the app with `Error 71` (`Explicit Sync only supported on dmabuf buffers` on GNOME). Jacket prepares GDK's paint context when each GTK window is realized, before the first frame, on Wayland desktops with the NVIDIA driver. Hardware acceleration and explicit sync remain enabled. X11 and non-NVIDIA systems retain their existing behavior. Explicit rendering environment variables take precedence; `JACKET_NVIDIA_WAYLAND_WORKAROUND=0` disables this hook for diagnosis.
+
+For an affected older installer, the temporary launch workaround is:
+
+```sh
+GDK_BACKEND=wayland __NV_DISABLE_EXPLICIT_SYNC=1 jacket
+```
+
+This disables NVIDIA explicit sync for that launch. Keep it separate from release acceptance. Track [WebKit bug 324551](https://bugs.webkit.org/show_bug.cgi?id=324551) and its [upstream fix](https://github.com/WebKit/WebKit/pull/75772); remove Jacket's compatibility hook after fixed system WebKitGTK packages pass the affected NVIDIA desktop checks across the supported distributions.
+
 ## Before publishing a broadly recommended Linux release
 
 - Pass CI for the exact release commit and inspect package-test screenshots.

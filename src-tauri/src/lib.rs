@@ -14,6 +14,8 @@ use tauri::{Emitter, Manager, State};
 mod auth_session;
 mod browser_sessions;
 mod downloader_updates;
+#[cfg(target_os = "linux")]
+mod linux_graphics;
 mod recovery;
 mod shell;
 
@@ -669,10 +671,13 @@ fn start_export(
 }
 
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+    let builder =
+        tauri::Builder::default().plugin(tauri_plugin_single_instance::init(|app, _, _| {
             shell::activate(app)
-        }))
+        }));
+    #[cfg(target_os = "linux")]
+    let builder = builder.plugin(linux_graphics::init());
+    builder
         .plugin(tauri_plugin_dialog::init())
         .manage(Jobs::default())
         .manage(UpdateControl::default())

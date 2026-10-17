@@ -213,6 +213,7 @@ version = "0.1.0-beta.1"
 dependencies = [
  "audio-engine",
  "glib",
+ "gtk",
  "hex",
  "libc",
  "reqwest 0.12.28",
