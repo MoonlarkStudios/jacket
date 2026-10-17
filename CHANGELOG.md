@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-beta.4](https://github.com/MoonlarkStudios/jacket/compare/v0.1.0-beta.3...v0.1.0-beta.4) (2026-10-17)
+
+
+### Documentation
+
+* shorten release notes ([#22](https://github.com/MoonlarkStudios/jacket/issues/22)) ([18138e1](https://github.com/MoonlarkStudios/jacket/commit/18138e162a3ecb6e4ff49ecb3b3db16fb9689719))
+
 ## [0.1.0-beta.3](https://github.com/MoonlarkStudios/jacket/compare/v0.1.0-beta.2...v0.1.0-beta.3) (2026-10-17)
 
 
