@@ -59,6 +59,8 @@ On an NVIDIA Wayland machine, add `--require-nvidia-sync`. The check forces the 
 
 GTK3/WebKitGTK can create a window's first OpenGL context during a shared-memory frame. On NVIDIA Wayland this enables explicit sync before GTK commits that frame, and the compositor disconnects the app with `Error 71` (`Explicit Sync only supported on dmabuf buffers` on GNOME). Jacket prepares GDK's paint context when each GTK window is realized, before the first frame, on Wayland desktops with the NVIDIA driver. Hardware acceleration and explicit sync remain enabled. X11 and non-NVIDIA systems retain their existing behavior. Explicit rendering environment variables take precedence; `JACKET_NVIDIA_WAYLAND_WORKAROUND=0` disables this hook for diagnosis.
 
+Explicit GLVND vendor selections (`__EGL_VENDOR_LIBRARY_FILENAMES` or `__EGL_VENDOR_LIBRARY_DIRS`) also bypass the NVIDIA hook. A hybrid desktop can have the NVIDIA driver loaded while Jacket uses Mesa; forcing that window's early OpenGL path can introduce a cross-GPU buffer-import failure. Keep the selected vendor's normal behavior in this case.
+
 For an affected older installer, the temporary launch workaround is:
 
 ```sh

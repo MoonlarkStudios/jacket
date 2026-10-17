@@ -9,6 +9,8 @@ fn rendering_overridden(mut get: impl FnMut(&str) -> Option<OsString>) -> bool {
         || [
             "GDK_GL",
             "GDK_DEBUG",
+            "__EGL_VENDOR_LIBRARY_FILENAMES",
+            "__EGL_VENDOR_LIBRARY_DIRS",
             "__NV_DISABLE_EXPLICIT_SYNC",
             "WEBKIT_DISABLE_DMABUF_RENDERER",
             "WEBKIT_DISABLE_COMPOSITING_MODE",
@@ -121,6 +123,8 @@ mod tests {
         for name in [
             "GDK_GL",
             "GDK_DEBUG",
+            "__EGL_VENDOR_LIBRARY_FILENAMES",
+            "__EGL_VENDOR_LIBRARY_DIRS",
             "__NV_DISABLE_EXPLICIT_SYNC",
             "WEBKIT_DISABLE_DMABUF_RENDERER",
             "WEBKIT_DISABLE_COMPOSITING_MODE",
