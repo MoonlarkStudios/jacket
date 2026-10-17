@@ -22,7 +22,7 @@ test('release template provides usable draft downloads, exact versions and sourc
   assert.match(body, /Jacket_0\.1\.0-beta\.1_amd64\.deb/);
   assert.match(body, /Jacket-0\.1\.0-0\.beta\.1\.x86_64\.rpm/);
   assert.match(body, /Linux x86_64 preview/);
-  assert.match(body, /fictional example album/);
+  assert.match(body, /Audio tools are included/);
   assert.match(body, /### Features\n\n\* Linux installers/);
   assert.match(body, new RegExp(`/blob/${options.sha}/docs/usage.md`));
   assert.match(body, /actions\/runs\/42/);
@@ -66,10 +66,7 @@ test('rebuilds preserve editorial changes and acceptance results outside managed
     ...options,
     body: 'Highlights: better audio exports.',
   });
-  body = body.replace(
-    '## Tested scope and known limitations',
-    '## Tested on my GNOME desktop',
-  );
+  body = body.replace('## Limits', '## Tested on my GNOME desktop');
   body += '\nHuman acceptance: native dialogs passed; KDE still untested.\n';
   const rebuilt = await renderReleaseNotes({ ...options, runId: 99, body });
   assert.match(rebuilt, /Highlights: better audio exports\./);

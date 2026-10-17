@@ -18,7 +18,7 @@ Only Linux x86_64 installers are currently released. macOS checks protect the so
 
 ### Release notes and download links
 
-The reviewed [release template](../.github/release-template.md) supplies the product introduction, screenshot, installer instructions, limitations, verification and support links. Release Please contributes the changelog. Filenames and source/build links are derived from the exact version and commit; maintainers review the highlights and record desktop acceptance before publication.
+The [release template](../.github/release-template.md) keeps release notes to install commands, highlights, brief limitations and verification/support links. Release Please contributes the changelog. Filenames and source/build links use the exact version and commit. Keep detailed setup in the user/Linux guides and acceptance evidence in the release PR or CI artifacts; summarize the actual acceptance status in the notes before publication.
 
 The first successful artifact upload initializes the template. On rebuilds, only the `jacket-downloads` and `jacket-verification` sections belong to automation. Edit highlights, known limitations and acceptance results outside those marked sections; these edits survive rebuilds. Keep the managed section markers intact. Maintainer checkboxes live in the workflow summary rather than the public release notes.
 
