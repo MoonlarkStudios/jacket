@@ -26,17 +26,24 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
+import { BulkTrackEditor } from './components/BulkTrackEditor';
 import {
   DownloadFeedback,
   SourceErrorMessage,
 } from './components/DownloadFeedback';
+import { ExportPreviewDialog } from './components/ExportPreviewDialog';
 import { SourceField } from './components/SourceField';
 import {
   type Dialog,
   TrackEditor,
   WorkspaceDialogs,
 } from './components/WorkspaceDialogs';
-import { desktopAvailable, revealArchive } from './desktop';
+import {
+  artworkAsset,
+  desktopAvailable,
+  openPlaylist,
+  revealArchive,
+} from './desktop';
 import { formatDuration, type Track } from './domain';
 import { example } from './example';
 import { archiveDirectory, archiveFilename } from './preferences';
@@ -70,6 +77,10 @@ export default function App() {
   } | null>(null);
   const [query, setQuery] = useState('');
   const [failedCover, setFailedCover] = useState<string | null>(null);
+  const [importedCover, setImportedCover] = useState<{
+    id: string;
+    url: string;
+  } | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const sourceInput = useRef<HTMLInputElement>(null);
   const editorTrigger = useRef<HTMLButtonElement | null>(null);
@@ -90,6 +101,7 @@ export default function App() {
     !w.exampleMode &&
     w.toolsReady &&
     w.eventsReady &&
+    w.draftReady &&
     !!w.chosen.length &&
     !!p.title.trim() &&
     reviewReady &&
@@ -123,7 +135,11 @@ export default function App() {
     p.artworkMode === 'none'
       ? null
       : p.artworkMode === 'shared'
-        ? p.sharedArtwork
+        ? p.sharedArtworkAsset
+          ? importedCover?.id === p.sharedArtworkAsset
+            ? importedCover.url
+            : null
+          : p.sharedArtwork
         : inspection?.artworkUrl ||
           inspection?.tracks.find((track) => track.artworkUrl)?.artworkUrl;
   const mac = navigator.platform.toLowerCase().includes('mac');
@@ -148,6 +164,24 @@ export default function App() {
     : null;
 
   const sourceUrl = inspection?.sourceUrl;
+  useEffect(() => {
+    const id = p.sharedArtworkAsset;
+    if (!id || !desktopAvailable) {
+      setImportedCover(null);
+      return;
+    }
+    let disposed = false;
+    void artworkAsset(id)
+      .then((asset) => {
+        if (!disposed) setImportedCover({ id, url: asset.previewDataUrl });
+      })
+      .catch((error) => {
+        if (!disposed) w.setError(String(error));
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [p.sharedArtworkAsset, w.setError]);
   useEffect(() => {
     if (sourceUrl) heading.current?.focus();
     else sourceInput.current?.focus();
@@ -197,7 +231,9 @@ export default function App() {
     !!editing ||
       dialog === 'details' ||
       dialog === 'artwork' ||
-      dialog === 'export',
+      dialog === 'export' ||
+      dialog === 'bulk' ||
+      dialog === 'preview',
     () => openDialog('authPrototype'),
   );
 
@@ -315,7 +351,7 @@ export default function App() {
               <Text className="start-eyebrow">FROM LINK TO NEATLY PACKED</Text>
               <Title order={1}>Download an album or playlist.</Title>
               <Text c="dimmed">
-                Tagged audio and artwork, together in one ZIP.
+                Tagged audio and artwork, ready for your library.
               </Text>
             </div>
             <SourceField
@@ -369,6 +405,18 @@ export default function App() {
                 this preview.
               </Text>
             )}
+            {w.draftStatus === 'failed' &&
+              !w.inspection &&
+              desktopAvailable && (
+                <Button
+                  variant="subtle"
+                  color="gray"
+                  disabled={w.busy}
+                  onClick={() => void w.discardDraft()}
+                >
+                  Discard saved review
+                </Button>
+              )}
             {w.error && (
               <SourceErrorMessage
                 error={w.error}
@@ -406,6 +454,49 @@ export default function App() {
         ) : (
           <>
             <ReviewUndo workspace={w} undo={undoNewDownload} />
+            {!w.exampleMode && !success && reviewReady && w.draftStatus && (
+              <Group
+                justify="space-between"
+                gap="xs"
+                className="review-persistence"
+              >
+                <Text size="xs" c="dimmed" role="status">
+                  {w.draftStatus === 'saving'
+                    ? 'Saving review…'
+                    : w.draftStatus === 'saved'
+                      ? 'Review saved on this device'
+                      : 'Review could not be saved. Keep Jacket open to retain your edits.'}
+                </Text>
+                <button
+                  type="button"
+                  className="text-action"
+                  disabled={w.busy}
+                  onClick={() => void w.discardDraft()}
+                >
+                  Discard review
+                </button>
+              </Group>
+            )}
+            {w.savedReview && (
+              <div className="review-undo">
+                <div>
+                  <Text size="sm" fw={500}>
+                    You also have a saved review.
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {w.savedReview.title} · {w.savedReview.trackCount} tracks
+                  </Text>
+                </div>
+                <Button
+                  variant="default"
+                  size="sm"
+                  disabled={w.busy}
+                  onClick={() => void w.continueSavedReview()}
+                >
+                  Continue saved review
+                </Button>
+              </div>
+            )}
             <section className="collection-heading">
               <button
                 type="button"
@@ -557,6 +648,29 @@ export default function App() {
                         ? 'All tracks selected'
                         : `${w.selected.size} of ${inspection.tracks.length} selected`}
                   </Text>
+                  {reviewReady && !success && (
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      color="gray"
+                      disabled={w.busy || w.selected.size === 0}
+                      onClick={(event) =>
+                        openDialog('bulk', event.currentTarget)
+                      }
+                    >
+                      Edit selected tracks
+                    </Button>
+                  )}
+                  {reviewReady && w.bulkUndo && !success && (
+                    <button
+                      type="button"
+                      className="text-action"
+                      disabled={w.busy}
+                      onClick={w.undoBulk}
+                    >
+                      Undo edits
+                    </button>
+                  )}
                 </Group>
                 {inspection.tracks.length > 8 && (
                   <TextInput
@@ -669,7 +783,9 @@ export default function App() {
                     </span>
                     <div className="success-copy">
                       <Text fw={600} size="sm">
-                        Your archive is ready
+                        {success.outputKind === 'folder'
+                          ? 'Your music folder is ready'
+                          : 'Your archive is ready'}
                       </Text>
                       <Text size="xs" c="dimmed" className="output-path">
                         {success.outputPath}
@@ -685,7 +801,11 @@ export default function App() {
                         )
                       }
                     >
-                      {mac ? 'Show in Finder' : 'Show in folder'}
+                      {success.outputKind === 'folder'
+                        ? 'Open folder'
+                        : mac
+                          ? 'Show in Finder'
+                          : 'Show in folder'}
                     </Button>
                   </div>
                   {exportNotes.length > 0 && (
@@ -702,6 +822,19 @@ export default function App() {
                     </details>
                   )}
                   <Group gap="lg" className="success-next">
+                    {success.outputKind === 'folder' && (
+                      <Button
+                        size="xs"
+                        variant="default"
+                        onClick={() =>
+                          void openPlaylist(success.outputPath).catch((error) =>
+                            w.setError(String(error)),
+                          )
+                        }
+                      >
+                        Open playlist
+                      </Button>
+                    )}
                     <Button
                       variant="subtle"
                       size="xs"
@@ -748,11 +881,13 @@ export default function App() {
                           openDialog('details', event.currentTarget)
                         }
                         disabled={w.busy}
-                        aria-label={`Rename ${w.savePath?.split(/[\\/]/).pop() || archiveFilename(p.title)}`}
+                        aria-label={`Rename ${p.title}`}
                       >
                         <span>
                           {w.savePath?.split(/[\\/]/).pop() ||
-                            archiveFilename(p.title)}
+                            (p.outputKind === 'folder'
+                              ? `${p.title}/`
+                              : archiveFilename(p.title))}
                         </span>
                         <IconEdit size={14} aria-hidden="true" />
                       </button>
@@ -771,8 +906,19 @@ export default function App() {
                         <IconChevronDown size={13} aria-hidden="true" />
                         <span className="export-options-summary">
                           {formatNames[p.format]} ·{' '}
-                          {artworkNames[p.artworkMode]}
+                          {artworkNames[p.artworkMode]} ·{' '}
+                          {p.outputKind === 'folder' ? 'Folder' : 'ZIP'}
                         </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="text-action preview-files"
+                        disabled={w.busy || !w.chosen.length}
+                        onClick={(event) =>
+                          openDialog('preview', event.currentTarget)
+                        }
+                      >
+                        Preview files
                       </button>
                       {reviewReady && !w.exampleMode && desktopAvailable && (
                         <Text
@@ -809,11 +955,13 @@ export default function App() {
                                 ? 'Check the audio tools in Settings'
                                 : !w.eventsReady
                                   ? 'Connecting to the audio tools…'
-                                  : w.selected.size === 0
-                                    ? 'Select at least one track'
-                                    : !p.title.trim()
-                                      ? `Add a ZIP filename in ${p.mode === 'album' ? 'Edit album details' : 'Edit details'}`
-                                      : `${mac ? '⌘' : 'Ctrl'} + Enter`
+                                  : !w.draftReady
+                                    ? 'Restoring unfinished work…'
+                                    : w.selected.size === 0
+                                      ? 'Select at least one track'
+                                      : !p.title.trim()
+                                        ? `Add a collection name in ${p.mode === 'album' ? 'Edit album details' : 'Edit details'}`
+                                        : `${mac ? '⌘' : 'Ctrl'} + Enter`
                           }
                           events={{ hover: true, focus: true, touch: false }}
                         >
@@ -834,9 +982,11 @@ export default function App() {
                                 ? 'Resume download'
                                 : retry
                                   ? 'Retry download'
-                                  : p.mode === 'album'
-                                    ? 'Download album…'
-                                    : 'Download playlist…'}
+                                  : p.outputKind === 'folder'
+                                    ? `Save ${p.mode === 'album' ? 'album' : 'playlist'}…`
+                                    : p.mode === 'album'
+                                      ? 'Download album…'
+                                      : 'Download playlist…'}
                             </Button>
                           </span>
                         </Tooltip>
@@ -880,6 +1030,31 @@ export default function App() {
         }}
         close={closeDialog}
       />
+      {dialog === 'bulk' && inspection && (
+        <BulkTrackEditor
+          tracks={inspection.tracks}
+          selected={w.selected}
+          inherited={
+            p.mode === 'album'
+              ? {
+                  album: p.albumTitle.trim() || undefined,
+                  albumArtist: p.albumArtist.trim() || undefined,
+                  releaseYear: p.year ?? undefined,
+                }
+              : undefined
+          }
+          busy={w.busy}
+          onApply={w.applyBulk}
+          close={closeDialog}
+        />
+      )}
+      {dialog === 'preview' && w.exportPlan && (
+        <ExportPreviewDialog
+          plan={w.exportPlan}
+          cover={cover ?? null}
+          close={closeDialog}
+        />
+      )}
       {editing && (
         <TrackEditor
           key={editing.index}

@@ -113,6 +113,14 @@ pub enum ArtworkMode {
     None,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum OutputKind {
+    #[default]
+    Zip,
+    Folder,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportPlan {
@@ -122,6 +130,14 @@ pub struct ExportPlan {
     pub format: AudioFormat,
     pub artwork_mode: ArtworkMode,
     pub shared_artwork_url: Option<String>,
+    /// Opaque app-owned asset identifier; never a caller-supplied file path.
+    #[serde(default)]
+    pub shared_artwork_asset: Option<String>,
+    /// Resolved by the native adapter and deliberately excluded from transport.
+    #[serde(skip)]
+    pub shared_artwork_path: Option<std::path::PathBuf>,
+    #[serde(default)]
+    pub output_kind: OutputKind,
     pub auth: AuthOptions,
     pub tracks: Vec<Track>,
 }
@@ -157,7 +173,30 @@ pub struct ManifestTrack {
 #[serde(rename_all = "camelCase")]
 pub struct ExportResult {
     pub output_path: String,
+    #[serde(default)]
+    pub output_kind: OutputKind,
+    #[serde(default)]
+    pub playlist_path: Option<String>,
     pub track_count: usize,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportPreviewTrack {
+    pub relative_path: String,
+    pub metadata: Metadata,
+    pub artwork_path: Option<String>,
+    pub extension_provisional: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportPreview {
+    pub root_name: String,
+    pub output_kind: OutputKind,
+    pub tracks: Vec<ExportPreviewTrack>,
+    pub files: Vec<String>,
     pub warnings: Vec<String>,
 }
 
@@ -176,5 +215,32 @@ mod tests {
         let track: ManifestTrack = serde_json::from_value(old).unwrap();
         assert!(track.embedded_metadata.is_none());
         assert!(track.embedded_artwork.is_none());
+    }
+
+    #[test]
+    fn older_plans_default_to_zip_and_never_deserialize_runtime_artwork_paths() {
+        let old = serde_json::json!({
+            "title": "Album", "sourceUrl": "https://www.youtube.com/watch?v=id",
+            "mode": "album", "format": "mp3", "artworkMode": "none",
+            "sharedArtworkUrl": null, "auth": {}, "tracks": [],
+            "sharedArtworkPath": "/caller/controlled/file"
+        });
+        let mut plan: ExportPlan = serde_json::from_value(old).unwrap();
+        assert_eq!(plan.output_kind, OutputKind::Zip);
+        assert!(plan.shared_artwork_asset.is_none());
+        assert!(plan.shared_artwork_path.is_none());
+        plan.shared_artwork_path = Some("/trusted/native/file".into());
+        let serialized = serde_json::to_value(plan).unwrap();
+        assert!(serialized.get("sharedArtworkPath").is_none());
+    }
+
+    #[test]
+    fn older_export_results_remain_readable() {
+        let result: ExportResult = serde_json::from_value(serde_json::json!({
+            "outputPath": "/output.zip", "trackCount": 2, "warnings": []
+        }))
+        .unwrap();
+        assert_eq!(result.output_kind, OutputKind::Zip);
+        assert!(result.playlist_path.is_none());
     }
 }

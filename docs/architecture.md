@@ -12,7 +12,7 @@ Tauri desktop adapter
   Native dialogs, browser profiles, downloader updates, jobs, recovery
        │ Rust API
 audio-engine
-  Source inspection → export plan → tagged audio + assets → ZIP + manifest
+  Source inspection → export plan / preview → tagged audio + assets → ZIP or folder + manifest
        │ argument-based subprocesses and HTTPS image requests
 yt-dlp / ffmpeg / ffprobe
 ```
@@ -33,8 +33,8 @@ The webview does not spawn processes or read browser databases. The browser-only
 - Unknown artists and release years remain unknown; uploader names and upload dates are not substitutes. Album-header enrichment is bounded and optional, so its failure does not fail inspection.
 - Supplied shared album fields override individual album/album-artist/year values at export. Track artists and existing track/disc numbers remain intact. Missing album track numbers are filled before selection, so deselecting tracks leaves gaps.
 - Inspection streams partial results without downloading audio. Editing and export wait for completion; failed or cancelled inspections keep a marked partial preview.
-- Artwork failures become warnings and allow audio export to continue. Every selected audio item must be prepared before an archive is published.
-- Write the ZIP beside its destination through a temporary file. Never overwrite an existing archive, including one created during the job; filename collisions receive a numbered suffix. Cancellation publishes no partial ZIP.
+- Artwork failures become warnings and allow audio export to continue. Every selected audio item must be prepared before a collection is published.
+- Write the ZIP beside its destination through a temporary file. Never overwrite an existing archive, including one created during the job; filename collisions receive a numbered suffix. Cancellation publishes no partial ZIP. Folder output stages beside the destination and uses an atomic no-replace directory publication, retrying numbered names on collisions. ZIP and folder delivery consume the same prepared bundle.
 
 ## Jobs and recovery
 
@@ -42,9 +42,21 @@ The native layer owns operation lifetimes. Browser-access tests and album jobs c
 
 Failed and cancelled exports retain completed source downloads for retry. Transient network failures receive bounded, cancellation-aware retries; explicit account restrictions and unavailable media stop with guidance. A retry reuses source downloads, although audio preparation may run again.
 
-The native layer atomically saves the export plan, destination, progress, and opaque browser selection in a private `recovery.json` beside cached media. On restart it offers the most recently active unfinished job; completed, dismissed, malformed, and incompatible records are skipped. Missing or older browser selections require an explicit profile choice. Successful exports remove their job directory. Dismissing recovery retains cached media; [manual cleanup](usage.md#local-data-and-cleanup) remains available until cache management is implemented.
+The native layer atomically saves the export plan, destination, progress, and opaque browser selection in a private `recovery.json` beside cached media. On restart it offers the most recently active unfinished job; completed, dismissed, malformed, and incompatible records are skipped. Missing or older browser selections require an explicit profile choice. Successful exports conditionally tombstone their exact review revision, then remove their job directory. Cleanup failures add notes to the successful result and retain a terminal recovery checkpoint for startup cleanup; terminal records are never offered as unfinished downloads. Dismissing recovery retains cached media; [manual cleanup](usage.md#local-data-and-cleanup) remains available until cache management is implemented.
 
 Keep the `com.moonlark.audio-dl` bundle identifier and preference namespace stable across branding changes. Handle incompatible recovery records explicitly.
+
+## Saved reviews and imported artwork
+
+`reviews.rs` keeps one committed review in private application data, independently of export recovery. A typed versioned record contains inspection, occurrence selections, edits, and export preferences; it excludes authentication. Revisions, retired sessions, and discard tombstones prevent delayed writes from restoring stale reviews. Writes are atomic and synchronized. The frontend saves committed state immediately rather than leaving a debounce window at close. Recovery takes startup precedence and retains newer committed edits for the same source. A different saved review remains available through an explicit continue action; initial recovery restoration never overwrites it. Ordinary draft restoration retains exact edited values and starts with public access.
+
+Persistence supports unfinished work only. Before starting an unfinished export, the frontend flushes its committed snapshot and passes a `{sessionId, revision}` completion identity to native recovery. A resumed job with an unrelated saved review retains its own recovery identity instead of overwriting that review. After publishing output, `export_completion.rs` saves a terminal checkpoint, conditionally clears the associated review, and removes the job cache. Newer and unrelated drafts remain intact; tombstones and retired writer sessions reject delayed saves. Startup reconciliation retries retained completion cleanup before draft loading and artwork pruning. Exported files remain successful even if cleanup fails.
+
+The current success screen and Save another copy are session-local. Completed content signatures prevent incidental renders, output-option changes, and New download/Undo from restoring finished work to disk. A deliberate content edit starts a new unfinished draft generation. There is no persistent export history or album catalogue.
+
+`artwork_assets.rs` normalizes chosen JPEG/PNG files into app-owned JPEGs. Opaque content hashes cross IPC; only native code resolves them to trusted paths. Source files are snapshotted before normalization. Cropping produces another asset; the previous cover remains selected until confirmation. Imported bytes are preserved for embedding and cover export. Startup-only cleanup retains assets referenced by the draft or any export record and skips cleanup on an unreadable inventory.
+
+`preview_export` and export share canonical naming. Preview metadata represents requested effective tags. Codec-dependent extensions and container tag limitations remain explicit until audio acquisition determines the codec.
 
 ## Desktop shell
 

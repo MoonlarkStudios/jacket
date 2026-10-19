@@ -1,15 +1,19 @@
 import { listen } from '@tauri-apps/api/event';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   archiveDestination,
   cancelExport,
   cancelInspection,
   chooseArchive,
+  chooseFolder,
   dependencyStatus,
   desktopAvailable,
+  discardReviewDraft,
   dismissRecovery,
   inspectSource,
+  loadReviewDraft,
   pendingExport,
+  saveReviewDraft,
   startExport,
 } from './desktop';
 import {
@@ -19,6 +23,7 @@ import {
   type InspectionEvent,
   type JobEvent,
   type PendingExport,
+  type ReviewCompletionIdentity,
   selectedTracks,
   type Track,
 } from './domain';
@@ -33,6 +38,13 @@ import {
   withAlbumTrackNumbers,
   writePreference,
 } from './preferences';
+import { makeReviewDraft, type ReviewDraft } from './reviewDraft';
+import {
+  applyBulkEdit,
+  type BulkEditUndo,
+  type BulkTrackEdits,
+  undoBulkEdit,
+} from './trackEdits';
 import { useBrowserSession } from './useBrowserSession';
 import { useDownloader } from './useDownloader';
 
@@ -45,6 +57,8 @@ const defaults: ExportPreferences = {
   format: 'compatible',
   artworkMode: 'perTrack',
   sharedArtwork: null,
+  sharedArtworkAsset: null,
+  outputKind: 'zip',
 };
 
 interface ReviewSnapshot {
@@ -62,6 +76,41 @@ interface ReviewSnapshot {
   retryOutput: string | null;
   retryTitle: string | null;
   auth: ExportPlan['auth'];
+  draftSession: string;
+  draftRevision: number;
+  completedContent: string | null;
+  recoveredReview: RecoveredReview | null;
+  savedReview: ReviewDraft | null;
+}
+
+interface RecoveredReview {
+  snapshot: string;
+  identity: ReviewCompletionIdentity | null;
+  unrelatedDraft: boolean;
+}
+
+interface DraftWrite {
+  identity: ReviewCompletionIdentity;
+  snapshot: string;
+  content: string;
+  status: 'saving' | 'saved' | 'failed';
+  promise: Promise<boolean>;
+}
+
+function reviewSignature(
+  inspection: Inspection,
+  selected: ReadonlySet<number>,
+  preferences: ExportPreferences,
+  includeOutput = false,
+): string {
+  const { format, outputKind, ...contentPreferences } = preferences;
+  return JSON.stringify({
+    inspection,
+    selected: [...selected].sort((a, b) => a - b),
+    preferences: includeOutput
+      ? { ...contentPreferences, format, outputKind }
+      : contentPreferences,
+  });
 }
 
 export function useWorkspace() {
@@ -111,11 +160,118 @@ export function useWorkspace() {
   const retryTitle = useRef<string | null>(null);
   const savedFormat = useRef(preferences.format);
   const userStarted = useRef(false);
+  const draftSession = useRef<string>(crypto.randomUUID());
+  const draftRevision = useRef(0);
+  const [draftReady, setDraftReady] = useState(!desktopAvailable);
+  const [draftStatus, setDraftStatus] = useState<
+    'saving' | 'saved' | 'failed' | null
+  >(null);
+  const [bulkUndo, setBulkUndo] = useState<BulkEditUndo | null>(null);
+  const [savedReview, setSavedReview] = useState<ReviewDraft | null>(null);
+  // Finished albums remain available in memory. Output conveniences do not
+  // turn a finished album into unfinished work; committed content changes do.
+  const completedContent = useRef<string | null>(null);
+  const currentContent = useRef<string | null>(null);
+  const currentSnapshot = useRef<string | null>(null);
+  const recoveredReview = useRef<RecoveredReview | null>(null);
+  const latestDraftWrite = useRef<DraftWrite | null>(null);
+  const activeExportReview = useRef<{
+    jobId: string;
+    content: string;
+    identity: ReviewCompletionIdentity | null;
+  } | null>(null);
+  currentContent.current = useMemo(
+    () =>
+      inspection ? reviewSignature(inspection, selected, preferences) : null,
+    [inspection, selected, preferences],
+  );
+  currentSnapshot.current = useMemo(
+    () =>
+      inspection
+        ? reviewSignature(inspection, selected, preferences, true)
+        : null,
+    [inspection, selected, preferences],
+  );
+
+  const writeReviewDraft = useCallback(
+    (
+      inspection: Inspection,
+      selected: ReadonlySet<number>,
+      preferences: ExportPreferences,
+    ): DraftWrite => {
+      const snapshot = reviewSignature(inspection, selected, preferences, true);
+      const previous = latestDraftWrite.current;
+      if (
+        previous?.identity.sessionId === draftSession.current &&
+        previous.identity.revision === draftRevision.current &&
+        previous.snapshot === snapshot &&
+        previous.status !== 'failed'
+      )
+        return previous;
+      const identity = {
+        sessionId: draftSession.current,
+        revision: ++draftRevision.current,
+      };
+      const write: DraftWrite = {
+        identity,
+        snapshot,
+        content: reviewSignature(inspection, selected, preferences),
+        status: 'saving',
+        promise: Promise.resolve(false),
+      };
+      latestDraftWrite.current = write;
+      setDraftStatus('saving');
+      const canReport = () =>
+        draftSession.current === identity.sessionId &&
+        draftRevision.current === identity.revision &&
+        currentContent.current === write.content &&
+        completedContent.current === null &&
+        !resettingRef.current;
+      write.promise = saveReviewDraft(
+        makeReviewDraft(
+          identity.sessionId,
+          identity.revision,
+          inspection,
+          selected,
+          preferences,
+        ),
+      ).then(
+        (saved) => {
+          write.status = saved ? 'saved' : 'failed';
+          if (canReport()) setDraftStatus(write.status);
+          return saved;
+        },
+        (error) => {
+          write.status = 'failed';
+          if (canReport()) setDraftStatus('failed');
+          throw error;
+        },
+      );
+      return write;
+    },
+    [],
+  );
+
+  const installReviewDraft = useCallback((draft: ReviewDraft) => {
+    draftSession.current = draft.sessionId;
+    draftRevision.current = draft.revision;
+    completedContent.current = null;
+    latestDraftWrite.current = null;
+    recoveredReview.current = null;
+    setUrl(draft.url);
+    setInspection(draft.inspection);
+    setInspectionStatus('complete');
+    setInspectionTotal(draft.inspection.tracks.length);
+    setSelected(new Set(draft.selected));
+    setPreferences({ ...defaults, ...draft.preferences });
+    setBulkUndo(null);
+    setNumberingUndo(null);
+  }, []);
 
   const restorePendingExport = useCallback(
     (value: PendingExport) => {
       const plan = value.plan;
-      setInspection({
+      const inspection: Inspection = {
         title: plan.title,
         sourceUrl: plan.sourceUrl,
         suggestedMode: plan.mode,
@@ -125,16 +281,29 @@ export function useWorkspace() {
           null,
         tracks: plan.tracks,
         warnings: [],
-      });
-      setSelected(new Set(plan.tracks.map((_, index) => index)));
-      setPreferences(recoveryPreferences(plan));
+      };
+      const selected = new Set(plan.tracks.map((_, index) => index));
+      const preferences = recoveryPreferences(plan);
+      recoveredReview.current = {
+        snapshot: reviewSignature(inspection, selected, preferences, true),
+        identity: value.reviewIdentity ?? null,
+        unrelatedDraft: false,
+      };
+      draftSession.current =
+        value.reviewIdentity?.sessionId ?? crypto.randomUUID();
+      draftRevision.current = value.reviewIdentity?.revision ?? 0;
+      latestDraftWrite.current = null;
+      completedContent.current = null;
+      setInspection(inspection);
+      setSelected(selected);
+      setPreferences(preferences);
       browserSession.restore(plan.auth);
       setUrl(plan.sourceUrl);
       setInspectionStatus('complete');
       setInspectionTotal(plan.tracks.length);
       currentJob.current = value.jobId;
       retryOutput.current = value.outputPath;
-      retryTitle.current = plan.title;
+      retryTitle.current = `${plan.title}\0${plan.outputKind ?? 'zip'}`;
       setSavePath(value.outputPath);
       setProgress({
         jobId: value.jobId,
@@ -163,12 +332,13 @@ export function useWorkspace() {
       currentJob.current &&
       progress?.stage !== 'complete' &&
       retryOutput.current &&
-      retryTitle.current === preferences.title
+      retryTitle.current === `${preferences.title}\0${preferences.outputKind}`
     ) {
       setSavePath(retryOutput.current);
       return;
     }
     setSavePath(null);
+    if (preferences.outputKind === 'folder') return;
     archiveDestination(preferences.title)
       .then((path) => {
         if (!disposed) setSavePath(path);
@@ -179,7 +349,13 @@ export function useWorkspace() {
     return () => {
       disposed = true;
     };
-  }, [preferences.title, exampleMode, inspectionStatus, progress?.stage]);
+  }, [
+    preferences.title,
+    preferences.outputKind,
+    exampleMode,
+    inspectionStatus,
+    progress?.stage,
+  ]);
 
   useEffect(() => {
     if (!desktopAvailable) return;
@@ -192,16 +368,49 @@ export function useWorkspace() {
         if (!disposed) setError(String(error));
       });
     pendingExport()
-      .then((value) => {
-        if (!disposed && !userStarted.current && value)
-          restorePendingExport(value);
+      .then(async (value) => {
+        if (disposed || userStarted.current) return;
+        if (value) restorePendingExport(value);
+        const draft = await loadReviewDraft();
+        if (disposed || userStarted.current || !draft) return;
+        if (
+          value &&
+          (draft.inspection.sourceUrl !== value.plan.sourceUrl ||
+            (value.reviewIdentity &&
+              draft.sessionId !== value.reviewIdentity.sessionId))
+        ) {
+          if (recoveredReview.current)
+            recoveredReview.current.unrelatedDraft = true;
+          setSavedReview(draft);
+          return;
+        }
+        userStarted.current = true;
+        installReviewDraft(draft);
+        setDraftStatus('saved');
       })
-      .catch(() => {
-        /* An unavailable recovery record never blocks a new download. */
+      .catch((error) => {
+        if (!disposed && !userStarted.current) {
+          setDraftStatus('failed');
+          setError(String(error));
+        }
+      })
+      .finally(() => {
+        if (!disposed) setDraftReady(true);
       });
     let unsubscribe: (() => void) | undefined;
     listen<JobEvent>('export-progress', ({ payload }) => {
       if (disposed || payload.jobId !== currentJob.current) return;
+      if (payload.stage === 'complete') {
+        const submitted = activeExportReview.current;
+        if (
+          submitted?.jobId === payload.jobId &&
+          submitted.content === currentContent.current
+        ) {
+          completedContent.current = submitted.content;
+          recoveredReview.current = null;
+          setDraftStatus(null);
+        }
+      }
       setProgress(payload);
       if (['complete', 'failed', 'cancelled'].includes(payload.stage)) {
         setExporting(false);
@@ -223,7 +432,44 @@ export function useWorkspace() {
       currentInspection.current = null;
       unsubscribe?.();
     };
-  }, [restorePendingExport]);
+  }, [restorePendingExport, installReviewDraft]);
+
+  useEffect(() => {
+    if (
+      !desktopAvailable ||
+      !draftReady ||
+      exampleMode ||
+      !inspection ||
+      inspectionStatus !== 'complete' ||
+      resettingRef.current
+    )
+      return;
+    const content = reviewSignature(inspection, selected, preferences);
+    if (completedContent.current === content) return;
+    const snapshot = reviewSignature(inspection, selected, preferences, true);
+    if (recoveredReview.current?.snapshot === snapshot) return;
+    if (completedContent.current || recoveredReview.current) {
+      // A new committed album edit gets a new generation. The native store
+      // fences delayed writes belonging to the finished snapshot.
+      draftSession.current = crypto.randomUUID();
+      draftRevision.current = 0;
+      latestDraftWrite.current = null;
+      completedContent.current = null;
+      recoveredReview.current = null;
+      setSavedReview(null);
+    }
+    void writeReviewDraft(inspection, selected, preferences).promise.catch(
+      () => {},
+    );
+  }, [
+    draftReady,
+    exampleMode,
+    inspection,
+    inspectionStatus,
+    selected,
+    preferences,
+    writeReviewDraft,
+  ]);
 
   const busy =
     loading || exporting || choosing || resetting || browserSession.testing;
@@ -243,6 +489,15 @@ export function useWorkspace() {
     setPreviousReview(null);
     const prepared = withAlbumTrackNumbers(value);
     setNumberingUndo(null);
+    setBulkUndo(null);
+    setSavedReview(null);
+    draftSession.current = crypto.randomUUID();
+    draftRevision.current = 0;
+    latestDraftWrite.current = null;
+    completedContent.current = null;
+    recoveredReview.current = null;
+    activeExportReview.current = null;
+    setDraftStatus(null);
     setInspection(prepared);
     setSelected(new Set(value.tracks.map((_, index) => index)));
     setPreferences(inspectionPreferences(value, savedFormat.current));
@@ -278,6 +533,7 @@ export function useWorkspace() {
     inspectionCancellation.current = false;
     setError(null);
     setLoading(true);
+    setBulkUndo(null);
     setCancelling(false);
     setInspection(null);
     setSavePath(null);
@@ -349,10 +605,13 @@ export function useWorkspace() {
       currentInspection.current ||
       choosingRef.current ||
       !eventsReady ||
+      !draftReady ||
       !desktopAvailable ||
       exampleMode
     )
       return;
+    const content = reviewSignature(inspection, selected, preferences);
+    const snapshot = reviewSignature(inspection, selected, preferences, true);
     choosingRef.current = true;
     setChoosing(true);
     setError(null);
@@ -363,19 +622,54 @@ export function useWorkspace() {
       const path =
         retrying &&
         retryOutput.current &&
-        retryTitle.current === preferences.title
+        retryTitle.current === `${preferences.title}\0${preferences.outputKind}`
           ? retryOutput.current
-          : await chooseArchive(preferences.title);
+          : await (preferences.outputKind === 'folder'
+              ? chooseFolder(preferences.title)
+              : chooseArchive(preferences.title));
       if (!path) return;
+      if (currentSnapshot.current !== snapshot)
+        throw new Error(
+          'Your review changed while choosing a destination. Start the download again.',
+        );
       setSavePath(path);
       retryOutput.current = path;
-      retryTitle.current = preferences.title;
+      retryTitle.current = `${preferences.title}\0${preferences.outputKind}`;
+      let reviewIdentity: ReviewCompletionIdentity | null = null;
+      const recovered = recoveredReview.current;
+      if (completedContent.current !== content) {
+        if (recovered?.unrelatedDraft && recovered.snapshot === snapshot) {
+          // Recovery already durably contains this exact plan. Re-saving it
+          // would replace a different unfinished review kept by the user.
+          reviewIdentity = recovered.identity;
+        } else {
+          const write = writeReviewDraft(inspection, selected, preferences);
+          if (!(await write.promise))
+            throw new Error(
+              'Your review could not be saved. Keep Jacket open and try the download again.',
+            );
+          if (
+            currentSnapshot.current !== snapshot ||
+            draftSession.current !== write.identity.sessionId ||
+            draftRevision.current !== write.identity.revision
+          )
+            throw new Error(
+              'Your review changed before the download started. Start the download again.',
+            );
+          reviewIdentity = write.identity;
+        }
+      }
       const id =
         currentJob.current &&
         ['failed', 'cancelled', 'interrupted'].includes(progress?.stage ?? '')
           ? currentJob.current
           : crypto.randomUUID();
       currentJob.current = id;
+      activeExportReview.current = {
+        jobId: id,
+        content,
+        identity: reviewIdentity,
+      };
       const queued: JobEvent = {
         jobId: id,
         stage: 'queued',
@@ -397,6 +691,8 @@ export function useWorkspace() {
             format: preferences.format,
             artworkMode: preferences.artworkMode,
             sharedArtworkUrl: preferences.sharedArtwork,
+            sharedArtworkAsset: preferences.sharedArtworkAsset,
+            outputKind: preferences.outputKind,
             auth: {
               browser,
               browserProfile,
@@ -405,6 +701,7 @@ export function useWorkspace() {
           },
           path,
           id,
+          reviewIdentity,
         );
       } catch (error) {
         setExporting(false);
@@ -440,11 +737,13 @@ export function useWorkspace() {
     setChoosing(true);
     setError(null);
     try {
-      const path = await chooseArchive(preferences.title);
+      const path = await (preferences.outputKind === 'folder'
+        ? chooseFolder(preferences.title)
+        : chooseArchive(preferences.title));
       if (!path) return;
       setSavePath(path);
       retryOutput.current = path;
-      retryTitle.current = preferences.title;
+      retryTitle.current = `${preferences.title}\0${preferences.outputKind}`;
     } catch (error) {
       setError(String(error));
     } finally {
@@ -467,6 +766,7 @@ export function useWorkspace() {
   }
 
   function toggle(index: number) {
+    userStarted.current = true;
     setSelected((previous) => {
       const next = new Set(previous);
       if (next.has(index)) next.delete(index);
@@ -475,6 +775,8 @@ export function useWorkspace() {
     });
   }
   function updateTrack(index: number, track: Track) {
+    userStarted.current = true;
+    setBulkUndo(null);
     if (
       inspection?.tracks[index]?.metadata.trackNumber !==
       track.metadata.trackNumber
@@ -497,6 +799,7 @@ export function useWorkspace() {
     >,
   ) {
     if (busy) return;
+    userStarted.current = true;
     setPreferences((previous) =>
       updateAlbumPreferences(
         previous,
@@ -507,6 +810,7 @@ export function useWorkspace() {
   }
   function setMode(mode: CollectionMode) {
     if (busy) return;
+    userStarted.current = true;
     if (mode === 'album' && preferences.mode !== 'album') {
       setInspection((previous) =>
         previous ? withAlbumTrackNumbers(previous, mode) : null,
@@ -529,6 +833,8 @@ export function useWorkspace() {
   }
   function numberTracks() {
     if (busy || preferences.mode !== 'album') return;
+    userStarted.current = true;
+    setBulkUndo(null);
     setNumberingUndo(
       inspection?.tracks.map((track) => track.metadata.trackNumber) ?? null,
     );
@@ -540,6 +846,7 @@ export function useWorkspace() {
   }
   function undoNumbering() {
     if (busy || !numberingUndo) return;
+    userStarted.current = true;
     setInspection((previous) =>
       previous
         ? {
@@ -585,6 +892,11 @@ export function useWorkspace() {
             retryOutput: retryOutput.current,
             retryTitle: retryTitle.current,
             auth: { browser, browserProfile },
+            draftSession: draftSession.current,
+            draftRevision: draftRevision.current,
+            completedContent: completedContent.current,
+            recoveredReview: recoveredReview.current,
+            savedReview,
           })
         : null;
     resettingRef.current = true;
@@ -594,6 +906,9 @@ export function useWorkspace() {
         await dismissRecovery(currentJob.current);
       if (snapshot) setPreviousReview(snapshot);
       setInspection(null);
+      currentContent.current = null;
+      currentSnapshot.current = null;
+      setDraftStatus(null);
       setNumberingUndo(null);
       setInspectionStatus('idle');
       setInspectionTotal(null);
@@ -626,6 +941,16 @@ export function useWorkspace() {
       return false;
     userStarted.current = true;
     const snapshot = previousReview;
+    draftSession.current = snapshot.draftSession;
+    draftRevision.current = Math.max(
+      draftRevision.current,
+      snapshot.draftRevision,
+    );
+    completedContent.current = snapshot.completedContent;
+    recoveredReview.current = snapshot.recoveredReview;
+    latestDraftWrite.current = null;
+    setSavedReview(snapshot.savedReview);
+    setDraftStatus(null);
     setPreviousReview(null);
     setUrl(snapshot.url);
     setInspection(snapshot.inspection);
@@ -651,6 +976,95 @@ export function useWorkspace() {
     retryOutput.current = null;
   }
 
+  function applyBulk(edits: BulkTrackEdits) {
+    if (busy || !inspection || inspectionStatus !== 'complete') return;
+    const result = applyBulkEdit(inspection.tracks, selected, edits);
+    if (!result.changedCount) return;
+    userStarted.current = true;
+    setInspection({ ...inspection, tracks: result.tracks });
+    setNumberingUndo(null);
+    setBulkUndo(result.undo);
+  }
+
+  function undoBulk() {
+    if (busy || !inspection || !bulkUndo || inspectionStatus !== 'complete')
+      return;
+    userStarted.current = true;
+    setInspection({
+      ...inspection,
+      tracks: undoBulkEdit(inspection.tracks, bulkUndo),
+    });
+    setBulkUndo(null);
+  }
+
+  async function discardDraft() {
+    if (busy) return;
+    if (savedReview) {
+      await continueSavedReview();
+      return;
+    }
+    resettingRef.current = true;
+    setResetting(true);
+    try {
+      // Keep the newer committed review if export recovery cannot be dismissed.
+      if (currentJob.current && progress?.stage !== 'complete')
+        await dismissRecovery(currentJob.current);
+      const discarded = await discardReviewDraft(
+        draftSession.current,
+        ++draftRevision.current,
+      );
+      if (!discarded)
+        throw new Error(
+          'The saved review changed. Reopen Jacket before discarding it.',
+        );
+      currentJob.current = null;
+      resettingRef.current = false;
+      setResetting(false);
+      if (await reset()) {
+        setPreviousReview(null);
+        setDraftStatus(null);
+        setBulkUndo(null);
+      }
+    } catch (error) {
+      setError(String(error));
+    } finally {
+      resettingRef.current = false;
+      setResetting(false);
+    }
+  }
+
+  async function continueSavedReview() {
+    if (busy || !savedReview) return;
+    resettingRef.current = true;
+    setResetting(true);
+    try {
+      if (currentJob.current && progress?.stage !== 'complete')
+        await dismissRecovery(currentJob.current);
+      userStarted.current = true;
+      draftSession.current = savedReview.sessionId;
+      draftRevision.current = Math.max(
+        draftRevision.current,
+        savedReview.revision,
+      );
+      installReviewDraft(savedReview);
+      currentJob.current = null;
+      retryOutput.current = null;
+      retryTitle.current = null;
+      setProgress(null);
+      setSavePath(null);
+      setError(null);
+      setSavedReview(null);
+      setPreviousReview(null);
+      setExampleMode(false);
+      browserSession.restore({ browser: null, browserProfile: null });
+    } catch (error) {
+      setError(String(error));
+    } finally {
+      resettingRef.current = false;
+      setResetting(false);
+    }
+  }
+
   return {
     url,
     setUrl: changeUrl,
@@ -659,9 +1073,15 @@ export function useWorkspace() {
     browserSession,
     inspection,
     selected,
-    setSelected,
+    setSelected: (value: Parameters<typeof setSelected>[0]) => {
+      userStarted.current = true;
+      setSelected(value);
+    },
     preferences,
-    setPreferences,
+    setPreferences: (value: Parameters<typeof setPreferences>[0]) => {
+      userStarted.current = true;
+      setPreferences(value);
+    },
     loading,
     inspectionStatus,
     inspectionTotal,
@@ -674,11 +1094,26 @@ export function useWorkspace() {
     progress,
     prepareAnotherCopy,
     eventsReady,
+    draftReady,
     ...downloaderState,
     dependencies,
     toolsReady,
     exampleMode,
     chosen,
+    exportPlan: inspection
+      ? ({
+          title: preferences.title,
+          sourceUrl: inspection.sourceUrl,
+          mode: preferences.mode,
+          format: preferences.format,
+          artworkMode: preferences.artworkMode,
+          sharedArtworkUrl: preferences.sharedArtwork,
+          sharedArtworkAsset: preferences.sharedArtworkAsset,
+          outputKind: preferences.outputKind,
+          auth: { browser, browserProfile },
+          tracks: chosen,
+        } satisfies ExportPlan)
+      : null,
     loadInspection,
     inspect,
     exportZip,
@@ -691,8 +1126,22 @@ export function useWorkspace() {
     numberTracks,
     numberingUndo,
     undoNumbering,
+    applyBulk,
+    undoBulk,
+    bulkUndo,
+    draftStatus,
+    discardDraft,
+    savedReview: savedReview
+      ? {
+          title: savedReview.preferences.title,
+          trackCount: savedReview.selected.length,
+        }
+      : null,
+    continueSavedReview,
     destinationPath:
-      retryTitle.current === preferences.title ? retryOutput.current : null,
+      retryTitle.current === `${preferences.title}\0${preferences.outputKind}`
+        ? retryOutput.current
+        : null,
     savePath,
     reset,
     undoReset,

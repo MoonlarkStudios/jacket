@@ -6,7 +6,7 @@ pub mod process;
 pub mod source;
 pub mod tagging;
 
-pub use export::export_archive;
+pub use export::{export_archive, export_collection, preview_export};
 pub use models::*;
 pub use process::{Cancellation, Toolchain};
 pub use source::{inspect, inspect_streaming};
@@ -17,7 +17,7 @@ pub enum EngineError {
     Invalid(String),
     #[error("Audio tool failed: {0}")]
     Tool(String),
-    #[error("Cancelled. No incomplete archive was saved.")]
+    #[error("Cancelled. No incomplete export was saved.")]
     Cancelled,
     #[error(transparent)]
     Io(#[from] std::io::Error),

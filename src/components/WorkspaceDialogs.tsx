@@ -5,6 +5,7 @@ import {
   Image,
   Modal,
   NumberInput,
+  ScrollArea,
   SegmentedControl,
   Select,
   Stack,
@@ -21,6 +22,7 @@ import {
   DownloaderSettings,
   DownloaderStatusButton,
 } from './DownloaderSettings';
+import { LocalArtwork } from './LocalArtwork';
 import { OwnedSessionSettings } from './OwnedSessionSettings';
 
 export type Dialog =
@@ -30,6 +32,8 @@ export type Dialog =
   | 'export'
   | 'artwork'
   | 'authPrototype'
+  | 'bulk'
+  | 'preview'
   | null;
 export function WorkspaceDialogs({
   workspace: w,
@@ -47,6 +51,7 @@ export function WorkspaceDialogs({
   focusDownloader?: boolean;
 }) {
   const p = w.preferences;
+  const [artworkBusy, setArtworkBusy] = useState(false);
   const patch = (value: Partial<typeof p>) =>
     w.setPreferences((previous) => ({ ...previous, ...value }));
   return (
@@ -99,14 +104,35 @@ export function WorkspaceDialogs({
       <Modal
         returnFocus={false}
         opened={dialog === 'export'}
-        onClose={close}
+        scrollAreaComponent={ScrollArea.Autosize}
+        size="lg"
+        onClose={() => {
+          if (!artworkBusy) close();
+        }}
+        closeButtonProps={{ disabled: artworkBusy }}
+        closeOnEscape={!artworkBusy}
+        closeOnClickOutside={!artworkBusy}
         title="Download options"
         centered
       >
         <Stack gap="lg">
+          <Select
+            label="Save as"
+            disabled={w.busy || artworkBusy}
+            value={p.outputKind}
+            allowDeselect={false}
+            onChange={(value) =>
+              patch({ outputKind: value === 'folder' ? 'folder' : 'zip' })
+            }
+            data={[
+              { value: 'zip', label: 'ZIP archive' },
+              { value: 'folder', label: 'Music folder · ready to play' },
+            ]}
+          />
           <div>
             <Select
               label="Audio format"
+              disabled={w.busy || artworkBusy}
               value={p.format}
               onChange={(value) => patch({ format: value as typeof p.format })}
               allowDeselect={false}
@@ -124,8 +150,12 @@ export function WorkspaceDialogs({
                   : 'Convert every track to MP3.'}
             </Text>
           </div>
-          <ArtworkOptions workspace={w} />
-          <Button onClick={close} fullWidth>
+          <ArtworkOptions
+            workspace={w}
+            busy={artworkBusy}
+            onBusyChange={setArtworkBusy}
+          />
+          <Button onClick={close} fullWidth disabled={artworkBusy}>
             Done
           </Button>
         </Stack>
@@ -133,13 +163,24 @@ export function WorkspaceDialogs({
       <Modal
         returnFocus={false}
         opened={dialog === 'artwork'}
-        onClose={close}
+        scrollAreaComponent={ScrollArea.Autosize}
+        size="lg"
+        onClose={() => {
+          if (!artworkBusy) close();
+        }}
+        closeButtonProps={{ disabled: artworkBusy }}
+        closeOnEscape={!artworkBusy}
+        closeOnClickOutside={!artworkBusy}
         title="Artwork"
         centered
       >
         <Stack gap="lg">
-          <ArtworkOptions workspace={w} />
-          <Button onClick={close} fullWidth>
+          <ArtworkOptions
+            workspace={w}
+            busy={artworkBusy}
+            onBusyChange={setArtworkBusy}
+          />
+          <Button onClick={close} fullWidth disabled={artworkBusy}>
             Done
           </Button>
         </Stack>
@@ -262,8 +303,8 @@ function DetailsEditor({
             </>
           )}
           <TextInput
-            label="ZIP filename"
-            description="The .zip extension is added automatically."
+            label="Collection name"
+            description="Used for the ZIP filename or exported folder."
             value={draft.title}
             disabled={w.busy}
             onChange={(event) => {
@@ -287,7 +328,15 @@ function DetailsEditor({
   );
 }
 
-function ArtworkOptions({ workspace: w }: { workspace: Workspace }) {
+function ArtworkOptions({
+  workspace: w,
+  busy,
+  onBusyChange,
+}: {
+  workspace: Workspace;
+  busy: boolean;
+  onBusyChange: (busy: boolean) => void;
+}) {
   const p = w.preferences;
   const [unavailableImages, setUnavailableImages] = useState<Set<string>>(
     () => new Set(),
@@ -305,9 +354,22 @@ function ArtworkOptions({ workspace: w }: { workspace: Workspace }) {
   ];
   return (
     <>
+      <LocalArtwork
+        currentAssetId={p.sharedArtworkAsset}
+        busy={w.busy}
+        onBusyChange={onBusyChange}
+        onSelect={(asset) =>
+          patch({
+            artworkMode: 'shared',
+            sharedArtworkAsset: asset.id,
+            sharedArtwork: null,
+          })
+        }
+      />
       <div>
         <Select
           label="Artwork"
+          disabled={w.busy || busy}
           value={p.artworkMode}
           onChange={(value) =>
             patch({ artworkMode: value as typeof p.artworkMode })
@@ -320,7 +382,7 @@ function ArtworkOptions({ workspace: w }: { workspace: Workspace }) {
           ]}
         />
         <Text size="sm" c="dimmed" mt={8}>
-          Images are embedded where supported and included in the ZIP.
+          Images are embedded where supported and included with your collection.
         </Text>
       </div>
       {p.artworkMode === 'shared' && candidates.length > 0 && (
@@ -333,15 +395,19 @@ function ArtworkOptions({ workspace: w }: { workspace: Workspace }) {
               <button
                 key={candidate}
                 type="button"
-                className={`artwork-choice ${candidate === p.sharedArtwork ? 'is-selected' : ''}`}
+                className={`artwork-choice ${!p.sharedArtworkAsset && candidate === p.sharedArtwork ? 'is-selected' : ''}`}
                 aria-label={
                   unavailableImages.has(candidate)
                     ? `Artwork option ${index + 1}: image unavailable`
                     : `Use artwork ${index + 1}`
                 }
-                aria-pressed={candidate === p.sharedArtwork}
-                disabled={unavailableImages.has(candidate)}
-                onClick={() => patch({ sharedArtwork: candidate })}
+                aria-pressed={
+                  !p.sharedArtworkAsset && candidate === p.sharedArtwork
+                }
+                disabled={w.busy || busy || unavailableImages.has(candidate)}
+                onClick={() =>
+                  patch({ sharedArtwork: candidate, sharedArtworkAsset: null })
+                }
               >
                 {unavailableImages.has(candidate) ? (
                   <Text
@@ -370,7 +436,7 @@ function ArtworkOptions({ workspace: w }: { workspace: Workspace }) {
                     }
                   />
                 )}
-                {candidate === p.sharedArtwork && (
+                {!p.sharedArtworkAsset && candidate === p.sharedArtwork && (
                   <span className="artwork-check">
                     <IconCheck size={12} />
                   </span>
@@ -389,11 +455,13 @@ function ArtworkOptions({ workspace: w }: { workspace: Workspace }) {
           </Text>
         </div>
       )}
-      {p.artworkMode !== 'none' && candidates.length === 0 && (
-        <Text size="sm" c="dimmed">
-          No source images are available. Audio will download without artwork.
-        </Text>
-      )}
+      {p.artworkMode !== 'none' &&
+        candidates.length === 0 &&
+        !p.sharedArtworkAsset && (
+          <Text size="sm" c="dimmed">
+            No source images are available. Audio will download without artwork.
+          </Text>
+        )}
     </>
   );
 }

@@ -112,6 +112,110 @@ fn target(codec: &str, format: AudioFormat) -> Result<(&'static str, bool)> {
     }
 }
 
+#[derive(Default)]
+struct TrackNamer {
+    names: std::collections::HashSet<String>,
+}
+
+impl TrackNamer {
+    fn filename(&mut self, plan: &ExportPlan, index: usize, extension: &str) -> String {
+        let track = &plan.tracks[index];
+        let prefix = if plan.mode == CollectionMode::Album {
+            track.metadata.track_number.unwrap_or((index + 1) as u32)
+        } else {
+            (index + 1) as u32
+        };
+        let stem = format!(
+            "{:02} - {}",
+            prefix,
+            sanitize_component(&track.metadata.title)
+        );
+        let mut unique_stem = stem.clone();
+        let mut duplicate = 2;
+        // Reserve stems before the codec is known so preview and export keep
+        // identical suffixes even when repeated titles have different codecs.
+        while !self.names.insert(unique_stem.to_lowercase()) {
+            unique_stem = format!("{stem} ({duplicate})");
+            duplicate += 1;
+        }
+        format!("{unique_stem}.{extension}")
+    }
+}
+
+fn planned_artwork_path(plan: &ExportPlan, index: usize) -> Option<String> {
+    match plan.artwork_mode {
+        ArtworkMode::None => None,
+        ArtworkMode::Shared => (plan.shared_artwork_asset.is_some()
+            || plan.shared_artwork_url.is_some())
+        .then(|| "cover.jpg".into()),
+        ArtworkMode::PerTrack => plan.tracks[index]
+            .artwork_url
+            .as_ref()
+            .map(|_| format!("artwork/{:02}.jpg", index + 1)),
+    }
+}
+
+fn validate_plan(plan: &ExportPlan) -> Result<()> {
+    if plan.tracks.is_empty() {
+        return Err(EngineError::Invalid("Select at least one track.".into()));
+    }
+    validate_source_url(&plan.source_url)?;
+    for track in &plan.tracks {
+        validate_source_url(&track.source_url)?;
+    }
+    Ok(())
+}
+
+/// Plan the same portable names used by export without downloading media.
+/// The source codec is unavailable during review, so only MP3 extensions are
+/// definitive. Metadata is the effective requested metadata, not a claim that
+/// every eventual container can embed every field.
+pub fn preview_export(plan: &ExportPlan) -> Result<ExportPreview> {
+    validate_plan(plan)?;
+    let (extension, provisional) = match plan.format {
+        AudioFormat::Mp3 => ("mp3", false),
+        AudioFormat::Compatible => ("mp3-or-m4a", true),
+        AudioFormat::Preserve => ("audio", true),
+    };
+    let mut namer = TrackNamer::default();
+    let mut files = Vec::new();
+    let mut tracks = Vec::new();
+    for (index, track) in plan.tracks.iter().enumerate() {
+        let relative_path = namer.filename(plan, index, extension);
+        files.push(relative_path.clone());
+        let artwork_path = planned_artwork_path(plan, index);
+        if let Some(path) = &artwork_path {
+            if !files.contains(path) {
+                files.push(path.clone());
+            }
+        }
+        tracks.push(ExportPreviewTrack {
+            relative_path,
+            metadata: track.metadata.clone(),
+            artwork_path,
+            extension_provisional: provisional,
+        });
+    }
+    files.extend(["manifest.json".into(), "playlist.m3u".into()]);
+    let mut warnings = Vec::new();
+    if provisional {
+        warnings.push(match plan.format {
+            AudioFormat::Compatible => "Audio extensions are provisional: AAC and ALAC become .m4a; other sources become .mp3. Final names are confirmed after download.".into(),
+            _ => "Audio extensions and supported embedded tags depend on the source codec. Final names are confirmed after download; WAV omits album artist and disc number.".into(),
+        });
+    }
+    if tracks.iter().any(|track| track.artwork_path.is_some()) {
+        warnings.push("Artwork is included when available. Embedding depends on the output container; WAV keeps the image as a separate file.".into());
+    }
+    Ok(ExportPreview {
+        root_name: sanitize_component(&plan.title),
+        output_kind: plan.output_kind,
+        tracks,
+        files,
+        warnings,
+    })
+}
+
 // yt-dlp's media URLs can expire or fail on one server. Re-extract the original
 // URL on a bounded retry, keeping its partial download and completed receipts.
 fn transient_download_failure(error: &EngineError) -> bool {
@@ -430,6 +534,130 @@ pub fn available_archive_path(output: &Path) -> PathBuf {
     candidate
 }
 
+pub fn available_folder_path(output: &Path) -> PathBuf {
+    let name = output.file_name().unwrap_or_default().to_string_lossy();
+    let mut candidate = output.to_owned();
+    let mut number = 2;
+    while candidate.symlink_metadata().is_ok() {
+        candidate = output.with_file_name(format!("{name} ({number})"));
+        number += 1;
+    }
+    candidate
+}
+
+fn validate_bundle_entry(relative: &str) -> Result<()> {
+    if relative.is_empty()
+        || relative.contains(['\\', ':'])
+        || relative
+            .split('/')
+            .any(|part| part.is_empty() || matches!(part, "." | ".."))
+    {
+        return Err(EngineError::Invalid("Unsafe collection entry".into()));
+    }
+    Ok(())
+}
+
+// Plain POSIX rename can replace an empty directory created after our name
+// check. Use the platform's atomic no-replace operation, including for dangling
+// links, and retry only collisions. Never publish via a partially copied final
+// directory, even on a filesystem that does not support this operation.
+fn publish_directory(source: &Path, destination: &Path) -> std::io::Result<()> {
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
+    {
+        use std::{ffi::CString, os::unix::ffi::OsStrExt};
+        let source = CString::new(source.as_os_str().as_bytes())?;
+        let destination = CString::new(destination.as_os_str().as_bytes())?;
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let result = unsafe {
+            libc::renameat2(
+                libc::AT_FDCWD,
+                source.as_ptr(),
+                libc::AT_FDCWD,
+                destination.as_ptr(),
+                libc::RENAME_NOREPLACE,
+            )
+        };
+        #[cfg(target_os = "macos")]
+        let result =
+            unsafe { libc::renamex_np(source.as_ptr(), destination.as_ptr(), libc::RENAME_EXCL) };
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
+    #[cfg(windows)]
+    {
+        // Windows directory renames fail when the destination already exists.
+        fs::rename(source, destination)
+    }
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        windows
+    )))]
+    {
+        let _ = (source, destination);
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "Atomic folder publication is not supported on this platform.",
+        ))
+    }
+}
+
+pub fn write_folder(
+    files: &[(String, PathBuf)],
+    output: &Path,
+    cancel: &Cancellation,
+) -> Result<PathBuf> {
+    cancel.check()?;
+    let parent = output
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let temporary = tempfile::Builder::new()
+        .prefix(".jacket-export-")
+        .tempdir_in(parent)?;
+    for (relative, path) in files {
+        cancel.check()?;
+        validate_bundle_entry(relative)?;
+        let target = temporary.path().join(relative);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut input = fs::File::open(path)?;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)?;
+        let mut buffer = [0; 65536];
+        loop {
+            cancel.check()?;
+            let count = input.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            file.write_all(&buffer[..count])?;
+        }
+        file.sync_all()?;
+    }
+    loop {
+        cancel.check()?;
+        let destination = available_folder_path(output);
+        match publish_directory(temporary.path(), &destination) {
+            Ok(()) => return Ok(destination),
+            Err(error)
+                if error.kind() == std::io::ErrorKind::AlreadyExists
+                    || destination.symlink_metadata().is_ok() =>
+            {
+                continue;
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+
 pub fn write_archive(
     root_name: &str,
     files: &[(String, PathBuf)],
@@ -450,12 +678,7 @@ pub fn write_archive(
             cancel.check()?;
             // Every name is generated internally; preserve that invariant if
             // other engine callers start providing file lists later.
-            if relative.starts_with('/')
-                || relative.split('/').any(|part| part == "..")
-                || relative.contains('\\')
-            {
-                return Err(EngineError::Invalid("Unsafe archive entry".into()));
-            }
+            validate_bundle_entry(relative)?;
             writer.start_file(
                 format!("{}/{relative}", sanitize_component(root_name)),
                 options,
@@ -496,17 +719,62 @@ pub fn export_archive(
     output: &Path,
     workdir: &Path,
     cancel: &Cancellation,
-    mut emit: impl FnMut(ProgressEvent),
+    emit: impl FnMut(ProgressEvent),
 ) -> Result<ExportResult> {
-    if plan.tracks.is_empty() {
-        return Err(EngineError::Invalid("Select at least one track.".into()));
+    let mut plan = plan.clone();
+    plan.output_kind = OutputKind::Zip;
+    export_collection(tools, &plan, output, workdir, cancel, emit)
+}
+
+pub fn export_collection(
+    tools: &Toolchain,
+    plan: &ExportPlan,
+    output: &Path,
+    workdir: &Path,
+    cancel: &Cancellation,
+    emit: impl FnMut(ProgressEvent),
+) -> Result<ExportResult> {
+    validate_plan(plan)?;
+    if matches!(plan.artwork_mode, ArtworkMode::Shared)
+        && plan.shared_artwork_asset.is_some()
+        && plan.shared_artwork_path.is_none()
+    {
+        return Err(EngineError::Invalid(
+            "The imported cover must be resolved by Jacket before export.".into(),
+        ));
     }
-    validate_source_url(&plan.source_url)?;
+    let prepared = prepare_bundle(tools, plan, workdir, cancel, emit)?;
+    let output = match plan.output_kind {
+        OutputKind::Zip => write_archive(&plan.title, &prepared.files, output, cancel)?,
+        OutputKind::Folder => write_folder(&prepared.files, output, cancel)?,
+    };
+    Ok(ExportResult {
+        playlist_path: (plan.output_kind == OutputKind::Folder)
+            .then(|| output.join("playlist.m3u").to_string_lossy().into_owned()),
+        output_path: output.to_string_lossy().into_owned(),
+        output_kind: plan.output_kind,
+        track_count: plan.tracks.len(),
+        warnings: prepared.warnings,
+    })
+}
+
+struct PreparedBundle {
+    files: Vec<(String, PathBuf)>,
+    warnings: Vec<String>,
+}
+
+fn prepare_bundle(
+    tools: &Toolchain,
+    plan: &ExportPlan,
+    workdir: &Path,
+    cancel: &Cancellation,
+    mut emit: impl FnMut(ProgressEvent),
+) -> Result<PreparedBundle> {
     let total = plan.tracks.len();
     let bundle = workdir.join("bundle");
     fs::create_dir_all(&bundle)?;
     let mut files = Vec::new();
-    let mut names = std::collections::HashSet::new();
+    let mut namer = TrackNamer::default();
     let mut tracks = Vec::new();
     let mut warnings = Vec::new();
     let mut playlist = String::from("#EXTM3U\n");
@@ -531,30 +799,27 @@ pub fn export_archive(
         })?;
         let source_codec = codec(tools, &acquired, cancel)?;
         let (ext, _) = target(&source_codec, plan.format)?;
-        let prefix = if plan.mode == CollectionMode::Album {
-            track.metadata.track_number.unwrap_or((index + 1) as u32)
-        } else {
-            (index + 1) as u32
-        };
-        // Include a unique ordinal in artwork paths; repeated playlist entries
-        // and duplicate track titles remain distinct and cannot overwrite.
-        let stem = format!(
-            "{:02} - {}",
-            prefix,
-            sanitize_component(&track.metadata.title)
-        );
-        let mut filename = format!("{stem}.{ext}");
-        let mut duplicate = 2;
-        while !names.insert(filename.to_lowercase()) {
-            filename = format!("{stem} ({duplicate}).{ext}");
-            duplicate += 1;
-        }
+        let filename = namer.filename(plan, index, ext);
         let chosen_artwork = match plan.artwork_mode {
             ArtworkMode::None => None,
             ArtworkMode::Shared => plan.shared_artwork_url.as_deref(),
             ArtworkMode::PerTrack => track.artwork_url.as_deref(),
         };
-        let cover = if let Some(url) = chosen_artwork {
+        let cover = if matches!(plan.artwork_mode, ArtworkMode::Shared)
+            && plan.shared_artwork_asset.is_some()
+        {
+            match plan
+                .shared_artwork_path
+                .as_ref()
+                .filter(|path| path.is_file())
+            {
+                Some(path) => Some(path.clone()),
+                None => {
+                    warnings.push(format!("Artwork unavailable for {}.", track.metadata.title));
+                    None
+                }
+            }
+        } else if let Some(url) = chosen_artwork {
             match artwork(tools, url, &workdir.join("images"), cancel) {
                 Ok(path) => Some(path),
                 Err(EngineError::Cancelled) => return Err(EngineError::Cancelled),
@@ -586,11 +851,8 @@ pub fn export_archive(
             cancel,
         )?;
         let artwork_path = if let Some(cover) = &cover {
-            let relative = if matches!(plan.artwork_mode, ArtworkMode::Shared) {
-                "cover.jpg".into()
-            } else {
-                format!("artwork/{:02}.jpg", index + 1)
-            };
+            let relative = planned_artwork_path(plan, index)
+                .expect("Selected artwork must have a planned collection path");
             if !files.iter().any(|(name, _)| name == &relative) {
                 files.push((relative.clone(), cover.clone()));
             }
@@ -644,21 +906,232 @@ pub fn export_archive(
     ]);
     emit(ProgressEvent {
         stage: "packaging".into(),
-        message: "Building your audio archive".into(),
+        message: match plan.output_kind {
+            OutputKind::Zip => "Building your audio archive".into(),
+            OutputKind::Folder => "Saving your audio folder".into(),
+        },
         completed: total,
         total,
     });
-    let output = write_archive(&plan.title, &files, output, cancel)?;
-    Ok(ExportResult {
-        output_path: output.to_string_lossy().into_owned(),
-        track_count: total,
-        warnings,
-    })
+    Ok(PreparedBundle { files, warnings })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fixture_plan() -> ExportPlan {
+        let track = Track {
+            id: "fixture".into(),
+            source_url: "https://www.youtube.com/watch?v=fixture".into(),
+            uploader: String::new(),
+            duration: None,
+            artwork_url: None,
+            source_metadata: Metadata {
+                title: "Original".into(),
+                ..Metadata::default()
+            },
+            metadata: Metadata {
+                title: "Björk / Live".into(),
+                album: "Reviewed album".into(),
+                track_number: Some(7),
+                ..Metadata::default()
+            },
+        };
+        ExportPlan {
+            title: "../Album".into(),
+            source_url: track.source_url.clone(),
+            mode: CollectionMode::Album,
+            format: AudioFormat::Mp3,
+            artwork_mode: ArtworkMode::Shared,
+            shared_artwork_url: None,
+            shared_artwork_asset: Some("opaque-cover".into()),
+            shared_artwork_path: None,
+            output_kind: OutputKind::Folder,
+            auth: AuthOptions::default(),
+            tracks: vec![track.clone(), track],
+        }
+    }
+
+    #[test]
+    fn preview_preserves_occurrences_effective_tags_and_canonical_names() {
+        let plan = fixture_plan();
+        let preview = preview_export(&plan).unwrap();
+        assert_eq!(preview.root_name, ".._Album");
+        assert_eq!(preview.output_kind, OutputKind::Folder);
+        assert_eq!(preview.tracks.len(), 2);
+        assert_eq!(preview.tracks[0].relative_path, "07 - Björk _ Live.mp3");
+        assert_eq!(preview.tracks[1].relative_path, "07 - Björk _ Live (2).mp3");
+        assert_eq!(preview.tracks[0].metadata.album, "Reviewed album");
+        assert!(!preview.tracks[0].extension_provisional);
+        assert_eq!(preview.tracks[0].artwork_path.as_deref(), Some("cover.jpg"));
+        assert_eq!(
+            preview.files.iter().filter(|p| *p == "cover.jpg").count(),
+            1
+        );
+        assert!(preview.files.contains(&"playlist.m3u".into()));
+        assert_eq!(plan.tracks[0].source_metadata.title, "Original");
+    }
+
+    #[test]
+    fn preview_marks_unknown_codec_dependent_names_and_rejects_bad_sources() {
+        let mut plan = fixture_plan();
+        for format in [AudioFormat::Compatible, AudioFormat::Preserve] {
+            plan.format = format;
+            let preview = preview_export(&plan).unwrap();
+            assert!(preview
+                .tracks
+                .iter()
+                .all(|track| track.extension_provisional));
+            assert!(preview.warnings[0].contains("after download"));
+        }
+        plan.tracks[1].source_url = "file:///private/source".into();
+        assert!(preview_export(&plan).is_err());
+    }
+
+    #[test]
+    fn codec_discovery_does_not_change_planned_duplicate_suffixes_or_source_order() {
+        let mut plan = fixture_plan();
+        plan.format = AudioFormat::Preserve;
+        plan.tracks[0].metadata.disc_number = Some(1);
+        plan.tracks[1].metadata.disc_number = Some(2);
+        let preview = preview_export(&plan).unwrap();
+        let mut namer = TrackNamer::default();
+        for (index, extension) in ["m4a", "opus"].into_iter().enumerate() {
+            let filename = namer.filename(&plan, index, extension);
+            assert_eq!(
+                filename.strip_suffix(extension).unwrap(),
+                preview.tracks[index]
+                    .relative_path
+                    .strip_suffix("audio")
+                    .unwrap()
+            );
+            assert_eq!(
+                preview.tracks[index].metadata.disc_number,
+                Some((index + 1) as u32)
+            );
+        }
+    }
+
+    #[test]
+    fn folder_delivery_matches_zip_entries_and_preserves_dotted_folder_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        fs::write(&source, b"same bytes").unwrap();
+        let files = vec![
+            ("01 - Song.mp3".into(), source.clone()),
+            ("artwork/01.jpg".into(), source),
+        ];
+        let output = dir.path().join("Album.deluxe");
+        fs::create_dir(&output).unwrap();
+        fs::write(output.join("keep"), b"original").unwrap();
+        let saved = write_folder(&files, &output, &Cancellation::default()).unwrap();
+        assert_eq!(saved, dir.path().join("Album.deluxe (2)"));
+        assert_eq!(fs::read(output.join("keep")).unwrap(), b"original");
+        let zip = dir.path().join("output.zip");
+        write_archive("Album", &files, &zip, &Cancellation::default()).unwrap();
+        let mut archive = zip::ZipArchive::new(fs::File::open(zip).unwrap()).unwrap();
+        for (relative, _) in &files {
+            let mut expected = Vec::new();
+            archive
+                .by_name(&format!("Album/{relative}"))
+                .unwrap()
+                .read_to_end(&mut expected)
+                .unwrap();
+            assert_eq!(fs::read(saved.join(relative)).unwrap(), expected);
+        }
+        assert!(!fs::read_dir(dir.path()).unwrap().any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".jacket-export-")));
+    }
+
+    #[test]
+    fn folder_delivery_cancellation_and_unsafe_paths_never_publish() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        fs::write(&source, b"audio").unwrap();
+        let output = dir.path().join("Album");
+        let cancel = Cancellation::default();
+        cancel.cancel();
+        assert!(matches!(
+            write_folder(&[("song.mp3".into(), source.clone())], &output, &cancel),
+            Err(EngineError::Cancelled)
+        ));
+        for relative in ["../escape", "/absolute", "artwork/../escape", "C:/escape"] {
+            assert!(write_folder(
+                &[(relative.into(), source.clone())],
+                &output,
+                &Cancellation::default()
+            )
+            .is_err());
+        }
+        assert!(!output.exists());
+        assert_eq!(fs::read(&source).unwrap(), b"audio");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn folder_publication_does_not_replace_a_directory_created_after_name_selection() {
+        let dir = tempfile::tempdir().unwrap();
+        let staging = dir.path().join("staging");
+        let output = dir.path().join("Album");
+        fs::create_dir(&staging).unwrap();
+        fs::write(staging.join("song"), b"audio").unwrap();
+        assert_eq!(available_folder_path(&output), output);
+        // Simulate another process winning after the availability check. Even
+        // an empty directory must remain untouched by the publication syscall.
+        fs::create_dir(&output).unwrap();
+        assert!(publish_directory(&staging, &output).is_err());
+        assert!(output.is_dir());
+        assert_eq!(fs::read_dir(output).unwrap().count(), 0);
+        assert_eq!(fs::read(staging.join("song")).unwrap(), b"audio");
+    }
+
+    #[test]
+    fn simultaneous_folder_exports_choose_distinct_complete_destinations() {
+        use std::sync::{Arc, Barrier};
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        fs::write(&source, b"audio").unwrap();
+        let barrier = Arc::new(Barrier::new(4));
+        let workers: Vec<_> = (0..4)
+            .map(|_| {
+                let barrier = barrier.clone();
+                let source = source.clone();
+                let output = dir.path().join("Album");
+                thread::spawn(move || {
+                    barrier.wait();
+                    write_folder(
+                        &[("song.mp3".into(), source)],
+                        &output,
+                        &Cancellation::default(),
+                    )
+                    .unwrap()
+                })
+            })
+            .collect();
+        let destinations: std::collections::HashSet<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect();
+        assert_eq!(destinations.len(), 4);
+        for output in destinations {
+            assert_eq!(fs::read(output.join("song.mp3")).unwrap(), b"audio");
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn folder_names_skip_dangling_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("Album");
+        std::os::unix::fs::symlink(dir.path().join("missing"), &output).unwrap();
+        let saved = write_folder(&[], &output, &Cancellation::default()).unwrap();
+        assert_eq!(saved, dir.path().join("Album (2)"));
+        assert!(output.symlink_metadata().unwrap().file_type().is_symlink());
+    }
 
     #[test]
     fn sha256_keeps_the_existing_lowercase_receipt_format() {

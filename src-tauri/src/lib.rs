@@ -11,12 +11,15 @@ use std::{
 };
 use tauri::{Emitter, Manager, State};
 
+mod artwork_assets;
 mod auth_session;
 mod browser_sessions;
 mod downloader_updates;
+mod export_completion;
 #[cfg(target_os = "linux")]
 mod linux_graphics;
 mod recovery;
+mod reviews;
 mod shell;
 
 #[derive(Default)]
@@ -211,6 +214,159 @@ struct Jobs {
     exported: Mutex<HashSet<PathBuf>>,
 }
 
+fn review_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("review-library"))
+}
+
+fn prune_review_artwork(app: &tauri::AppHandle) -> Result<(), String> {
+    let root = review_root(app)?;
+    let mut retained =
+        recovery::artwork_asset_ids(&jobs_root(app)?).map_err(|error| error.to_string())?;
+    if let Some(draft) = app.state::<reviews::Store>().load(&root.join("draft"))? {
+        if let Some(id) = draft.preferences.shared_artwork_asset {
+            retained.insert(id);
+        }
+    }
+    artwork_assets::prune(&root.join("artwork"), &retained)?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn review_draft_load(app: tauri::AppHandle) -> Result<Option<reviews::ReviewDraft>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        export_completion::reconcile(
+            &app.state::<reviews::Store>(),
+            &review_root(&app)?.join("draft"),
+            &jobs_root(&app)?,
+        )?;
+        app.state::<reviews::Store>()
+            .load(&review_root(&app)?.join("draft"))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn review_draft_save(
+    app: tauri::AppHandle,
+    draft: reviews::ReviewDraft,
+) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<reviews::Store>()
+            .save(&review_root(&app)?.join("draft"), draft)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn review_draft_discard(
+    app: tauri::AppHandle,
+    session_id: String,
+    revision: u64,
+) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<reviews::Store>().discard(
+            &review_root(&app)?.join("draft"),
+            &session_id,
+            revision,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn import_artwork(
+    app: tauri::AppHandle,
+    path: String,
+    crop: Option<artwork_assets::Crop>,
+) -> Result<artwork_assets::Asset, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let tools = base_toolchain(&app).map_err(|error| error.to_string())?;
+        artwork_assets::import(
+            &review_root(&app)?.join("artwork"),
+            &tools,
+            std::path::Path::new(&path),
+            crop,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn crop_artwork(
+    app: tauri::AppHandle,
+    id: String,
+    crop: artwork_assets::Crop,
+) -> Result<artwork_assets::Asset, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let tools = base_toolchain(&app).map_err(|error| error.to_string())?;
+        artwork_assets::crop(&review_root(&app)?.join("artwork"), &tools, &id, crop)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn artwork_asset(app: tauri::AppHandle, id: String) -> Result<artwork_assets::Asset, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        artwork_assets::load(&review_root(&app)?.join("artwork"), &id)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+fn preview_export(plan: ExportPlan) -> Result<audio_engine::ExportPreview, String> {
+    audio_engine::preview_export(&plan).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn folder_destination(directory: String, title: String) -> Result<String, String> {
+    let directory = PathBuf::from(directory);
+    if !directory.is_absolute() || !directory.is_dir() {
+        return Err("Choose an available music folder.".into());
+    }
+    Ok(audio_engine::export::available_folder_path(
+        &directory.join(audio_engine::export::sanitize_component(&title)),
+    )
+    .to_string_lossy()
+    .into_owned())
+}
+
+#[tauri::command]
+fn open_export_playlist(output_path: String, jobs: State<Jobs>) -> Result<(), String> {
+    let root = PathBuf::from(output_path);
+    let exported = jobs.exported.lock().map_err(|error| error.to_string())?;
+    if !exported.contains(&root) || !root.is_dir() {
+        return Err("This exported folder is no longer available.".into());
+    }
+    let playlist = root.join("playlist.m3u");
+    if !playlist.is_file() {
+        return Err("The exported playlist is no longer available.".into());
+    }
+    drop(exported);
+    #[cfg(target_os = "macos")]
+    let status = Command::new("open").arg(&playlist).status();
+    #[cfg(target_os = "windows")]
+    let status = Command::new("explorer").arg(&playlist).status();
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let status = Command::new("xdg-open").arg(&playlist).status();
+    if !status.map_err(|error| error.to_string())?.success() {
+        return Err(
+            "Choose an audio player that supports M3U playlists, then open the playlist again."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 fn browser_locations(app: &tauri::AppHandle) -> Result<browser_sessions::Locations, String> {
     Ok(browser_sessions::Locations::current(
         app.path()
@@ -338,19 +494,31 @@ async fn session_action(
 fn reveal_archive(output_path: String, jobs: State<Jobs>) -> Result<(), String> {
     let path = PathBuf::from(output_path);
     let exported = jobs.exported.lock().map_err(|error| error.to_string())?;
-    if !exported.contains(&path) || !path.is_file() {
+    if !exported.contains(&path) || (!path.is_file() && !path.is_dir()) {
         return Err("This archive is no longer available at the saved location.".into());
     }
     drop(exported);
     #[cfg(target_os = "macos")]
-    let status = Command::new("open").arg("-R").arg(&path).status();
+    let status = if path.is_dir() {
+        Command::new("open").arg(&path).status()
+    } else {
+        Command::new("open").arg("-R").arg(&path).status()
+    };
     #[cfg(target_os = "windows")]
-    let status = Command::new("explorer")
-        .arg(format!("/select,{}", path.display()))
-        .status();
+    let status = if path.is_dir() {
+        Command::new("explorer").arg(&path).status()
+    } else {
+        Command::new("explorer")
+            .arg(format!("/select,{}", path.display()))
+            .status()
+    };
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let status = Command::new("xdg-open")
-        .arg(path.parent().ok_or("Archive folder is unavailable")?)
+        .arg(if path.is_dir() {
+            path.as_path()
+        } else {
+            path.parent().ok_or("Export folder is unavailable")?
+        })
         .status();
     let status = status.map_err(|error| error.to_string())?;
     if !status.success() {
@@ -539,13 +707,28 @@ fn start_export(
     plan: ExportPlan,
     output_path: String,
     job_id: String,
+    review_identity: Option<reviews::CompletionIdentity>,
     jobs: State<Jobs>,
 ) -> Result<(), String> {
+    if let Some(identity) = &review_identity {
+        identity.validate()?;
+    }
     let mut plan = plan;
     plan.auth = browser_sessions::resolve(&browser_locations(&app)?, &plan.auth)?;
     let output = PathBuf::from(output_path);
-    if !output.is_absolute() || output.extension().and_then(|s| s.to_str()) != Some("zip") {
-        return Err("Choose an absolute .zip destination using the save dialog.".into());
+    if !output.is_absolute()
+        || (plan.output_kind == audio_engine::OutputKind::Zip
+            && output.extension().and_then(|s| s.to_str()) != Some("zip"))
+    {
+        return Err("Choose an available destination using the save dialog.".into());
+    }
+    if matches!(plan.artwork_mode, audio_engine::ArtworkMode::Shared) {
+        if let Some(id) = &plan.shared_artwork_asset {
+            plan.shared_artwork_path = Some(artwork_assets::resolve(
+                &review_root(&app)?.join("artwork"),
+                id,
+            )?);
+        }
     }
     if !recovery::valid_job_id(&job_id) {
         return Err("Invalid job identifier".into());
@@ -558,6 +741,7 @@ fn start_export(
         plan.clone(),
         output.to_string_lossy().into_owned(),
     );
+    record.review_identity = review_identity;
     let cancel = Cancellation::default();
     {
         let mut active = jobs.active.lock().map_err(|error| error.to_string())?;
@@ -587,7 +771,7 @@ fn start_export(
                 runtime_plan.auth = handoff.auth.clone();
             }
             std::fs::create_dir_all(&workdir)?;
-            let result = audio_engine::export_archive(
+            let result = audio_engine::export_collection(
                 &tools,
                 &runtime_plan,
                 &output,
@@ -620,12 +804,23 @@ fn start_export(
             result
         })();
         let (stage, result, error) = match outcome {
-            Ok(result) => {
-                record.progress.stage = "complete".into();
-                record.progress.completed = plan.tracks.len();
-                record.output_path = result.output_path.clone();
-                let _ = record.save(&workdir);
-                let _ = std::fs::remove_dir_all(&workdir);
+            Ok(mut result) => {
+                match review_root(&app) {
+                    Ok(root) => export_completion::finish(
+                        &app.state::<reviews::Store>(),
+                        &root.join("draft"),
+                        &workdir,
+                        &mut record,
+                        &mut result,
+                    ),
+                    Err(_) => {
+                        record.progress.stage = "complete".into();
+                        record.progress.completed = plan.tracks.len();
+                        record.output_path = result.output_path.clone();
+                        let _ = record.save(&workdir);
+                        result.warnings.push("Your files were saved, but Jacket could not clear the unfinished review. Cleanup will be retried when Jacket opens again.".into());
+                    }
+                }
                 if let Ok(mut exported) = app.state::<Jobs>().exported.lock() {
                     exported.insert(PathBuf::from(&result.output_path));
                 }
@@ -655,7 +850,11 @@ fn start_export(
                 progress: ProgressEvent {
                     stage: stage.into(),
                     message: if stage == "complete" {
-                        "Your archive is ready".into()
+                        if plan.output_kind == audio_engine::OutputKind::Folder {
+                            "Your music folder is ready".into()
+                        } else {
+                            "Your archive is ready".into()
+                        }
                     } else {
                         "Export stopped".into()
                     },
@@ -683,7 +882,18 @@ pub fn run() {
         .manage(UpdateControl::default())
         .manage(shell::Shell::default())
         .manage(auth_session::Control::default())
+        .manage(reviews::Store::default())
         .setup(|app| {
+            if let (Ok(root), Ok(jobs)) = (review_root(app.handle()), jobs_root(app.handle())) {
+                let _ = export_completion::reconcile(
+                    &app.state::<reviews::Store>(),
+                    &root.join("draft"),
+                    &jobs,
+                );
+            }
+            // Before the frontend can import, retain every draft/job asset.
+            // An unreadable inventory leaves all assets intact.
+            let _ = prune_review_artwork(app.handle());
             // A failed cleanup is surfaced on session access, never blocks public use.
             if let Ok(root) = session_root(app.handle()) {
                 let _ = auth_session::startup(&root);
@@ -710,6 +920,15 @@ pub fn run() {
             archive_destination,
             pending_export,
             dismiss_recovery,
+            review_draft_load,
+            review_draft_save,
+            review_draft_discard,
+            import_artwork,
+            crop_artwork,
+            artwork_asset,
+            preview_export,
+            folder_destination,
+            open_export_playlist,
             check_downloader_update,
             update_downloader,
             restore_downloader,

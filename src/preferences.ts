@@ -15,6 +15,8 @@ export interface ExportPreferences {
   format: AudioFormat;
   artworkMode: 'perTrack' | 'shared' | 'none';
   sharedArtwork: string | null;
+  sharedArtworkAsset: string | null;
+  outputKind: 'zip' | 'folder';
 }
 
 export function readPreference(key: string): string | null {
@@ -83,6 +85,8 @@ export function recoveryPreferences(plan: ExportPlan): ExportPreferences {
     year: shared(plan.tracks.map((track) => track.metadata.releaseYear)),
     artworkMode: plan.artworkMode,
     sharedArtwork: plan.sharedArtworkUrl,
+    sharedArtworkAsset: plan.sharedArtworkAsset ?? null,
+    outputKind: plan.outputKind ?? 'zip',
   };
 }
 
@@ -122,6 +126,8 @@ export function inspectionPreferences(
       value.artworkUrl ||
       value.tracks.find((track) => track.artworkUrl)?.artworkUrl ||
       null,
+    sharedArtworkAsset: null,
+    outputKind: 'zip',
   };
 }
 

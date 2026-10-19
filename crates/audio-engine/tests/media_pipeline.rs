@@ -9,11 +9,22 @@ use sha2::{Digest, Sha256};
 use std::{fs, io::Read, path::Path, process::Command};
 
 fn tools() -> Toolchain {
+    let offline_downloader =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/offline-media-tests-must-not-download");
     if let Some(resources) = std::env::var_os("AUDIO_DL_TEST_RESOURCES") {
-        return Toolchain::discover_with_resources(Path::new(&resources))
+        let mut tools = Toolchain::discover_with_resources(Path::new(&resources))
             .expect("Provide a complete bundled test runtime");
+        tools.yt_dlp = offline_downloader;
+        return tools;
     }
-    Toolchain::discover().expect("Install yt-dlp and FFmpeg to run the media integration tests")
+    // Every export fixture seeds completed receipts. A downloader must never
+    // run in this offline suite; an accidental cache miss fails explicitly.
+    Toolchain {
+        yt_dlp: offline_downloader,
+        ffmpeg: process::find_tool("ffmpeg").expect("Install FFmpeg to run media tests"),
+        ffprobe: process::find_tool("ffprobe").expect("Install ffprobe to run media tests"),
+        node: None,
+    }
 }
 
 fn make_audio(tools: &Toolchain, path: &Path, codec: &str) {
@@ -141,7 +152,7 @@ fn make_cover(tools: &Toolchain, path: &Path) {
 }
 
 #[test]
-#[ignore = "Requires FFmpeg, yt-dlp, and Python with Mutagen"]
+#[ignore = "Requires FFmpeg and Python with Mutagen"]
 fn physical_tags_and_cover_blocks_follow_each_container_and_keep_audio_payloads() {
     let tools = tools();
     let dir = tempfile::tempdir().unwrap();
@@ -254,7 +265,7 @@ fn physical_tags_and_cover_blocks_follow_each_container_and_keep_audio_payloads(
 }
 
 #[test]
-#[ignore = "Requires FFmpeg, yt-dlp, and Python with Mutagen"]
+#[ignore = "Requires FFmpeg and Python with Mutagen"]
 fn clearing_music_tags_and_artwork_does_not_resurrect_source_metadata() {
     let tools = tools();
     let dir = tempfile::tempdir().unwrap();
@@ -346,7 +357,7 @@ fn clearing_music_tags_and_artwork_does_not_resurrect_source_metadata() {
 }
 
 #[test]
-#[ignore = "Requires FFmpeg, yt-dlp, and Python with Mutagen"]
+#[ignore = "Requires FFmpeg and Python with Mutagen"]
 fn wav_export_warns_and_manifest_separates_requested_and_embedded_fields() {
     let tools = tools();
     let dir = tempfile::tempdir().unwrap();
@@ -380,6 +391,9 @@ fn wav_export_warns_and_manifest_separates_requested_and_embedded_fields() {
         format: AudioFormat::Preserve,
         artwork_mode: ArtworkMode::None,
         shared_artwork_url: None,
+        shared_artwork_asset: None,
+        shared_artwork_path: None,
+        output_kind: OutputKind::Zip,
         auth: AuthOptions::default(),
         tracks: vec![track],
     };
@@ -453,7 +467,7 @@ fn tags() -> Metadata {
 }
 
 #[test]
-#[ignore = "Requires locally installed FFmpeg and yt-dlp"]
+#[ignore = "Requires locally installed FFmpeg"]
 fn compatible_output_preserves_aac_and_embeds_cover_and_real_tags() {
     let tools = tools();
     let dir = tempfile::tempdir().unwrap();
@@ -519,7 +533,7 @@ fn compatible_output_preserves_aac_and_embeds_cover_and_real_tags() {
 }
 
 #[test]
-#[ignore = "Requires locally installed FFmpeg and yt-dlp"]
+#[ignore = "Requires locally installed FFmpeg"]
 fn preserve_output_keeps_opus_and_does_not_invent_music_tags() {
     let tools = tools();
     let dir = tempfile::tempdir().unwrap();
@@ -551,7 +565,7 @@ fn preserve_output_keeps_opus_and_does_not_invent_music_tags() {
 }
 
 #[test]
-#[ignore = "Requires locally installed FFmpeg and yt-dlp"]
+#[ignore = "Requires locally installed FFmpeg"]
 fn archive_reuses_sources_preserves_repeats_and_records_original_metadata() {
     let tools = tools();
     let dir = tempfile::tempdir().unwrap();
@@ -589,6 +603,9 @@ fn archive_reuses_sources_preserves_repeats_and_records_original_metadata() {
         format: AudioFormat::Compatible,
         artwork_mode: ArtworkMode::None,
         shared_artwork_url: None,
+        shared_artwork_asset: None,
+        shared_artwork_path: None,
+        output_kind: OutputKind::Zip,
         auth: AuthOptions::default(),
         tracks: vec![track.clone(), track],
     };
@@ -637,4 +654,193 @@ fn archive_reuses_sources_preserves_repeats_and_records_original_metadata() {
         .read_to_string(&mut contents)
         .unwrap();
     assert!(contents.contains("07 - Björk _ Live (2).m4a"));
+}
+
+#[test]
+#[ignore = "Requires FFmpeg and Python with Mutagen"]
+fn folder_and_zip_exports_match_preview_and_embed_the_imported_cover_bytes() {
+    let tools = tools();
+    let dir = tempfile::tempdir().unwrap();
+    let url = "https://www.youtube.com/watch?v=fixture";
+    let source_dir = dir
+        .path()
+        .join("sources")
+        .join(hex::encode(Sha256::digest(url.as_bytes())));
+    fs::create_dir_all(&source_dir).unwrap();
+    let source = source_dir.join("source.mp3");
+    make_audio(&tools, &source, "libmp3lame");
+    fs::write(
+        source_dir.join("receipt.json"),
+        serde_json::to_vec(&source).unwrap(),
+    )
+    .unwrap();
+    let cover = dir.path().join("owned-cover.jpg");
+    make_cover(&tools, &cover);
+    let track = Track {
+        id: "fixture".into(),
+        source_url: url.into(),
+        uploader: String::new(),
+        duration: Some(0.25),
+        artwork_url: None,
+        source_metadata: Metadata::default(),
+        metadata: tags(),
+    };
+    let mut plan = ExportPlan {
+        title: "Imported artwork".into(),
+        source_url: url.into(),
+        mode: CollectionMode::Album,
+        format: AudioFormat::Mp3,
+        artwork_mode: ArtworkMode::Shared,
+        shared_artwork_url: None,
+        shared_artwork_asset: Some("opaque-imported-cover".into()),
+        shared_artwork_path: Some(cover.clone()),
+        output_kind: OutputKind::Folder,
+        auth: AuthOptions::default(),
+        tracks: vec![track.clone(), track],
+    };
+    let preview = preview_export(&plan).unwrap();
+    let folder = dir.path().join("Album");
+    let result = export_collection(
+        &tools,
+        &plan,
+        &folder,
+        dir.path(),
+        &Cancellation::default(),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(result.output_kind, OutputKind::Folder);
+    assert_eq!(result.output_path, folder.to_string_lossy());
+    assert_eq!(
+        result.playlist_path.as_deref(),
+        Some(folder.join("playlist.m3u").to_str().unwrap())
+    );
+    assert!(result.warnings.is_empty());
+    assert_eq!(
+        fs::read(folder.join("cover.jpg")).unwrap(),
+        fs::read(&cover).unwrap()
+    );
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(folder.join("manifest.json")).unwrap()).unwrap();
+    for (index, preview_track) in preview.tracks.iter().enumerate() {
+        assert_eq!(
+            manifest["tracks"][index]["relativePath"],
+            preview_track.relative_path
+        );
+        assert_eq!(manifest["tracks"][index]["embeddedArtwork"], true);
+        let physical = physical_tags(&folder.join(&preview_track.relative_path));
+        assert_eq!(
+            physical["pictures"][0]["sha256"],
+            hash_file(&cover).unwrap()
+        );
+    }
+    let playlist = fs::read_to_string(folder.join("playlist.m3u")).unwrap();
+    for track in &preview.tracks {
+        assert!(playlist.contains(&track.relative_path));
+    }
+    plan.output_kind = OutputKind::Zip;
+    let zip_path = dir.path().join("Album.zip");
+    let archive_result = export_collection(
+        &tools,
+        &plan,
+        &zip_path,
+        dir.path(),
+        &Cancellation::default(),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(archive_result.output_kind, OutputKind::Zip);
+    assert!(archive_result.playlist_path.is_none());
+    let mut archive = zip::ZipArchive::new(fs::File::open(zip_path).unwrap()).unwrap();
+    assert_eq!(archive.len(), preview.files.len());
+    for relative in preview.files {
+        let mut contents = Vec::new();
+        archive
+            .by_name(&format!("Imported artwork/{relative}"))
+            .unwrap()
+            .read_to_end(&mut contents)
+            .unwrap();
+        if relative.ends_with(".mp3") {
+            // Independent preparations can order equivalent ID3 frames
+            // differently. Compare the audio packets and physical tags rather
+            // than requiring byte-identical tag serialization across runs.
+            let current = dir.path().join("bundle").join(&relative);
+            assert_eq!(
+                hex::encode(Sha256::digest(&contents)),
+                hash_file(&current).unwrap()
+            );
+            assert_eq!(
+                physical_tags(&current),
+                physical_tags(&folder.join(&relative))
+            );
+            assert_eq!(
+                audio_payloads(&tools, &current),
+                audio_payloads(&tools, &folder.join(&relative))
+            );
+        } else if relative == "manifest.json" {
+            let mut zipped: Value = serde_json::from_slice(&contents).unwrap();
+            let mut original = manifest.clone();
+            for (zip_track, original_track) in zipped["tracks"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .zip(original["tracks"].as_array_mut().unwrap())
+            {
+                let audio_path = zip_track["relativePath"].as_str().unwrap();
+                assert_eq!(
+                    zip_track["sha256"],
+                    hash_file(&dir.path().join("bundle").join(audio_path)).unwrap()
+                );
+                zip_track["sha256"] = Value::Null;
+                original_track["sha256"] = Value::Null;
+            }
+            assert_eq!(zipped, original);
+        } else {
+            assert_eq!(
+                hex::encode(Sha256::digest(&contents)),
+                hash_file(&folder.join(relative)).unwrap()
+            );
+        }
+    }
+    // Cancellation after all audio is prepared must still publish no folder,
+    // and the original media receipts remain valid for the next attempt.
+    plan.output_kind = OutputKind::Folder;
+    let cancelled_destination = dir.path().join("Cancelled");
+    let cancel = Cancellation::default();
+    let outcome = export_collection(
+        &tools,
+        &plan,
+        &cancelled_destination,
+        dir.path(),
+        &cancel,
+        |event| {
+            if event.stage == "packaging" {
+                cancel.cancel();
+            }
+        },
+    );
+    assert!(matches!(outcome, Err(EngineError::Cancelled)));
+    assert!(!cancelled_destination.exists());
+    assert!(source.is_file());
+    assert!(source_dir.join("receipt.json").is_file());
+
+    // A changed retry must deliver only its current selected files, even when
+    // previous prepared audio remains beside the reusable source receipts.
+    plan.tracks.truncate(1);
+    plan.artwork_mode = ArtworkMode::None;
+    let retry_destination = dir.path().join("Retry");
+    let retry = export_collection(
+        &tools,
+        &plan,
+        &retry_destination,
+        dir.path(),
+        &Cancellation::default(),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(retry.track_count, 1);
+    assert!(retry_destination.join("07 - Björk _ Live.mp3").is_file());
+    assert!(!retry_destination.join("07 - Björk _ Live (2).mp3").exists());
+    assert!(!retry_destination.join("cover.jpg").exists());
+    assert_eq!(fs::read_dir(&retry_destination).unwrap().count(), 3);
 }

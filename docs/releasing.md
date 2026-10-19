@@ -117,6 +117,15 @@ For each advertised environment, test installation and launch, keyboard access, 
 - [ ] Verify successful-job cache cleanup and the documented cleanup instructions for retained jobs. Check startup and offline restart behavior.
 - [ ] Test managed downloader updating, bundled fallback, and local-install mode on each supported updater platform. Verify failed checks/transfers keep the usable downloader and activation waits for album jobs.
 
+### Collection finishing acceptance
+
+- [ ] At 600 × 600, edit checked tracks hidden by search, preview Keep/Set/Clear and literal title cleanup, apply once, and undo. Confirm inherited album fields remain clear and repeated entries stay distinct.
+- [ ] Import a JPEG/PNG through the picker and by dropping it into Artwork. Crop with the keyboard, cancel a crop, and confirm a cover. Move the original image, restart, and verify the selected cover and exported embedded bytes remain correct.
+- [ ] Restart before downloading and verify exact edits, cleared numbers, selection, format, artwork, and output kind. Check edits made after an export failure and the choice between a different saved review and unfinished export. Discard must not return after a delayed save.
+- [ ] Compare Preview files with ZIP and folder exports. Verify provisional extensions, metadata limitations, numbered destination collisions, cancellation without partial output, retry, Open folder, and Open playlist.
+- [ ] After a successful ZIP and folder export, restart and verify the completed review is absent. Before closing, check Save another copy and New download/Undo remain usable without restoring finished work to disk. New committed content edits should autosave again; output-option changes alone should stay session-local. Verify a delayed save cannot revive a completed review and cleanup failures preserve the actual output with a visible note.
+- [ ] Complete the five-person first-use evaluation: target four people finishing an imperfect album without help or subsequent tag editing in under five active minutes, excluding transfer time. Record observed results before making usability claims.
+
 ## Browser-session acceptance
 
 Make account-access claims only for tested OS/browser/profile combinations. Public exports and synthetic fixtures do not prove restricted-source access.
