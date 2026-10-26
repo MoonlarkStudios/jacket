@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<p align="center"><strong>From link to neatly packed.</strong><br>Turn YouTube albums and playlists into tagged audio, artwork, and a playlist—together in one ZIP.</p>
+<p align="center"><strong>From link to neatly packed.</strong><br>Turn YouTube albums and playlists into tagged audio, artwork, and a playlist—together in one ZIP or music folder.</p>
 
 <p align="center">
   <a href="#get-started">Get started</a> ·
@@ -18,14 +18,16 @@
 
 *The screenshots use Jacket’s built-in fictional example album. Browser preview downloads are disabled.*
 
-Jacket is a focused desktop app from [Moonlark Studios](https://github.com/MoonlarkStudios). Paste a YouTube or YouTube Music link, review the tracks and album details, and save a portable archive. Downloads and tagging run on your computer.
+Jacket is a focused desktop app from [Moonlark Studios](https://github.com/MoonlarkStudios). Paste a YouTube or YouTube Music link, review the tracks and album details, and save a portable archive or music folder. Downloads and tagging run on your computer.
 
 ## What you can do
 
-- **Review before downloading.** Select tracks, search a playlist, and correct titles, artists, album details, track numbers, disc numbers, and release years.
+- **Finish the details.** Select tracks and correct their metadata together. Preview reversible title cleanup, or edit individual tracks and album details.
 - **Keep albums organized.** Apply shared album metadata and artwork, or keep each playlist track’s own details. Repeated entries stay in order.
 - **Choose your audio format.** Use M4A / MP3 for compatibility, preserve supported source codecs, or choose MP3 throughout.
-- **Take the whole package.** Get tagged audio, available artwork, an M3U playlist, and a manifest with source details and file hashes.
+- **Bring your own cover.** Choose or drop a JPEG/PNG, crop it, and use it throughout an album. Jacket keeps its own copy.
+- **Preview and save.** Review the planned filenames and tags, then save a ZIP or a ready-to-play folder with artwork, an M3U playlist, and a manifest.
+- **Pick up unfinished work.** Edits and interrupted downloads survive a restart. Successful exports clear their saved working state; the files belong in your music folder or player.
 - **Recover interrupted downloads.** Retry with completed source downloads cached, or reopen Jacket to resume an unfinished export.
 - **Use public links without signing in.** Optionally select a browser profile for content your account can access.
 
@@ -69,8 +71,8 @@ Open `http://127.0.0.1:1420` and choose **Try example**. This preview lets you e
 1. Paste an HTTPS YouTube playlist, video, or YouTube Music album link into Jacket.
 2. Review the available tracks. Choose **Edit album details**, click a track’s edit button, or click the cover to change artwork.
 3. Open **Download options** to choose the format and artwork behavior.
-4. Choose **Download album…** or **Download playlist…**, then pick where to save the ZIP.
-5. When the archive is ready, reveal it in your file manager and extract it into your music folder.
+4. Choose **Preview files** to review the result. In **Download options**, choose **ZIP archive** or **Music folder**.
+5. Start the download and choose a destination. Folder exports can be opened immediately with **Open folder** or **Open playlist**; extract ZIP exports before playback.
 
 Existing archives are kept. If the filename is already taken, Jacket saves a numbered copy. Unavailable entries are reported before download; artwork failures produce a warning while allowing audio export to continue.
 

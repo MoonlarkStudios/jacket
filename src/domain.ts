@@ -1,6 +1,7 @@
 export type CollectionMode = 'album' | 'collection';
 export type AudioFormat = 'compatible' | 'preserve' | 'mp3';
 export type ArtworkMode = 'perTrack' | 'shared' | 'none';
+export type OutputKind = 'zip' | 'folder';
 export type Browser = 'chrome' | 'firefox' | 'safari' | 'edge';
 
 export interface Metadata {
@@ -48,6 +49,8 @@ export interface ExportResult {
   outputPath: string;
   trackCount: number;
   warnings: string[];
+  outputKind?: OutputKind;
+  playlistPath?: string | null;
 }
 
 export interface JobEvent {
@@ -67,12 +70,45 @@ export interface ExportPlan {
   format: AudioFormat;
   artworkMode: ArtworkMode;
   sharedArtworkUrl: string | null;
+  sharedArtworkAsset?: string | null;
+  outputKind?: OutputKind;
   auth: {
     browser: Browser | null;
     browserProfile?: string | null;
     managedSession?: string | null;
   };
   tracks: Track[];
+}
+
+export interface ReviewCompletionIdentity {
+  sessionId: string;
+  revision: number;
+}
+
+export interface ArtworkAsset {
+  id: string;
+  previewDataUrl: string;
+  width: number;
+  height: number;
+}
+
+export interface ArtworkCrop {
+  x: number;
+  y: number;
+  size: number;
+}
+
+export interface ExportPreview {
+  rootName: string;
+  outputKind: OutputKind;
+  tracks: {
+    relativePath: string;
+    metadata: Metadata;
+    artworkPath: string | null;
+    extensionProvisional: boolean;
+  }[];
+  files: string[];
+  warnings: string[];
 }
 
 export interface PendingExport {
@@ -86,6 +122,7 @@ export interface PendingExport {
     total: number;
   };
   error: string | null;
+  reviewIdentity?: ReviewCompletionIdentity | null;
 }
 
 export type DownloaderChannel = 'stable' | 'nightly';

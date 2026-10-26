@@ -276,3 +276,34 @@ test('restart recovery preserves a custom destination name, cleared fields, numb
     tracks.map((t) => t.metadata),
   );
 });
+
+test('fresh reviews default to ZIP while recovery retains imported artwork and folder output', () => {
+  const defaults = p.inspectionPreferences(
+    inspection([track('Artist')]),
+    'compatible',
+  );
+  assert.equal(defaults.outputKind, 'zip');
+  assert.equal(defaults.sharedArtworkAsset, null);
+  const oldPlan = {
+    title: 'Legacy archive',
+    mode: 'collection',
+    format: 'mp3',
+    artworkMode: 'shared',
+    sharedArtworkUrl: 'https://i.ytimg.com/vi/fixture/default.jpg',
+    tracks: [track('Artist')],
+  };
+  const legacy = p.recoveryPreferences(oldPlan);
+  assert.equal(legacy.outputKind, 'zip');
+  assert.equal(legacy.sharedArtworkAsset, null);
+  assert.equal(legacy.sharedArtwork, oldPlan.sharedArtworkUrl);
+  const imported = p.recoveryPreferences({
+    ...oldPlan,
+    outputKind: 'folder',
+    sharedArtworkAsset: 'a'.repeat(64),
+    sharedArtworkUrl: null,
+  });
+  assert.equal(imported.outputKind, 'folder');
+  assert.equal(imported.sharedArtworkAsset, 'a'.repeat(64));
+  assert.equal(imported.sharedArtwork, null);
+  assert.equal(imported.artworkMode, 'shared');
+});

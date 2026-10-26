@@ -1,13 +1,17 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import type {
+  ArtworkAsset,
+  ArtworkCrop,
   Browser,
   DownloaderChannel,
   DownloaderPreferences,
   DownloaderStatus,
   ExportPlan,
+  ExportPreview,
   Inspection,
   PendingExport,
+  ReviewCompletionIdentity,
 } from './domain';
 import {
   archiveDirectory,
@@ -15,6 +19,7 @@ import {
   readPreference,
   writePreference,
 } from './preferences';
+import type { ReviewDraft } from './reviewDraft';
 
 export const desktopAvailable = isTauri();
 
@@ -108,8 +113,14 @@ export function startExport(
   plan: ExportPlan,
   outputPath: string,
   jobId: string,
+  reviewIdentity: ReviewCompletionIdentity | null = null,
 ) {
-  return invoke<void>('start_export', { plan, outputPath, jobId });
+  return invoke<void>('start_export', {
+    plan,
+    outputPath,
+    jobId,
+    reviewIdentity,
+  });
 }
 
 export function cancelExport(jobId: string) {
@@ -128,6 +139,64 @@ export function dependencyStatus() {
 
 export function revealArchive(outputPath: string) {
   return invoke<void>('reveal_archive', { outputPath });
+}
+
+export async function chooseFolder(title: string) {
+  const parent = await open({
+    title: 'Choose a folder for your album',
+    directory: true,
+    multiple: false,
+    defaultPath: readPreference('save-directory') || undefined,
+  });
+  if (typeof parent !== 'string') return null;
+  const separator = parent.includes('\\') ? '\\' : '/';
+  writePreference(
+    'save-directory',
+    `${parent.replace(/[\\/]$/, '')}${separator}`,
+  );
+  return invoke<string>('folder_destination', { directory: parent, title });
+}
+
+export function previewExport(plan: ExportPlan) {
+  return invoke<ExportPreview>('preview_export', { plan });
+}
+
+export function openPlaylist(outputPath: string) {
+  return invoke<void>('open_export_playlist', { outputPath });
+}
+
+export async function chooseArtwork() {
+  const path = await open({
+    title: 'Choose cover artwork',
+    multiple: false,
+    directory: false,
+    filters: [{ name: 'Cover image', extensions: ['jpg', 'jpeg', 'png'] }],
+  });
+  return typeof path === 'string' ? importArtwork(path) : null;
+}
+
+export function importArtwork(path: string) {
+  return invoke<ArtworkAsset>('import_artwork', { path, crop: null });
+}
+
+export function cropArtwork(id: string, crop: ArtworkCrop) {
+  return invoke<ArtworkAsset>('crop_artwork', { id, crop });
+}
+
+export function artworkAsset(id: string) {
+  return invoke<ArtworkAsset>('artwork_asset', { id });
+}
+
+export function loadReviewDraft() {
+  return invoke<ReviewDraft | null>('review_draft_load');
+}
+
+export function saveReviewDraft(draft: ReviewDraft) {
+  return invoke<boolean>('review_draft_save', { draft });
+}
+
+export function discardReviewDraft(sessionId: string, revision: number) {
+  return invoke<boolean>('review_draft_discard', { sessionId, revision });
 }
 
 export function pendingExport() {

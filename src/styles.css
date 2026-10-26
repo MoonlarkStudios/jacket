@@ -109,6 +109,19 @@ button {
 .review-content > .review-undo {
   margin: 0 0 16px;
 }
+.review-persistence {
+  flex-shrink: 0;
+  margin-bottom: 12px;
+  padding: 0 2px;
+}
+.review-persistence > .mantine-Text-root {
+  flex: 1 1 240px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.review-persistence > button {
+  flex-shrink: 0;
+}
 .source-context {
   display: flex;
   align-items: center;
@@ -322,13 +335,21 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 12px;
-  gap: 16px;
+  padding: 8px 12px;
+  gap: 8px 16px;
+  flex-wrap: wrap;
   flex-shrink: 0;
   border-bottom: 1px solid #e5ddd0;
 }
+.track-toolbar > .mantine-Group-root {
+  flex: 1 1 350px;
+  min-width: 0;
+  row-gap: 8px;
+}
 .track-search {
   width: 190px;
+  min-width: 130px;
+  flex: 0 1 190px;
 }
 .track-search .mantine-Input-input {
   border: 0;
@@ -418,6 +439,24 @@ button {
 .export-summary {
   flex: 1;
   min-width: 0;
+}
+.preview-files {
+  display: block;
+  width: fit-content;
+  margin: 8px 0;
+}
+.file-preview-row {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--jacket-border);
+  border-radius: 8px;
+  background: var(--jacket-surface);
+  overflow-wrap: anywhere;
+}
+.file-preview-name {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .download-controls {
   display: flex;
@@ -710,7 +749,7 @@ button {
     margin: 0;
   }
   .track-toolbar {
-    padding: 0 6px;
+    padding: 8px 6px;
   }
   .track-row {
     padding: 9px 6px;
@@ -721,6 +760,7 @@ button {
   }
   .track-search {
     width: 135px;
+    flex-basis: 135px;
   }
   .export-footer {
     padding: 18px 6px 22px;
