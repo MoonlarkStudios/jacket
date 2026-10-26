@@ -8,43 +8,36 @@ const outline = JSON.parse(
   await readFile(new URL('./wordmark-outline.json', import.meta.url), 'utf8'),
 );
 const colors = {
-  ink: '#282725',
-  paper: '#F4EFE5',
-  copper: '#D47749',
-  groove: '#595B58',
+  ink: '#20221E',
+  paper: '#F3EFE5',
+  copper: '#D47746',
+  groove: '#B4C5A6',
+  tile: '#282B25',
   muted: '#787369',
 };
 const sleeve =
-  'M258 313H762Q774 313 774 325V463C710 485 678 537 678 600C678 663 710 715 774 737V861Q774 873 762 873H258Q246 873 246 861V325Q246 313 258 313Z';
-const rectBand = '<rect x="366" y="310" width="85" height="566" rx="3"/>';
+  'M276 344H718Q732 344 732 358V503Q732 510 726 514C682 537 657 575 657 618C657 661 682 699 726 722Q732 726 732 733V862Q732 876 718 876H276Q262 876 262 862V358Q262 344 276 344Z';
+const rectBand = '<rect x="367" y="344" width="44" height="532"/>';
+const grooves = (stroke = colors.groove, width = 24) =>
+  `<g fill="none" stroke="${stroke}" stroke-width="${width}" stroke-linecap="round"><path d="M780 433A186 186 0 0 1 780 803"/><path d="M780 499A120 120 0 0 1 780 737"/></g>`;
 const wrap = (title, desc, body, box = '0 0 1254 1254', w = 1254, h = 1254) =>
   `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="${box}" role="img" aria-labelledby="title desc"><title id="title">${title}</title><desc id="desc">${desc}</desc>${body}</svg>\n`;
-const defs = `<defs>
- <linearGradient id="tile" x1="120" y1="100" x2="1100" y2="1170" gradientUnits="userSpaceOnUse"><stop stop-color="#3C3D3C"/><stop offset=".44" stop-color="#2C2D2C"/><stop offset="1" stop-color="#222322"/></linearGradient>
- <linearGradient id="vinyl" x1="650" y1="345" x2="1010" y2="860" gradientUnits="userSpaceOnUse"><stop stop-color="#363735"/><stop offset="1" stop-color="#1F201F"/></linearGradient>
- <linearGradient id="sleeve" x1="246" y1="313" x2="774" y2="873" gradientUnits="userSpaceOnUse"><stop stop-color="#E08955"/><stop offset=".5" stop-color="#D47749"/><stop offset="1" stop-color="#C96C3E"/></linearGradient>
- <linearGradient id="paper" x1="366" y1="310" x2="451" y2="876" gradientUnits="userSpaceOnUse"><stop stop-color="#FFF9EF"/><stop offset=".6" stop-color="#F4EFE5"/><stop offset="1" stop-color="#E9E2D5"/></linearGradient>
- <radialGradient id="label" cx=".35" cy=".25" r=".85"><stop stop-color="#FFFCF5"/><stop offset="1" stop-color="#EEE8DC"/></radialGradient>
- <filter id="depth" x="-15%" y="-15%" width="140%" height="150%" color-interpolation-filters="sRGB"><feDropShadow dx="0" dy="10" stdDeviation="11" flood-color="#000" flood-opacity=".25"/></filter>
- <filter id="band-depth" x="-35%" y="-10%" width="200%" height="130%" color-interpolation-filters="sRGB"><feDropShadow dx="4" dy="4" stdDeviation="4" flood-color="#000" flood-opacity=".23"/></filter>
- <clipPath id="sleeve-clip"><path d="${sleeve}"/></clipPath>
-</defs>`;
-
 function flatSymbol(mode = 'color') {
   if (mode === 'mono')
-    return `<defs><mask id="knockout" maskUnits="userSpaceOnUse" x="206" y="286" width="850" height="614"><g fill="#fff"><circle cx="760" cy="600" r="266"/><path d="${sleeve}"/></g><g fill="#000">${rectBand}<circle cx="760" cy="600" r="86"/></g><circle cx="760" cy="600" r="16" fill="#fff"/><path d="M774 341V463M774 737V853" stroke="#000" stroke-width="9"/></mask></defs><rect x="206" y="286" width="850" height="614" fill="currentColor" mask="url(#knockout)"/>`;
-  const dark = mode === 'dark';
-  return `<circle cx="760" cy="600" r="266" fill="${dark ? '#4D504D' : colors.ink}"/><circle cx="760" cy="600" r="86" fill="${colors.paper}"/><circle cx="760" cy="600" r="16" fill="${colors.ink}"/><path d="${sleeve}" fill="${colors.copper}"/><g fill="${colors.paper}">${rectBand}</g>`;
+    return `<defs><mask id="knockout" maskUnits="userSpaceOnUse" x="206" y="286" width="850" height="614"><g fill="#fff"><circle cx="760" cy="618" r="250"/><path d="${sleeve}"/></g><g fill="#000">${rectBand}<circle cx="760" cy="618" r="18"/></g>${grooves('#000')}<path d="M732 368V503M732 733V868" stroke="#000" stroke-width="9"/></mask></defs><rect x="206" y="286" width="850" height="614" fill="currentColor" mask="url(#knockout)"/>`;
+  const edge = mode === 'dark' ? '#59614F' : colors.ink;
+  return `<circle cx="760" cy="618" r="250" fill="${colors.ink}" stroke="${edge}" stroke-width="3"/>${grooves()}<circle cx="760" cy="618" r="18" fill="${colors.paper}"/><path d="${sleeve}" fill="${colors.copper}"/><g fill="${colors.paper}">${rectBand}</g>`;
 }
 
 function icon(small = false) {
-  if (small)
-    return `<rect x="80" y="86" width="1094" height="1070" rx="174" fill="${colors.ink}" stroke="#686B66" stroke-width="9"/><circle cx="760" cy="600" r="266" fill="#484B47" stroke="#70746D" stroke-width="11"/><circle cx="760" cy="600" r="91" fill="#FFF9EF"/><circle cx="760" cy="600" r="22" fill="${colors.ink}"/><path d="${sleeve}" fill="${colors.copper}"/><rect x="364" y="310" width="89" height="566" rx="3" fill="#FFF9EF"/>`;
-  return `${defs}<rect x="80" y="86" width="1094" height="1070" rx="174" fill="url(#tile)" stroke="#4B4D49" stroke-width="3"/><g filter="url(#depth)"><circle cx="760" cy="600" r="266" fill="url(#vinyl)" stroke="#464843" stroke-width="4"/><circle cx="760" cy="600" r="197" fill="none" stroke="#74766C" stroke-opacity=".28" stroke-width="5"/><circle cx="760" cy="600" r="86" fill="url(#label)"/><circle cx="760" cy="600" r="16" fill="#232421"/><path d="${sleeve}" fill="url(#sleeve)" stroke="#EEA071" stroke-opacity=".48" stroke-width="2"/></g><g filter="url(#band-depth)"><rect x="366" y="310" width="85" height="566" rx="3" fill="url(#paper)" stroke="#FFFCF5" stroke-opacity=".55" stroke-width="2"/></g>`;
+  const band = small
+    ? '<rect x="365" y="344" width="48" height="532"/>'
+    : rectBand;
+  return `<rect x="130" y="132" width="996" height="990" rx="178" fill="${colors.tile}" stroke="#4A4F42" stroke-width="${small ? 6 : 2}"/><circle cx="760" cy="618" r="250" fill="${colors.ink}" stroke="#414839" stroke-width="${small ? 6 : 2}"/>${grooves(colors.groove, small ? 36 : 24)}<circle cx="760" cy="618" r="${small ? 22 : 18}" fill="${colors.paper}"/><path d="${sleeve}" fill="${colors.copper}"/><g fill="${colors.paper}">${band}</g>`;
 }
 
 const markDesc =
-  'An orange record sleeve, narrow ivory vertical packaging band, and a black record exposed at the right.';
+  'A copper record sleeve with a narrow cream band, a more exposed charcoal record, two broad sage grooves, and a cream center dot.';
 const out = async (name, body) => writeFile(path.join(root, 'svg', name), body);
 await Promise.all(
   ['svg', 'png', 'previews'].map((d) =>
@@ -56,11 +49,11 @@ await out(
   'jacket-app-icon-small.svg',
   wrap(
     'Jacket small app icon',
-    'Optically adjusted Jacket icon: wider band, brighter record edge, no groove or shadow.',
+    'Optically adjusted Jacket icon: two stronger sage grooves, a narrow cream band, and a larger center dot.',
     icon(true),
   ),
 );
-for (const size of [16, 32, 64, 128, 256, 512, 1024]) {
+for (const size of [16, 24, 32, 64, 128, 256, 512, 1024]) {
   await out(
     `jacket-icon-${size}.svg`,
     wrap(
@@ -175,22 +168,24 @@ await writeFile(
       },
       icon: {
         canvas: { width: 1254, height: 1254 },
-        tile: { x: 80, y: 86, width: 1094, height: 1070, radius: 174 },
-        sleeve: { x: 246, y: 313, width: 528, height: 560 },
-        band: { x: 366, y: 310, width: 85, height: 566, widthRatio: 85 / 528 },
+        tile: { x: 130, y: 132, width: 996, height: 990, radius: 178 },
+        sleeve: { x: 262, y: 344, width: 470, height: 532 },
+        band: { x: 367, y: 344, width: 44, height: 532, widthRatio: 44 / 470 },
         record: {
           centerX: 760,
-          centerY: 600,
-          radius: 266,
-          grooveRadius: 197,
-          labelRadius: 86,
+          centerY: 618,
+          radius: 250,
+          exposedDiameterRatio: (760 + 250 - 732) / 500,
+          grooveRadii: { outer: 186, inner: 120 },
+          grooveWidth: 24,
+          centerDotRadius: 18,
         },
         smallVariant: {
           maximumSize: 32,
-          bandWidth: 89,
-          labelRadius: 91,
-          holeRadius: 22,
-          grooves: 0,
+          bandWidth: 48,
+          centerDotRadius: 22,
+          grooves: 2,
+          grooveWidth: 36,
         },
       },
       usage: {
@@ -207,7 +202,7 @@ await writeFile(
 if (process.env.SHARP_MODULE) {
   const require = createRequire(import.meta.url);
   const sharp = require(process.env.SHARP_MODULE);
-  for (const size of [16, 32, 64, 128, 256, 512, 1024, 1254]) {
+  for (const size of [16, 24, 32, 64, 128, 256, 512, 1024, 1254]) {
     const file = path.join(
       root,
       'svg',
@@ -222,5 +217,58 @@ if (process.env.SHARP_MODULE) {
     .resize(1200, 400)
     .png()
     .toFile(path.join(root, 'png', 'jacket-logo-light.png'));
+
+  const preview = (width, height, body) =>
+    Buffer.from(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${body}</svg>`,
+    );
+  const label = (x, y, text, fill = colors.paper, size = 22) =>
+    `<text x="${x}" y="${y}" fill="${fill}" font-family="sans-serif" font-size="${size}">${text}</text>`;
+  const wordmark = (x, y, width, fill) =>
+    `<path d="${outline.path}" transform="translate(${x} ${y}) scale(${width / outline.width})" fill="${fill}"/>`;
+  await sharp(
+    preview(
+      1200,
+      560,
+      `<rect width="1200" height="560" fill="${colors.ink}"/><g transform="translate(8 16) scale(.42)">${icon()}</g>${wordmark(605, 190, 430, colors.paper)}${label(607, 365, 'Copper sleeve · Sage grooves', colors.paper, 24)}`,
+    ),
+  )
+    .png()
+    .toFile(path.join(root, 'previews', 'jacket-identity.png'));
+  await sharp(
+    preview(
+      1200,
+      800,
+      `<rect width="1200" height="800" fill="${colors.paper}"/>${label(56, 60, 'Jacket / Brand identity', colors.ink)}<g transform="translate(44 80) scale(.43)">${icon()}</g><g transform="translate(540 145) scale(.4)">${flatSymbol()}</g>${wordmark(654, 535, 390, colors.ink)}${label(56, 724, 'Charcoal · Cream · Copper · Sage', colors.ink)}${[colors.ink, colors.paper, colors.copper, colors.groove].map((color, index) => `<rect x="${650 + index * 100}" y="665" width="78" height="78" rx="12" fill="${color}" stroke="${colors.muted}" stroke-width="1"/>`).join('')}`,
+    ),
+  )
+    .png()
+    .toFile(path.join(root, 'previews', 'brand-identity.png'));
+  const proof = [];
+  for (const [index, size] of [16, 24, 32].entries()) {
+    const y = 140 + index * 160;
+    const file = path.join(root, 'png', `jacket-icon-${size}.png`);
+    proof.push(
+      { input: await readFile(file), left: 220 - size / 2, top: y - size / 2 },
+      {
+        input: await sharp(file)
+          .resize(size * 4, size * 4, { kernel: 'nearest' })
+          .png()
+          .toBuffer(),
+        left: 410 - size * 2,
+        top: y - size * 2,
+      },
+    );
+  }
+  await sharp(
+    preview(
+      600,
+      580,
+      `<rect width="600" height="580" fill="${colors.ink}"/>${label(32, 38, 'Jacket / optical icon proof')}${label(184, 76, 'Actual size', colors.paper, 16)}${label(370, 76, '4× pixels', colors.paper, 16)}${[16, 24, 32].map((size, index) => label(32, 146 + index * 160, `${size} px`)).join('')}`,
+    ),
+  )
+    .composite(proof)
+    .png()
+    .toFile(path.join(root, 'previews', 'jacket-small-sizes.png'));
 }
 console.log('Jacket SVG identity built in', root);
