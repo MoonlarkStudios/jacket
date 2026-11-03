@@ -1,54 +1,110 @@
 # Contributing to Jacket
 
-Thanks for helping make Jacket a dependable desktop utility. Bug reports, focused fixes, accessibility improvements, and documentation corrections are welcome.
+Jacket's native application follows the Rust and iced direction of Resonant v2.
+Use mise for repository commands and the
+[Google Rust Style Guide](https://google.github.io/styleguide/rustguide.html) for
+Rust code. Apply its API guidance in the context of application code. Chromium-only
+build, threading and flat-directory rules do not replace Cargo conventions.
 
-## Before you start
+## Development environment
 
-For a substantial feature or a workflow change, open an issue first so we can agree on the user problem and scope. For a small fix, send a pull request with reproduction steps and relevant validation.
+Install mise, then run `mise trust`, `mise install`, `mise run setup`, and
+`mise run dev`. `rust-toolchain.toml` pins the compiler, rustfmt and Clippy;
+`mise.toml` pins the other tools and defines the quality gate. Run one-off commands
+with `mise exec -- <command>`. Commit `Cargo.lock` with dependency changes and use
+`--locked` for ordinary builds and checks.
 
-The current validated development platform is macOS on Apple Silicon. Linux has a [preview build and installer-testing path](docs/linux-preview.md). Other platforms are welcome contributions, but require their own native testing before we claim support. See the [desktop acceptance matrix](docs/releasing.md#desktop-acceptance).
+On macOS, install Xcode Command Line Tools (`xcode-select --install`) and Homebrew.
+The macOS runtime staging and local app target require Apple Silicon and macOS 26
+or later. Public signing/notarization is not configured.
 
-## Set up
+Ubuntu 24.04 build prerequisites:
 
-Follow the [README setup](README.md#run-the-desktop-app-from-source). `mise.toml` and `rust-toolchain.toml` are the source of truth for tool versions. Commit both dependency lockfiles when updating dependencies.
+```sh
+sudo apt-get update
+sudo apt-get install build-essential pkg-config libx11-dev libxkbcommon-dev \
+  libwayland-dev libgl1-mesa-dev ffmpeg
+```
+
+Install yt-dlp using your trusted package manager. mise supplies Node, which yt-dlp
+uses for JavaScript challenges. `mise run doctor` checks tool versions, windowing
+headers and availability. Native source builds do not need GTK, WebKit or npm.
+A graphical X11/Wayland session and suitable display drivers are required to launch
+the app; the ordinary tests run without a display or live source account.
 
 | Command | Purpose |
 | --- | --- |
-| `mise run desktop` | Run the native app with local audio tools. |
-| `mise run dev` | Explore the browser preview with fictional example content. |
-| `mise run check` | Check formatting, Biome, Clippy, TypeScript, the production UI build, and all unit tests. |
-| `mise run test:media` | Run offline media integration tests with FFmpeg/ffprobe and an independent Mutagen tag reader. |
-| `mise run format` | Format frontend files and Rust code. |
-| `mise run lint:fix` | Apply safe Biome fixes. |
-| `mise run doctor` | Check local runtimes and native build prerequisites. |
-| `mise run branding:sync` | Sync approved branding into web assets and native icons. |
+| `mise run dev` / `mise run desktop` | Launch the native iced app. |
+| `mise run example` | Explore fictional tracks without downloading. |
+| `mise run build` | Build the optimized `jacket` executable. |
+| `mise run check` | Workflow/script checks, rustfmt, Clippy and all native unit tests. |
+| `mise run check:workspace` | Compile-check all native targets. |
+| `mise run test:media` | Offline exports with FFmpeg and an independent Mutagen reader. |
+| `mise run fmt` | Format native Rust code. |
+| `mise run snapshot` | Capture an isolated fictional review and quit; requires a display. |
+| `mise run qualify:ui` | Capture 26 native views across panels, themes and window sizes for visual review. |
+| `mise run licenses:native` | Collect exact Cargo sources, native notices and an integrity manifest. |
+| `mise run package:mac` | Build a local ad-hoc signed `.app` with staged tools. |
+| `mise run package:linux` | Build a portable Linux candidate with pinned tools and source companion. |
 
-List individual tasks with `mise tasks`. `npm test` runs frontend tests only; use `mise run check` for the full quality gate. The checks do not modify source files. Python unit tests use synthetic session fixtures and never open a real browser database. Media integration tests generate their own audio and do not contact YouTube.
+The first dependency fetch and runtime staging need network access. Native unit
+tests do not contact YouTube, access real browser databases or need an account.
+Media integration tests synthesize their own recordings. The full native check
+never installs the retained frontend dependencies. Comparison-only browser tasks
+are explicitly named `legacy:*`; they are outside the native quality gate.
 
-GitHub Actions runs the quality gate and media integration tests on macOS and Linux. Linux jobs also build preview installers and test installation in disposable containers. A separate job checks the dependency lockfiles and Git history for known vulnerabilities and secrets. CI retains temporary preview artifacts. The [release workflow](docs/releasing.md#automated-release-process) prepares a GitHub Release draft with permanent installers and corresponding sources after a release PR is merged. A maintainer publishes the draft after acceptance; distribution signing is separate.
+## Module boundaries and Rust conventions
 
-## Code boundaries
+| Path | Responsibility |
+| --- | --- |
+| `apps/jacket` | iced widgets, input handling, dialogs and native app coordination. |
+| `crates/jacket-core` | Source intent, review state, metadata editing and export-plan construction. |
+| `crates/jacket-desktop` | Local storage, recovery, browser profiles, artwork, downloader and supervised jobs. |
+| `crates/audio-engine` | Inspection, subprocesses, codecs, tagging and transactional export publication. |
+| `scripts/native_*` | Native prerequisite checks, packaging and offline script tests. |
+| `src`, `src-tauri` | Retained legacy implementation and migration reference. |
 
-- `crates/audio-engine`: inspection, metadata, tagging, codec choices, cancellable subprocesses, and archive creation. Keep it independent of Tauri.
-- `src-tauri`: desktop commands, native menus, browser-profile resolution, downloader updates, job ownership, and recovery.
-- `src`: review UI, editing drafts, preferences, and typed desktop transport. Keep process execution and cookie access out of the webview.
-- `tests`: frontend state and behavior tests, plus synthetic Python session tests.
-- `scripts`: development checks, brand synchronization, platform runtime staging, and Linux package/source collection and verification.
+Keep reusable behavior outside iced. No native workspace crate may depend on
+Tauri or a webview. The dependency-boundary script checks the native manifests.
+Keep crate roots as module declarations and explicit re-exports; implementations
+belong in leaf modules named for their main responsibility. Use ordinary module
+paths and explicit imports, avoiding production glob imports or `#[path]`
+overrides. Prefer concrete, readable code over speculative abstraction.
 
-See [architecture](docs/architecture.md) and the [manifest contract](docs/manifest.md) before changing export behavior. Preserve original source metadata and repeated playlist entries. Keep recovery compatible where possible; handle incompatible records explicitly. Avoid changing the bundle identifier or preference namespace during branding changes.
+Use `Result` for expected I/O and validation failures. Reserve panics for broken
+invariants with useful `expect` messages. Never recover a poisoned mutex's inner
+state. Give each admitted operation its own cancellation token; do not reset or
+reuse it. Keep slow I/O and subprocess work off the UI thread, bound progress
+queues and supervise terminal worker outcomes. Cancel and join owned workers
+before teardown. Preserve transactional publication, output collision protection,
+original source metadata, duplicate playlist occurrences and exact review identity
+when reconciling successful exports.
 
-## Validate the behavior you change
+Keep unit tests beside their modules and integration tests in each crate's
+`tests/` directory. Add tests for behavior and meaningful failure modes, including
+cancellation, corrupt persistence and stale completion. Do not use live accounts,
+cookies or restricted media as fixtures. Avoid including credentials, private
+URLs, recordings or export destinations in logs and reports.
 
-Run `mise run check`. For tagging, codec, archive, or media-pipeline changes, also run `mise run test:media`. Add a focused regression test for a bug when it protects meaningful behavior. UI changes should include a screenshot and a keyboard check at the 600 × 600 minimum window size. Check focus, reduced motion, selection, and Cancel behavior when relevant.
+## Validation and pull requests
 
-The hook tests use a small controlled runtime to exercise state transitions; they do not replace testing React effects and focus behavior in the real app. Keep the browser example clearly labeled, and do not enable downloads from example data.
+Run `mise run check`. For audio/tagging/export changes, also run
+`mise run test:media`. Native interface changes need a visual review and keyboard
+check at minimum and normal window sizes. Check focus, resize, scrolling, dialog
+cancellation, operation cancellation and closing while work is active. Record
+which platform and display path were exercised; headless checks alone do not
+establish desktop acceptance. Use the checklist in [native port](docs/native-port.md).
 
-Do not use live accounts, browser cookies, or restricted media as automated fixtures. Redact private URLs, account names, local paths, and cookie values from reports. Security reports belong in the [private reporting channel](SECURITY.md).
+Keep feature tests, workspace membership, manifests, lockfile and mise changes in
+the same independently buildable commit. Validate the exact staged tree; do not
+rely on untracked files or later commits. Use semantic, single-line commit
+subjects such as `feat(native): add cancellable track inspection`, without bodies
+or trailers. See [AGENTS.md](AGENTS.md).
 
-## Pull requests
+PR descriptions should explain the resulting behavior and relevant validation.
+Public binary publication remains separate from candidate generation; complete
+desktop acceptance, notices, corresponding source and signing before publishing.
+The native branch intentionally does not run the automatic Tauri release path.
 
-Use Conventional Commit PR titles and squash merging. `fix:` describes a bug fix, `feat:` adds a feature, and `!` marks an incompatible change; scopes such as `fix(linux):` are optional. Use `docs:`, `test:`, `ci:`, or `chore:` for maintenance. Individual development commits can be informal. Before merging, confirm the squash commit uses the reviewed PR title; it drives proposed versions and release notes. See the [version policy](docs/releasing.md#version-policy).
-
-Explain the problem, the resulting behavior, and how you verified it. Keep changes focused; avoid unrelated formatting or dependency churn. For provider failures, include the downloader version and a public reproduction URL only if it is safe to share.
-
-By contributing, you agree that your contribution is licensed under Jacket’s [GPL-3.0-or-later license](LICENSE). Do not copy code or assets whose license is incompatible with that license. Third-party runtime distribution needs its own notices and source preparation; see [third-party notices](THIRD_PARTY_NOTICES.md) and the [release checklist](docs/releasing.md).
+Contributions are licensed under [GPL-3.0-or-later](LICENSE). Retain third-party
+licenses and source provenance. Report security issues through [SECURITY.md](SECURITY.md).

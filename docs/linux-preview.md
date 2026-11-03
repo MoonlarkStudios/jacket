@@ -1,3 +1,5 @@
+> **Legacy implementation reference.** This document describes the retained React/Tauri app. For the Rust and iced branch, use the [current README](../README.md) and [native port guide](native-port.md). Old installer and acceptance results do not qualify the native app.
+
 # Linux preview
 
 Jacket's Linux preview targets **x86_64**. CI builds on **Ubuntu 24.04** and tests the DEB on Ubuntu 24.04 and Debian 13, and the RPM on Fedora 44. These are preview candidates until the checks have passed for the exact commit. They are not a claim of compatibility with every Debian or RPM distribution, older systems, ARM, or sandboxed app stores.

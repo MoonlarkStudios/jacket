@@ -1,0 +1,894 @@
+{
+  "Rust:block2@0.5.1": {
+    "file": "native-madsmtm-objc2-4fc083f1c6d6-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "4fc083f1c6d6784577e38b0ee8dbd344481e2fd2",
+    "sha256": "59d7e0b5f6b7345b56404e25f9c9c18f6d2ae66d4a7d21acaf88755868136e0d",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/4fc083f1c6d6784577e38b0ee8dbd344481e2fd2/LICENSE.txt"
+    ]
+  },
+  "Rust:block2@0.6.2": {
+    "canonicalLegalText": {
+      "licenses": [
+        "MIT",
+        "Apache-2.0",
+        "Zlib"
+      ],
+      "repository": "https://github.com/spdx/license-list-data",
+      "revision": "31846481de7ea17d92f2f46fad76abe58b2e9bb0"
+    },
+    "file": "native-madsmtm-objc2-b4167b582b2f-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream LICENSE.md retained verbatim with linked MIT/Apache-2.0/Zlib canonical legal templates from an immutable SPDX revision. Template copyright placeholders are identified as templates; upstream omitted separate copyright notices.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "b4167b582b2f75f9a1be75495c41b765344fd03c",
+    "sha256": "03a1da66d5b2bf05b1fccc295cfdbecf624cf70d93dd8e2da04b1dc37f66fc21",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/b4167b582b2f75f9a1be75495c41b765344fd03c/LICENSE.md",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/MIT.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Apache-2.0.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Zlib.txt"
+    ]
+  },
+  "Rust:block@0.1.6": {
+    "canonicalLegalText": {
+      "licenses": [
+        "MIT"
+      ],
+      "repository": "https://github.com/spdx/license-list-data",
+      "revision": "31846481de7ea17d92f2f46fad76abe58b2e9bb0"
+    },
+    "file": "native-SSheldon-rust-block-47178790cfc9-NOTICES.txt",
+    "provenance": "Published manifest licensing declaration + canonical legal text; upstream omitted separate copyright notice. Published manifest authorship and license declarations verified against the official release manifest; every published Rust source file compared byte-for-byte with this exact upstream release revision. Canonical MIT copyright placeholder is identified as a template, not an attribution assertion.",
+    "releaseTag": "0.1.6",
+    "repository": "https://github.com/SSheldon/rust-block",
+    "revision": "47178790cfc9d4a8b092051d8b413b78bd31254a",
+    "sha256": "6aff9f7f10a13927e739bb7f1056dc39a45b6e9a03bc98410a214c7683946d75",
+    "sourceVerification": [
+      {
+        "file": "src/lib.rs",
+        "sha256": "eb31678adf63b53109d9b94eba23699fd5f9ebfdb950f6e1a57ad51bb6a146fa"
+      },
+      {
+        "file": "src/test_utils.rs",
+        "sha256": "271bd579b67e2440134227cf8ee52c1b8c22854eb0c7923b46306b51810c2cf1"
+      }
+    ],
+    "urls": [
+      "https://raw.githubusercontent.com/SSheldon/rust-block/47178790cfc9d4a8b092051d8b413b78bd31254a/Cargo.toml",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/MIT.txt"
+    ]
+  },
+  "Rust:clipboard-win@5.4.3": {
+    "file": "native-DoumanAsh-clipboard-win-ed27008ae5d1-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/DoumanAsh/clipboard-win",
+    "revision": "ed27008ae5d1f10cfbb266de039f0fb35fd05a56",
+    "sha256": "934df1d485f254fa76817be23eb0566f69c03f24cf87451277f756f21f086ad5",
+    "urls": [
+      "https://raw.githubusercontent.com/DoumanAsh/clipboard-win/ed27008ae5d1f10cfbb266de039f0fb35fd05a56/LICENSE"
+    ]
+  },
+  "Rust:dispatch2@0.3.1": {
+    "canonicalLegalText": {
+      "licenses": [
+        "MIT",
+        "Apache-2.0",
+        "Zlib"
+      ],
+      "repository": "https://github.com/spdx/license-list-data",
+      "revision": "31846481de7ea17d92f2f46fad76abe58b2e9bb0"
+    },
+    "file": "native-madsmtm-objc2-8852b424193c-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream LICENSE.md retained verbatim with linked MIT/Apache-2.0/Zlib canonical legal templates from an immutable SPDX revision. Template copyright placeholders are identified as templates; upstream omitted separate copyright notices.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "8852b424193ca41602281b3d7540d7c8ed51e49a",
+    "sha256": "03a1da66d5b2bf05b1fccc295cfdbecf624cf70d93dd8e2da04b1dc37f66fc21",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/MIT.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Apache-2.0.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Zlib.txt"
+    ]
+  },
+  "Rust:dispatch@0.2.0": {
+    "canonicalLegalText": {
+      "licenses": [
+        "MIT"
+      ],
+      "repository": "https://github.com/spdx/license-list-data",
+      "revision": "31846481de7ea17d92f2f46fad76abe58b2e9bb0"
+    },
+    "file": "native-SSheldon-rust-dispatch-82d6c7a5b75d-NOTICES.txt",
+    "provenance": "Published manifest licensing declaration + canonical legal text; upstream omitted separate copyright notice. Published manifest authorship and license declarations verified against the official release manifest; every published Rust source file compared byte-for-byte with this exact upstream release revision. Canonical MIT copyright placeholder is identified as a template, not an attribution assertion.",
+    "publishedVcsRevision": true,
+    "repository": "https://github.com/SSheldon/rust-dispatch",
+    "revision": "82d6c7a5b75dc0c71c3f46f87bb6c16a476f7748",
+    "sha256": "cb7d8a5d0a12878998bcf8481a2584997ec70ab320052d77720b8460c662f0bf",
+    "sourceVerification": [
+      {
+        "file": "examples/main.rs",
+        "sha256": "da1d4571dd62e1fcef114a68c15bd340dbb5e83b84391e3bbb7a13cd8e57e88a"
+      },
+      {
+        "file": "src/ffi.rs",
+        "sha256": "320c101bdd43517d8cdb5663861733aa569705495ca97ab547571afcf2820b87"
+      },
+      {
+        "file": "src/group.rs",
+        "sha256": "22d17cacb1401da31acfca71ce8cead89dfc728f1873de7192b000f1c7456707"
+      },
+      {
+        "file": "src/lib.rs",
+        "sha256": "1f75d8f3bb8dbc57449c8727c68d7c75e6a5cf20347617c96ab6a608f186612b"
+      },
+      {
+        "file": "src/once.rs",
+        "sha256": "b67a020f1ba3ebecf52f065cb058aba61d97b5b1155e6495e5b0fc0b996f7931"
+      },
+      {
+        "file": "src/queue.rs",
+        "sha256": "efffe03ab4615c85f0708ed47b41973b2ccd4d578e146743b455986ffc95da87"
+      },
+      {
+        "file": "src/sem.rs",
+        "sha256": "5d74917749799a8b3385bf694caf0c344a11e8a9363c4512a21d956bcf7a14ac"
+      }
+    ],
+    "urls": [
+      "https://raw.githubusercontent.com/SSheldon/rust-dispatch/82d6c7a5b75dc0c71c3f46f87bb6c16a476f7748/Cargo.toml",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/MIT.txt"
+    ]
+  },
+  "Rust:gl_generator@0.14.0": {
+    "file": "native-brendanzab-gl-rs-ea503e8d5fb6-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/brendanzab/gl-rs",
+    "revision": "ea503e8d5fb6d73c6030e6191ce738cd3bf3433e",
+    "sha256": "3e03cf24d2f5d10e245e81dbb96fd8d49eff6232ca33d57ff4fcba63b756ec1d",
+    "urls": [
+      "https://raw.githubusercontent.com/brendanzab/gl-rs/ea503e8d5fb6d73c6030e6191ce738cd3bf3433e/LICENSE"
+    ]
+  },
+  "Rust:gpu-alloc-types@0.3.1": {
+    "file": "native-zakarumych-gpu-alloc-7ddd1fe576fc-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/zakarumych/gpu-alloc",
+    "revision": "7ddd1fe576fcfc503347eb97e476a47581479f22",
+    "sha256": "4faafc66f88f318334fc364d0b17dac9d4bfe19e4fd8867b1dc24d63f724f257",
+    "urls": [
+      "https://raw.githubusercontent.com/zakarumych/gpu-alloc/7ddd1fe576fcfc503347eb97e476a47581479f22/COPYING"
+    ]
+  },
+  "Rust:gpu-alloc@0.6.2": {
+    "file": "native-zakarumych-gpu-alloc-61020bdcb4eb-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/zakarumych/gpu-alloc",
+    "revision": "61020bdcb4eb04fca6bbf748aeb9570e859236e0",
+    "sha256": "09b779ea35212aada60de96c2153f2129377019265ca769685a92476058f885f",
+    "urls": [
+      "https://raw.githubusercontent.com/zakarumych/gpu-alloc/61020bdcb4eb04fca6bbf748aeb9570e859236e0/COPYING"
+    ]
+  },
+  "Rust:gpu-descriptor-types@0.2.0": {
+    "file": "native-zakarumych-gpu-descriptor-9f2fb9546591-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/zakarumych/gpu-descriptor",
+    "revision": "9f2fb9546591322e7b77ee1e79385e01effd85e4",
+    "sha256": "e83ba7e23b1a362f02ce79fe99770dd9430f555b874a4a41ce9c19e3c5b79ab3",
+    "urls": [
+      "https://raw.githubusercontent.com/zakarumych/gpu-descriptor/9f2fb9546591322e7b77ee1e79385e01effd85e4/COPYING"
+    ]
+  },
+  "Rust:gpu-descriptor@0.3.2": {
+    "file": "native-zakarumych-gpu-descriptor-bb28b4e55b74-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/zakarumych/gpu-descriptor",
+    "revision": "bb28b4e55b742e0ea3e7a0968e7ee6287ba0e06a",
+    "sha256": "8c237b7526de584c9d07d8acb3990f54a27fae0f6536c09c2349907ae60f75e6",
+    "urls": [
+      "https://raw.githubusercontent.com/zakarumych/gpu-descriptor/bb28b4e55b742e0ea3e7a0968e7ee6287ba0e06a/COPYING"
+    ]
+  },
+  "Rust:hexf-parse@0.2.1": {
+    "canonicalLegalCode": "https://creativecommons.org/publicdomain/zero/1.0/legalcode.txt",
+    "file": "native-hexf-parse-0.2.1-CC0-1.0.txt",
+    "provenance": "Published crate declares CC0-1.0 in Cargo.toml but omits a separate notice. Retains SPDX canonical CC0 legal text at the recorded immutable revision; license text contains the Creative Commons public-domain waiver, not a substituted copyright notice.",
+    "repository": "https://github.com/lifthrasiir/hexf",
+    "revision": "4225763d744183d720f575ae96d04161b4d08ea0",
+    "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "url": "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/CC0-1.0.txt"
+  },
+  "Rust:iced_core@0.14.0": {
+    "file": "native-iced-rs-iced-3997291f318a-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/iced-rs/iced",
+    "revision": "3997291f318a8bc06fa522f5579836fb3feb94df",
+    "sha256": "d7fec70b6627d290ba40f079d696a83a1e84bf8634ea8eb6f1ed9b77c50a57d3",
+    "urls": [
+      "https://raw.githubusercontent.com/iced-rs/iced/3997291f318a8bc06fa522f5579836fb3feb94df/LICENSE"
+    ]
+  },
+  "Rust:iced_debug@0.14.0": {
+    "file": "native-iced-rs-iced-3997291f318a-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/iced-rs/iced",
+    "revision": "3997291f318a8bc06fa522f5579836fb3feb94df",
+    "sha256": "d7fec70b6627d290ba40f079d696a83a1e84bf8634ea8eb6f1ed9b77c50a57d3",
+    "urls": [
+      "https://raw.githubusercontent.com/iced-rs/iced/3997291f318a8bc06fa522f5579836fb3feb94df/LICENSE"
+    ]
+  },
+  "Rust:iced_futures@0.14.0": {
+    "file": "native-iced-rs-iced-3997291f318a-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/iced-rs/iced",
+    "revision": "3997291f318a8bc06fa522f5579836fb3feb94df",
+    "sha256": "d7fec70b6627d290ba40f079d696a83a1e84bf8634ea8eb6f1ed9b77c50a57d3",
+    "urls": [
+      "https://raw.githubusercontent.com/iced-rs/iced/3997291f318a8bc06fa522f5579836fb3feb94df/LICENSE"
+    ]
+  },
+  "Rust:iced_graphics@0.14.0": {
+    "file": "native-iced-rs-iced-3997291f318a-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/iced-rs/iced",
+    "revision": "3997291f318a8bc06fa522f5579836fb3feb94df",
+    "sha256": "d7fec70b6627d290ba40f079d696a83a1e84bf8634ea8eb6f1ed9b77c50a57d3",
+    "urls": [
+      "https://raw.githubusercontent.com/iced-rs/iced/3997291f318a8bc06fa522f5579836fb3feb94df/LICENSE"
+    ]
+  },
+  "Rust:iced_program@0.14.0": {
+    "file": "native-iced-rs-iced-3997291f318a-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/iced-rs/iced",
+    "revision": "3997291f318a8bc06fa522f5579836fb3feb94df",
+    "sha256": "d7fec70b6627d290ba40f079d696a83a1e84bf8634ea8eb6f1ed9b77c50a57d3",
+    "urls": [
+      "https://raw.githubusercontent.com/iced-rs/iced/3997291f318a8bc06fa522f5579836fb3feb94df/LICENSE"
+    ]
+  },
+  "Rust:iced_renderer@0.14.0": {
+    "file": "native-iced-rs-iced-3997291f318a-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/iced-rs/iced",
+    "revision": "3997291f318a8bc06fa522f5579836fb3feb94df",
+    "sha256": "d7fec70b6627d290ba40f079d696a83a1e84bf8634ea8eb6f1ed9b77c50a57d3",
+    "urls": [
+      "https://raw.githubusercontent.com/iced-rs/iced/3997291f318a8bc06fa522f5579836fb3feb94df/LICENSE"
+    ]
+  },
+  "Rust:iced_runtime@0.14.0": {
+    "file": "native-iced-rs-iced-3997291f318a-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/iced-rs/iced",
+    "revision": "3997291f318a8bc06fa522f5579836fb3feb94df",
+    "sha256": "d7fec70b6627d290ba40f079d696a83a1e84bf8634ea8eb6f1ed9b77c50a57d3",
+    "urls": [
+      "https://raw.githubusercontent.com/iced-rs/iced/3997291f318a8bc06fa522f5579836fb3feb94df/LICENSE"
+    ]
+  },
+  "Rust:iced_tiny_skia@0.14.1": {
+    "file": "native-iced-rs-iced-0ecf60664df7-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/iced-rs/iced",
+    "revision": "0ecf60664df7b8ac7d7aef5f7279d5323027f693",
+    "sha256": "94ded4bc61eae696ba3d2ff128d1b2060afb54d345c9a9b6cdd457da5fa52c20",
+    "urls": [
+      "https://raw.githubusercontent.com/iced-rs/iced/0ecf60664df7b8ac7d7aef5f7279d5323027f693/LICENSE"
+    ]
+  },
+  "Rust:iced_wgpu@0.14.0": {
+    "file": "native-iced-rs-iced-3997291f318a-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/iced-rs/iced",
+    "revision": "3997291f318a8bc06fa522f5579836fb3feb94df",
+    "sha256": "d7fec70b6627d290ba40f079d696a83a1e84bf8634ea8eb6f1ed9b77c50a57d3",
+    "urls": [
+      "https://raw.githubusercontent.com/iced-rs/iced/3997291f318a8bc06fa522f5579836fb3feb94df/LICENSE"
+    ]
+  },
+  "Rust:iced_widget@0.14.2": {
+    "file": "native-iced-rs-iced-54abf81d13fe-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/iced-rs/iced",
+    "revision": "54abf81d13fec06d4d9ac754b03ce2c3313e8a1f",
+    "sha256": "ec461c001a7a6128b351549150238a9990cc603badec156c6d3b72bf15175886",
+    "urls": [
+      "https://raw.githubusercontent.com/iced-rs/iced/54abf81d13fec06d4d9ac754b03ce2c3313e8a1f/LICENSE"
+    ]
+  },
+  "Rust:iced_winit@0.14.1": {
+    "file": "native-iced-rs-iced-38237dd294da-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/iced-rs/iced",
+    "revision": "38237dd294da3256c2ac4d3f8288fc73956c91e0",
+    "sha256": "62647ea4aa32274961d7d982521b5ea5a95b3b3bd30f5b8a98cab69252b0f29d",
+    "urls": [
+      "https://raw.githubusercontent.com/iced-rs/iced/38237dd294da3256c2ac4d3f8288fc73956c91e0/LICENSE"
+    ]
+  },
+  "Rust:jni-macros@0.22.4": {
+    "file": "native-jni-rs-jni-rs-33045a124105-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/jni-rs/jni-rs",
+    "revision": "33045a124105c939d1e2cbdcb5a39e5d868ffa03",
+    "sha256": "2b0fcefca153c15bf05073457199a9b791cbcd581d5cd34a658aed6c8805c622",
+    "urls": [
+      "https://raw.githubusercontent.com/jni-rs/jni-rs/33045a124105c939d1e2cbdcb5a39e5d868ffa03/LICENSE-APACHE",
+      "https://raw.githubusercontent.com/jni-rs/jni-rs/33045a124105c939d1e2cbdcb5a39e5d868ffa03/LICENSE-MIT"
+    ]
+  },
+  "Rust:jni-sys-macros@0.4.1": {
+    "file": "native-jni-rs-jni-sys-64d77b7a5f11-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/jni-rs/jni-sys",
+    "revision": "64d77b7a5f119d7b55b4e2c169a4668067ff59e6",
+    "sha256": "0e8fbe4209d81e84c4bb88a49237188e963b2e795138e4936ac7926bd181069b",
+    "urls": [
+      "https://raw.githubusercontent.com/jni-rs/jni-sys/64d77b7a5f119d7b55b4e2c169a4668067ff59e6/LICENSE-APACHE",
+      "https://raw.githubusercontent.com/jni-rs/jni-sys/64d77b7a5f119d7b55b4e2c169a4668067ff59e6/LICENSE-MIT"
+    ]
+  },
+  "Rust:jni@0.22.4": {
+    "file": "native-jni-rs-jni-rs-5ae9458a4ec4-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/jni-rs/jni-rs",
+    "revision": "5ae9458a4ec44c5318f37ddc7569c1d4ae8a69e7",
+    "sha256": "2b0fcefca153c15bf05073457199a9b791cbcd581d5cd34a658aed6c8805c622",
+    "urls": [
+      "https://raw.githubusercontent.com/jni-rs/jni-rs/5ae9458a4ec44c5318f37ddc7569c1d4ae8a69e7/LICENSE-APACHE",
+      "https://raw.githubusercontent.com/jni-rs/jni-rs/5ae9458a4ec44c5318f37ddc7569c1d4ae8a69e7/LICENSE-MIT"
+    ]
+  },
+  "Rust:khronos_api@3.1.0": {
+    "file": "native-brendanzab-gl-rs-f150967b1c44-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/brendanzab/gl-rs",
+    "revision": "f150967b1c44ae888e6676f93f639ebc82771bdc",
+    "sha256": "a728f03c9c3785e86c4e77b1b896a55a14feaf32f2b9382cb68ec360e9eb5fad",
+    "urls": [
+      "https://raw.githubusercontent.com/brendanzab/gl-rs/f150967b1c44ae888e6676f93f639ebc82771bdc/LICENSE"
+    ]
+  },
+  "Rust:malloc_buf@0.0.6": {
+    "canonicalLegalText": {
+      "licenses": [
+        "MIT"
+      ],
+      "repository": "https://github.com/spdx/license-list-data",
+      "revision": "31846481de7ea17d92f2f46fad76abe58b2e9bb0"
+    },
+    "file": "native-SSheldon-malloc_buf-a7811e5f4c6f-NOTICES.txt",
+    "manifestPackagingDifference": [
+      "package.exclude is present only in published distribution metadata"
+    ],
+    "provenance": "Published manifest licensing declaration + canonical legal text; upstream omitted separate copyright notice. Published manifest authorship and license declarations verified against the official release manifest; every published Rust source file compared byte-for-byte with this exact upstream release revision. Canonical MIT copyright placeholder is identified as a template, not an attribution assertion.",
+    "releaseTag": "0.0.6",
+    "repository": "https://github.com/SSheldon/malloc_buf",
+    "revision": "a7811e5f4c6f9685dd57ad9bfe34e9bf6b0ba4f9",
+    "sha256": "025dd8d0f66e629f1d255e93febb71e211eb2d4e6d7b072760075c811eeb2d81",
+    "sourceVerification": [
+      {
+        "file": "src/lib.rs",
+        "sha256": "1130dacbe045a20c1ea1e65e00976f18eb7513da492b07d538e7b1b5c64b8842"
+      }
+    ],
+    "urls": [
+      "https://raw.githubusercontent.com/SSheldon/malloc_buf/a7811e5f4c6f9685dd57ad9bfe34e9bf6b0ba4f9/Cargo.toml",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/MIT.txt"
+    ]
+  },
+  "Rust:ndk-context@0.1.1": {
+    "file": "native-rust-windowing-android-ndk-rs-10f2ba388fca-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/rust-windowing/android-ndk-rs",
+    "revision": "10f2ba388fca20f7349996ebae26ccda7a6fda5c",
+    "sha256": "863a413a422c835668e16c6a53746aae83f067c237649c0abb0267a02135c8b1",
+    "urls": [
+      "https://raw.githubusercontent.com/rust-windowing/android-ndk-rs/10f2ba388fca20f7349996ebae26ccda7a6fda5c/LICENSE-APACHE",
+      "https://raw.githubusercontent.com/rust-windowing/android-ndk-rs/10f2ba388fca20f7349996ebae26ccda7a6fda5c/LICENSE-MIT"
+    ]
+  },
+  "Rust:ndk-sys@0.6.0+11769913": {
+    "file": "native-rust-mobile-ndk-49bbbba16c58-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/rust-mobile/ndk",
+    "revision": "49bbbba16c58ff63cb8a0ad0eca5a9fb7ecaec25",
+    "sha256": "863a413a422c835668e16c6a53746aae83f067c237649c0abb0267a02135c8b1",
+    "urls": [
+      "https://raw.githubusercontent.com/rust-mobile/ndk/49bbbba16c58ff63cb8a0ad0eca5a9fb7ecaec25/LICENSE-APACHE",
+      "https://raw.githubusercontent.com/rust-mobile/ndk/49bbbba16c58ff63cb8a0ad0eca5a9fb7ecaec25/LICENSE-MIT"
+    ]
+  },
+  "Rust:ndk@0.9.0": {
+    "file": "native-rust-mobile-ndk-49bbbba16c58-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/rust-mobile/ndk",
+    "revision": "49bbbba16c58ff63cb8a0ad0eca5a9fb7ecaec25",
+    "sha256": "863a413a422c835668e16c6a53746aae83f067c237649c0abb0267a02135c8b1",
+    "urls": [
+      "https://raw.githubusercontent.com/rust-mobile/ndk/49bbbba16c58ff63cb8a0ad0eca5a9fb7ecaec25/LICENSE-APACHE",
+      "https://raw.githubusercontent.com/rust-mobile/ndk/49bbbba16c58ff63cb8a0ad0eca5a9fb7ecaec25/LICENSE-MIT"
+    ]
+  },
+  "Rust:objc-sys@0.3.5": {
+    "file": "native-madsmtm-objc2-4fc083f1c6d6-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "4fc083f1c6d6784577e38b0ee8dbd344481e2fd2",
+    "sha256": "59d7e0b5f6b7345b56404e25f9c9c18f6d2ae66d4a7d21acaf88755868136e0d",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/4fc083f1c6d6784577e38b0ee8dbd344481e2fd2/LICENSE.txt"
+    ]
+  },
+  "Rust:objc2-app-kit@0.2.2": {
+    "file": "native-madsmtm-objc2-e282618be4c3-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "e282618be4c3a3b9542957e0c8540e9588472ce8",
+    "sha256": "59d7e0b5f6b7345b56404e25f9c9c18f6d2ae66d4a7d21acaf88755868136e0d",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/e282618be4c3a3b9542957e0c8540e9588472ce8/LICENSE.txt"
+    ]
+  },
+  "Rust:objc2-app-kit@0.3.2": {
+    "canonicalLegalText": {
+      "licenses": [
+        "MIT",
+        "Apache-2.0",
+        "Zlib"
+      ],
+      "repository": "https://github.com/spdx/license-list-data",
+      "revision": "31846481de7ea17d92f2f46fad76abe58b2e9bb0"
+    },
+    "file": "native-madsmtm-objc2-7b1abfd750a2-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream LICENSE.md retained verbatim with linked MIT/Apache-2.0/Zlib canonical legal templates from an immutable SPDX revision. Template copyright placeholders are identified as templates; upstream omitted separate copyright notices.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+    "sha256": "03a1da66d5b2bf05b1fccc295cfdbecf624cf70d93dd8e2da04b1dc37f66fc21",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/MIT.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Apache-2.0.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Zlib.txt"
+    ]
+  },
+  "Rust:objc2-cloud-kit@0.2.2": {
+    "file": "native-madsmtm-objc2-e282618be4c3-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "e282618be4c3a3b9542957e0c8540e9588472ce8",
+    "sha256": "59d7e0b5f6b7345b56404e25f9c9c18f6d2ae66d4a7d21acaf88755868136e0d",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/e282618be4c3a3b9542957e0c8540e9588472ce8/LICENSE.txt"
+    ]
+  },
+  "Rust:objc2-cloud-kit@0.3.2": {
+    "canonicalLegalText": {
+      "licenses": [
+        "MIT",
+        "Apache-2.0",
+        "Zlib"
+      ],
+      "repository": "https://github.com/spdx/license-list-data",
+      "revision": "31846481de7ea17d92f2f46fad76abe58b2e9bb0"
+    },
+    "file": "native-madsmtm-objc2-7b1abfd750a2-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream LICENSE.md retained verbatim with linked MIT/Apache-2.0/Zlib canonical legal templates from an immutable SPDX revision. Template copyright placeholders are identified as templates; upstream omitted separate copyright notices.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+    "sha256": "03a1da66d5b2bf05b1fccc295cfdbecf624cf70d93dd8e2da04b1dc37f66fc21",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/MIT.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Apache-2.0.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Zlib.txt"
+    ]
+  },
+  "Rust:objc2-contacts@0.2.2": {
+    "file": "native-madsmtm-objc2-e282618be4c3-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "e282618be4c3a3b9542957e0c8540e9588472ce8",
+    "sha256": "59d7e0b5f6b7345b56404e25f9c9c18f6d2ae66d4a7d21acaf88755868136e0d",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/e282618be4c3a3b9542957e0c8540e9588472ce8/LICENSE.txt"
+    ]
+  },
+  "Rust:objc2-core-data@0.2.2": {
+    "file": "native-madsmtm-objc2-e282618be4c3-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "e282618be4c3a3b9542957e0c8540e9588472ce8",
+    "sha256": "59d7e0b5f6b7345b56404e25f9c9c18f6d2ae66d4a7d21acaf88755868136e0d",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/e282618be4c3a3b9542957e0c8540e9588472ce8/LICENSE.txt"
+    ]
+  },
+  "Rust:objc2-core-data@0.3.2": {
+    "canonicalLegalText": {
+      "licenses": [
+        "MIT",
+        "Apache-2.0",
+        "Zlib"
+      ],
+      "repository": "https://github.com/spdx/license-list-data",
+      "revision": "31846481de7ea17d92f2f46fad76abe58b2e9bb0"
+    },
+    "file": "native-madsmtm-objc2-7b1abfd750a2-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream LICENSE.md retained verbatim with linked MIT/Apache-2.0/Zlib canonical legal templates from an immutable SPDX revision. Template copyright placeholders are identified as templates; upstream omitted separate copyright notices.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+    "sha256": "03a1da66d5b2bf05b1fccc295cfdbecf624cf70d93dd8e2da04b1dc37f66fc21",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/MIT.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Apache-2.0.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Zlib.txt"
+    ]
+  },
+  "Rust:objc2-core-foundation@0.3.2": {
+    "canonicalLegalText": {
+      "licenses": [
+        "MIT",
+        "Apache-2.0",
+        "Zlib"
+      ],
+      "repository": "https://github.com/spdx/license-list-data",
+      "revision": "31846481de7ea17d92f2f46fad76abe58b2e9bb0"
+    },
+    "file": "native-madsmtm-objc2-7b1abfd750a2-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream LICENSE.md retained verbatim with linked MIT/Apache-2.0/Zlib canonical legal templates from an immutable SPDX revision. Template copyright placeholders are identified as templates; upstream omitted separate copyright notices.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+    "sha256": "03a1da66d5b2bf05b1fccc295cfdbecf624cf70d93dd8e2da04b1dc37f66fc21",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/MIT.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Apache-2.0.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Zlib.txt"
+    ]
+  },
+  "Rust:objc2-core-graphics@0.3.2": {
+    "canonicalLegalText": {
+      "licenses": [
+        "MIT",
+        "Apache-2.0",
+        "Zlib"
+      ],
+      "repository": "https://github.com/spdx/license-list-data",
+      "revision": "31846481de7ea17d92f2f46fad76abe58b2e9bb0"
+    },
+    "file": "native-madsmtm-objc2-7b1abfd750a2-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream LICENSE.md retained verbatim with linked MIT/Apache-2.0/Zlib canonical legal templates from an immutable SPDX revision. Template copyright placeholders are identified as templates; upstream omitted separate copyright notices.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+    "sha256": "03a1da66d5b2bf05b1fccc295cfdbecf624cf70d93dd8e2da04b1dc37f66fc21",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/MIT.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Apache-2.0.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Zlib.txt"
+    ]
+  },
+  "Rust:objc2-core-image@0.2.2": {
+    "file": "native-madsmtm-objc2-e282618be4c3-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "e282618be4c3a3b9542957e0c8540e9588472ce8",
+    "sha256": "59d7e0b5f6b7345b56404e25f9c9c18f6d2ae66d4a7d21acaf88755868136e0d",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/e282618be4c3a3b9542957e0c8540e9588472ce8/LICENSE.txt"
+    ]
+  },
+  "Rust:objc2-core-image@0.3.2": {
+    "canonicalLegalText": {
+      "licenses": [
+        "MIT",
+        "Apache-2.0",
+        "Zlib"
+      ],
+      "repository": "https://github.com/spdx/license-list-data",
+      "revision": "31846481de7ea17d92f2f46fad76abe58b2e9bb0"
+    },
+    "file": "native-madsmtm-objc2-7b1abfd750a2-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream LICENSE.md retained verbatim with linked MIT/Apache-2.0/Zlib canonical legal templates from an immutable SPDX revision. Template copyright placeholders are identified as templates; upstream omitted separate copyright notices.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+    "sha256": "03a1da66d5b2bf05b1fccc295cfdbecf624cf70d93dd8e2da04b1dc37f66fc21",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/MIT.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Apache-2.0.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Zlib.txt"
+    ]
+  },
+  "Rust:objc2-core-location@0.2.2": {
+    "file": "native-madsmtm-objc2-e282618be4c3-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "e282618be4c3a3b9542957e0c8540e9588472ce8",
+    "sha256": "59d7e0b5f6b7345b56404e25f9c9c18f6d2ae66d4a7d21acaf88755868136e0d",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/e282618be4c3a3b9542957e0c8540e9588472ce8/LICENSE.txt"
+    ]
+  },
+  "Rust:objc2-core-text@0.3.2": {
+    "canonicalLegalText": {
+      "licenses": [
+        "MIT",
+        "Apache-2.0",
+        "Zlib"
+      ],
+      "repository": "https://github.com/spdx/license-list-data",
+      "revision": "31846481de7ea17d92f2f46fad76abe58b2e9bb0"
+    },
+    "file": "native-madsmtm-objc2-7b1abfd750a2-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream LICENSE.md retained verbatim with linked MIT/Apache-2.0/Zlib canonical legal templates from an immutable SPDX revision. Template copyright placeholders are identified as templates; upstream omitted separate copyright notices.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+    "sha256": "03a1da66d5b2bf05b1fccc295cfdbecf624cf70d93dd8e2da04b1dc37f66fc21",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/MIT.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Apache-2.0.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Zlib.txt"
+    ]
+  },
+  "Rust:objc2-core-video@0.3.2": {
+    "canonicalLegalText": {
+      "licenses": [
+        "MIT",
+        "Apache-2.0",
+        "Zlib"
+      ],
+      "repository": "https://github.com/spdx/license-list-data",
+      "revision": "31846481de7ea17d92f2f46fad76abe58b2e9bb0"
+    },
+    "file": "native-madsmtm-objc2-7b1abfd750a2-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream LICENSE.md retained verbatim with linked MIT/Apache-2.0/Zlib canonical legal templates from an immutable SPDX revision. Template copyright placeholders are identified as templates; upstream omitted separate copyright notices.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+    "sha256": "03a1da66d5b2bf05b1fccc295cfdbecf624cf70d93dd8e2da04b1dc37f66fc21",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/MIT.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Apache-2.0.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Zlib.txt"
+    ]
+  },
+  "Rust:objc2-encode@4.1.0": {
+    "canonicalLegalText": {
+      "licenses": [
+        "MIT",
+        "Apache-2.0",
+        "Zlib"
+      ],
+      "repository": "https://github.com/spdx/license-list-data",
+      "revision": "31846481de7ea17d92f2f46fad76abe58b2e9bb0"
+    },
+    "file": "native-madsmtm-objc2-8d214f547736-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream LICENSE.md retained verbatim with linked MIT/Apache-2.0/Zlib canonical legal templates from an immutable SPDX revision. Template copyright placeholders are identified as templates; upstream omitted separate copyright notices.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "8d214f5477365ffcbcbb7de058c86ed9a518efb7",
+    "sha256": "03a1da66d5b2bf05b1fccc295cfdbecf624cf70d93dd8e2da04b1dc37f66fc21",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/8d214f5477365ffcbcbb7de058c86ed9a518efb7/LICENSE.md",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/MIT.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Apache-2.0.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Zlib.txt"
+    ]
+  },
+  "Rust:objc2-io-surface@0.3.2": {
+    "canonicalLegalText": {
+      "licenses": [
+        "MIT",
+        "Apache-2.0",
+        "Zlib"
+      ],
+      "repository": "https://github.com/spdx/license-list-data",
+      "revision": "31846481de7ea17d92f2f46fad76abe58b2e9bb0"
+    },
+    "file": "native-madsmtm-objc2-7b1abfd750a2-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream LICENSE.md retained verbatim with linked MIT/Apache-2.0/Zlib canonical legal templates from an immutable SPDX revision. Template copyright placeholders are identified as templates; upstream omitted separate copyright notices.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+    "sha256": "03a1da66d5b2bf05b1fccc295cfdbecf624cf70d93dd8e2da04b1dc37f66fc21",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/MIT.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Apache-2.0.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Zlib.txt"
+    ]
+  },
+  "Rust:objc2-link-presentation@0.2.2": {
+    "file": "native-madsmtm-objc2-e282618be4c3-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "e282618be4c3a3b9542957e0c8540e9588472ce8",
+    "sha256": "59d7e0b5f6b7345b56404e25f9c9c18f6d2ae66d4a7d21acaf88755868136e0d",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/e282618be4c3a3b9542957e0c8540e9588472ce8/LICENSE.txt"
+    ]
+  },
+  "Rust:objc2-metal@0.2.2": {
+    "file": "native-madsmtm-objc2-e282618be4c3-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "e282618be4c3a3b9542957e0c8540e9588472ce8",
+    "sha256": "59d7e0b5f6b7345b56404e25f9c9c18f6d2ae66d4a7d21acaf88755868136e0d",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/e282618be4c3a3b9542957e0c8540e9588472ce8/LICENSE.txt"
+    ]
+  },
+  "Rust:objc2-quartz-core@0.2.2": {
+    "file": "native-madsmtm-objc2-e282618be4c3-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "e282618be4c3a3b9542957e0c8540e9588472ce8",
+    "sha256": "59d7e0b5f6b7345b56404e25f9c9c18f6d2ae66d4a7d21acaf88755868136e0d",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/e282618be4c3a3b9542957e0c8540e9588472ce8/LICENSE.txt"
+    ]
+  },
+  "Rust:objc2-quartz-core@0.3.2": {
+    "canonicalLegalText": {
+      "licenses": [
+        "MIT",
+        "Apache-2.0",
+        "Zlib"
+      ],
+      "repository": "https://github.com/spdx/license-list-data",
+      "revision": "31846481de7ea17d92f2f46fad76abe58b2e9bb0"
+    },
+    "file": "native-madsmtm-objc2-7b1abfd750a2-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream LICENSE.md retained verbatim with linked MIT/Apache-2.0/Zlib canonical legal templates from an immutable SPDX revision. Template copyright placeholders are identified as templates; upstream omitted separate copyright notices.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+    "sha256": "03a1da66d5b2bf05b1fccc295cfdbecf624cf70d93dd8e2da04b1dc37f66fc21",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/MIT.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Apache-2.0.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Zlib.txt"
+    ]
+  },
+  "Rust:objc2-symbols@0.2.2": {
+    "file": "native-madsmtm-objc2-e282618be4c3-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "e282618be4c3a3b9542957e0c8540e9588472ce8",
+    "sha256": "59d7e0b5f6b7345b56404e25f9c9c18f6d2ae66d4a7d21acaf88755868136e0d",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/e282618be4c3a3b9542957e0c8540e9588472ce8/LICENSE.txt"
+    ]
+  },
+  "Rust:objc2-ui-kit@0.2.2": {
+    "file": "native-madsmtm-objc2-e282618be4c3-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "e282618be4c3a3b9542957e0c8540e9588472ce8",
+    "sha256": "59d7e0b5f6b7345b56404e25f9c9c18f6d2ae66d4a7d21acaf88755868136e0d",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/e282618be4c3a3b9542957e0c8540e9588472ce8/LICENSE.txt"
+    ]
+  },
+  "Rust:objc2-uniform-type-identifiers@0.2.2": {
+    "file": "native-madsmtm-objc2-e282618be4c3-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "e282618be4c3a3b9542957e0c8540e9588472ce8",
+    "sha256": "59d7e0b5f6b7345b56404e25f9c9c18f6d2ae66d4a7d21acaf88755868136e0d",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/e282618be4c3a3b9542957e0c8540e9588472ce8/LICENSE.txt"
+    ]
+  },
+  "Rust:objc2-user-notifications@0.2.2": {
+    "file": "native-madsmtm-objc2-e282618be4c3-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "e282618be4c3a3b9542957e0c8540e9588472ce8",
+    "sha256": "59d7e0b5f6b7345b56404e25f9c9c18f6d2ae66d4a7d21acaf88755868136e0d",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/e282618be4c3a3b9542957e0c8540e9588472ce8/LICENSE.txt"
+    ]
+  },
+  "Rust:objc2@0.5.3": {
+    "file": "native-madsmtm-objc2-5237cbf081d0-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license notices retained verbatim.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "5237cbf081d04ef75a1f6a207b4018e7c1ae7438",
+    "sha256": "59d7e0b5f6b7345b56404e25f9c9c18f6d2ae66d4a7d21acaf88755868136e0d",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/5237cbf081d04ef75a1f6a207b4018e7c1ae7438/LICENSE.txt"
+    ]
+  },
+  "Rust:objc2@0.6.5": {
+    "canonicalLegalText": {
+      "licenses": [
+        "MIT",
+        "Apache-2.0",
+        "Zlib"
+      ],
+      "repository": "https://github.com/spdx/license-list-data",
+      "revision": "31846481de7ea17d92f2f46fad76abe58b2e9bb0"
+    },
+    "file": "native-madsmtm-objc2-d7d2fa23ceaa-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream LICENSE.md retained verbatim with linked MIT/Apache-2.0/Zlib canonical legal templates from an immutable SPDX revision. Template copyright placeholders are identified as templates; upstream omitted separate copyright notices.",
+    "repository": "https://github.com/madsmtm/objc2",
+    "revision": "d7d2fa23ceaa5e6096c923b081040e5d81b3b9df",
+    "sha256": "03a1da66d5b2bf05b1fccc295cfdbecf624cf70d93dd8e2da04b1dc37f66fc21",
+    "urls": [
+      "https://raw.githubusercontent.com/madsmtm/objc2/d7d2fa23ceaa5e6096c923b081040e5d81b3b9df/LICENSE.md",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/MIT.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Apache-2.0.txt",
+      "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Zlib.txt"
+    ]
+  },
+  "Rust:profiling@1.0.18": {
+    "file": "native-aclysma-profiling-8271551172eb-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/aclysma/profiling",
+    "revision": "8271551172eb6fa4cba47369aedd93790c623df9",
+    "sha256": "1d4df06b075aa9bfb2419b758daa2c25d4f2121e3162f7bb58cbd367d6cbeb0f",
+    "urls": [
+      "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-APACHE",
+      "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-MIT"
+    ]
+  },
+  "Rust:spirv@0.3.0+sdk-1.3.268.0": {
+    "file": "native-gfx-rs-rspirv-e91a5debc10c-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/gfx-rs/rspirv",
+    "revision": "e91a5debc10c395b36db7721dfff6326d697a1e2",
+    "sha256": "5730b0a851358d8362ed6766164a7bf3573d5206ea2accb986f9a1291ad6a94d",
+    "urls": [
+      "https://raw.githubusercontent.com/gfx-rs/rspirv/e91a5debc10c395b36db7721dfff6326d697a1e2/LICENSE"
+    ]
+  },
+  "Rust:svg_fmt@0.4.5": {
+    "file": "native-nical-rust_debug-93f414cd572b-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/nical/rust_debug",
+    "revision": "93f414cd572b5c2781df93dbdc068ed13443d05a",
+    "sha256": "7bfb48c9a0fe8163182043e2e5265af8d6d6ea6ec3a89db5b37af357f30692fd",
+    "urls": [
+      "https://raw.githubusercontent.com/nical/rust_debug/93f414cd572b5c2781df93dbdc068ed13443d05a/LICENSE"
+    ]
+  },
+  "Rust:valuable@0.1.1": {
+    "file": "native-tokio-rs-valuable-9efc29b6e58c-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/tokio-rs/valuable",
+    "revision": "9efc29b6e58cef28f6566a47aa7e142a55fead77",
+    "sha256": "2ed096c8d4965431eaddb819aa7732204e0aae8ce80d560596ef9f5d895cb786",
+    "urls": [
+      "https://raw.githubusercontent.com/tokio-rs/valuable/9efc29b6e58cef28f6566a47aa7e142a55fead77/LICENSE"
+    ]
+  },
+  "Rust:zune-core@0.4.12": {
+    "file": "native-etemesi254-zune-image-f8fbb123d5ed-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/etemesi254/zune-image",
+    "revision": "f8fbb123d5ed04441e8324a555bfcda0cb1bd28f",
+    "sha256": "f80733b3abe0205d8ffb3fc052948b7cbb32e289d4d8b6d55cc6c684cad064ce",
+    "urls": [
+      "https://raw.githubusercontent.com/etemesi254/zune-image/f8fbb123d5ed04441e8324a555bfcda0cb1bd28f/LICENSE-ZLIB",
+      "https://raw.githubusercontent.com/etemesi254/zune-image/f8fbb123d5ed04441e8324a555bfcda0cb1bd28f/LICENSE.md"
+    ]
+  },
+  "Rust:zune-jpeg@0.4.21": {
+    "file": "native-etemesi254-zune-image-fa2c767a01d7-NOTICES.txt",
+    "provenance": "Exact published crate .cargo_vcs_info.json revision; upstream license files retained verbatim.",
+    "repository": "https://github.com/etemesi254/zune-image",
+    "revision": "fa2c767a01d7d9373911d0bf63e0588553d67e0e",
+    "sha256": "0eaa5cc27350235b3db5e3615fefd50868c0d7bd692b1eab9dbf469aed08bf02",
+    "urls": [
+      "https://raw.githubusercontent.com/etemesi254/zune-image/fa2c767a01d7d9373911d0bf63e0588553d67e0e/LICENSE-ZLIB",
+      "https://raw.githubusercontent.com/etemesi254/zune-image/fa2c767a01d7d9373911d0bf63e0588553d67e0e/LICENSE.md"
+    ]
+  }
+}

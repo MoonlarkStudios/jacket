@@ -1,3 +1,5 @@
+> **Legacy implementation reference.** This document describes the retained React/Tauri app. For the Rust and iced branch, use the [current README](../README.md) and [native port guide](native-port.md). Old installer and acceptance results do not qualify the native app.
+
 # Using Jacket
 
 [Back to the README](../README.md)

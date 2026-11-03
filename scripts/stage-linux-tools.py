@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Build Jacket's x86_64 Linux runtime from hash-pinned inputs.
 
-Only GTK/WebKit, Python 3, CA certificates and the base C/C++ runtime are system
-dependencies. FFmpeg's optional libraries are not discovered from the builder.
+Python 3, CA certificates and the base C/C++ runtime are system dependencies
+of these audio tools. The native app supplies its own windowing requirements. FFmpeg's optional libraries are not discovered from the builder.
 The companion source archive is part of the deliverable, not an optional log.
 """
 import argparse
@@ -191,7 +191,7 @@ def stage():
     info = {'target': lock['target'], 'inputs': inputs, 'configure': configurations,
             'compiler': subprocess.check_output(['cc', '--version'], text=True).splitlines()[0],
             'builder': Path('/etc/os-release').read_text(),
-            'systemDependencies': ['python3 >= 3.10', 'ca-certificates', 'GTK3', 'WebKitGTK 4.1', 'xdg-utils', 'glibc >= 2.39', 'libstdc++', 'libgcc']}
+            'systemDependencies': ['python3 >= 3.10', 'ca-certificates', 'glibc >= 2.39', 'libstdc++', 'libgcc']}
     (staging / 'build-info.json').write_text(json.dumps(info, indent=2) + '\n')
     (staging / 'README.txt').write_text('Jacket Linux audio runtime. See build-info.json for exact inputs and build commands.\nThe matching jacket-linux-runtime-sources.tar.gz must accompany distributed installers.\nyt-dlp uses system Python in isolated mode. Node and FFmpeg are private to Jacket.\n')
     files = {path.relative_to(staging).as_posix(): digest(path) for path in sorted(staging.rglob('*')) if path.is_file()}

@@ -1,3 +1,5 @@
+> **Legacy implementation reference.** This document describes the retained React/Tauri app. For the Rust and iced branch, use the [current README](../README.md) and [native port guide](native-port.md). Old installer and acceptance results do not qualify the native app.
+
 # macOS packaging
 
 The packaged app includes a complete local runtime. End users do not need Homebrew, Python, Node or FFmpeg. Development (`mise run desktop`) can still discover installed tools when no packaged resource directory exists. Use the [release checklist](releasing.md) before distributing a build.

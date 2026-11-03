@@ -1,18 +1,15 @@
 [workspace]
-members = ["crates/audio-engine", "src-tauri"]
-resolver = "2"
-exclude = ["vendor/glib"]
-
-# GTK3 still requires GLib 0.18. Backport the upstream VariantStrIter fix
-# instead of suppressing RUSTSEC-2024-0429. See vendor/README.md.
-[patch.crates-io]
-glib = { path = "vendor/glib" }
+members = ["apps/jacket", "crates/audio-engine", "crates/jacket-core", "crates/jacket-desktop"]
+default-members = ["apps/jacket"]
+resolver = "3"
+exclude = ["src-tauri", "vendor/glib"]
 
 [workspace.package]
 version = "0.1.0-beta.3"
 edition = "2021"
 license = "GPL-3.0-or-later"
-rust-version = "1.88"
+rust-version = "1.96"
+publish = false
 repository = "https://github.com/MoonlarkStudios/jacket"
 
 [workspace.dependencies]
@@ -30,3 +27,11 @@ unsafe_op_in_unsafe_fn = "deny"
 all = { level = "warn", priority = -1 }
 dbg_macro = "warn"
 todo = "warn"
+
+[profile.dev]
+debug = 1
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
