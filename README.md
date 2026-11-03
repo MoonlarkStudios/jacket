@@ -53,6 +53,10 @@ mise run desktop
 
 Setup installs the project’s locked frontend dependencies and test tools. On macOS, it also installs missing FFmpeg and yt-dlp Homebrew packages. The project pins its Node.js, Rust, Python, and uv versions; run project commands through mise.
 
+On Linux, first install the native development libraries and audio tools from
+the [source setup guide](docs/linux-preview.md#run-from-source). `mise install`
+does not install these system packages. Run `mise run doctor` to check them.
+
 For a local macOS app bundle:
 
 ```sh

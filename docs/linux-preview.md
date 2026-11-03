@@ -22,6 +22,41 @@ Use the actual filename from your download. Launch **Jacket** from your applicat
 
 The preview's supported workflow is **public YouTube links**. Browser-account downloads are experimental and require separate live acceptance; encrypted Chromium profiles may need additional Python/keyring components. The owned-session prototype remains disabled on Linux.
 
+## Run from source
+
+`mise run desktop` needs both local audio tools and Tauri's native development
+libraries. Installing the WebKit runtime alone is insufficient: Rust also needs
+the development package's linker files and `pkg-config` metadata.
+
+On Fedora, install the core build dependencies and downloader:
+
+```sh
+sudo dnf install gcc gcc-c++ make pkgconf-pkg-config webkit2gtk4.1-devel yt-dlp
+```
+
+FFmpeg and FFprobe must also be on `PATH`; use your distribution's FFmpeg
+packages. See [Tauri's prerequisites](https://v2.tauri.app/start/prerequisites/#linux)
+for other distributions and optional platform features. Jacket's Linux
+`setup:media` checks for installed audio tools; it does not install system
+packages. `mise install` supplies the pinned language runtimes, not WebKit or
+the audio tools.
+
+Then run:
+
+```sh
+mise install
+mise run setup
+mise run doctor
+mise run desktop
+```
+
+`doctor` reports missing audio tools and native development libraries before
+launching the build. For `cannot find -lwebkit2gtk-4.1`, `-ljavascriptcoregtk-4.1`,
+or `-lsoup-3.0`, install the development packages instead of creating temporary
+library links. Packaged previews include their audio runtime and only require
+the package manager's runtime dependencies; these build prerequisites apply to
+running from a source checkout.
+
 ## What is shipped
 
 - System libraries: GTK3, WebKitGTK 4.1, Python 3.10 or later, CA certificates, xdg-utils, and the base C/C++ runtime. The Ubuntu 24.04 build baseline requires a compatible glibc (2.39 or later); older Ubuntu/Debian versions are outside this preview.
