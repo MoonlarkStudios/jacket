@@ -321,7 +321,8 @@ test('Undo of failed download preserves cache job ID and destination for a safe 
   assert.deepEqual(h.calls.start[1].slice(0, 3), [plan, path, id]);
   assert.equal(h.calls.start[1][3].sessionId, h.calls.start[0][3].sessionId);
   assert.ok(h.calls.start[1][3].revision > h.calls.start[0][3].revision);
-  assert.equal(h.calls.choose.length, 1);
+  assert.equal(h.calls.chooseFolder.length, 1);
+  assert.equal(h.calls.choose.length, 0);
 });
 
 test('in-flight inspection cannot be overwritten by Undo; failures retain it and success retires it', async () => {
@@ -431,6 +432,8 @@ test('choosing another destination retains progress and cache, never starts a do
   const h = fixture();
   h.render().loadInspection(album);
   let w = await h.flush();
+  w.setPreferences((p) => ({ ...p, outputKind: 'zip' }));
+  w = await h.flush();
   await w.exportZip();
   const id = h.calls.start[0][2];
   const progress = {
@@ -469,6 +472,8 @@ test('renaming a failed download clears the retry destination hint and asks for 
   const h = fixture();
   h.render().loadInspection(album);
   let w = await h.flush();
+  w.setPreferences((p) => ({ ...p, outputKind: 'zip' }));
+  w = await h.flush();
   await w.exportZip();
   const id = h.calls.start[0][2];
   h.f.listeners.get('export-progress')({
@@ -500,24 +505,27 @@ test('renaming a failed download clears the retry destination hint and asks for 
 });
 
 test('saved reviews restore committed null numbering, URL, selection, artwork and output preferences exactly', async () => {
-  const h = fixture();
-  const draft = savedReview();
-  h.f.native.loadReviewDraft = async () => structuredClone(draft);
-  h.render();
-  const w = await h.flush();
-  assert.equal(w.url, draft.url);
-  assert.deepEqual(w.inspection, draft.inspection);
-  assert.equal(w.inspection.tracks[0].metadata.trackNumber, null);
-  assert.deepEqual([...w.selected], [1]);
-  assert.deepEqual(w.preferences, draft.preferences);
-  assert.equal(w.browser, null, 'ordinary reviews start with public access');
-  assert.equal(w.browserProfile, null);
-  assert.equal(w.inspectionStatus, 'complete');
-  const saved = h.calls.saveReview.at(-1);
-  assert.equal(saved.sessionId, draft.sessionId);
-  assert.ok(saved.revision > draft.revision);
-  assert.deepEqual(saved.inspection, draft.inspection);
-  assert.equal(w.draftStatus, 'saved');
+  for (const outputKind of ['folder', 'zip']) {
+    const h = fixture();
+    const draft = savedReview();
+    draft.preferences.outputKind = outputKind;
+    h.f.native.loadReviewDraft = async () => structuredClone(draft);
+    h.render();
+    const w = await h.flush();
+    assert.equal(w.url, draft.url);
+    assert.deepEqual(w.inspection, draft.inspection);
+    assert.equal(w.inspection.tracks[0].metadata.trackNumber, null);
+    assert.deepEqual([...w.selected], [1]);
+    assert.deepEqual(w.preferences, draft.preferences);
+    assert.equal(w.browser, null, 'ordinary reviews start with public access');
+    assert.equal(w.browserProfile, null);
+    assert.equal(w.inspectionStatus, 'complete');
+    const saved = h.calls.saveReview.at(-1);
+    assert.equal(saved.sessionId, draft.sessionId);
+    assert.ok(saved.revision > draft.revision);
+    assert.deepEqual(saved.inspection, draft.inspection);
+    assert.equal(w.draftStatus, 'saved');
+  }
 });
 
 test('review persistence contains committed edits and selected occurrences without browser credentials', async () => {
@@ -716,6 +724,8 @@ test('switching output kind during retry chooses the matching destination and re
   const h = fixture();
   h.render().loadInspection(album);
   let w = await h.flush();
+  w.setPreferences((p) => ({ ...p, outputKind: 'zip' }));
+  w = await h.flush();
   await w.exportZip();
   const id = h.calls.start[0][2];
   stopExport(h, id);
@@ -1189,6 +1199,8 @@ test('superseding a review while destination selection is pending prevents an ou
   const h = fixture();
   h.render().loadInspection(album);
   let w = await h.flush();
+  w.setPreferences((p) => ({ ...p, outputKind: 'zip' }));
+  w = await h.flush();
   const chooser = deferred();
   h.f.native.chooseArchive = () => chooser.promise;
   const operation = w.exportZip();
@@ -1375,7 +1387,7 @@ test('cancelled destination selection keeps the unfinished review without starti
   h.render().loadInspection(album);
   let w = await h.flush();
   const saves = h.calls.saveReview.length;
-  h.f.native.chooseArchive = async () => null;
+  h.f.native.chooseFolder = async () => null;
   await w.exportZip();
   w = await h.flush();
   assert.equal(w.inspection.title, 'Album');
@@ -1530,4 +1542,90 @@ test('export waits for startup review arbitration so a delayed unrelated review 
   await w.exportZip();
   assert.equal(h.calls.saveReview.length, 0);
   assert.deepEqual(h.calls.start[0][3], pending.reviewIdentity);
+});
+
+test('standalone song inspection and edits preserve source tags and choose a music folder', async () => {
+  const h = fixture();
+  const song = {
+    ...structuredClone(album),
+    title: 'Provider video title',
+    sourceUrl: 'https://www.youtube.com/watch?v=eQVkkG8Oz8c',
+    suggestedMode: 'collection',
+    tracks: [structuredClone(album.tracks[0])],
+  };
+  song.tracks[0].metadata.trackNumber = null;
+  song.tracks[0].metadata.album = '';
+  song.tracks[0].sourceMetadata = structuredClone(song.tracks[0].metadata);
+  const original = structuredClone(song);
+  h.f.native.inspectSource = async () => song;
+  h.render();
+  let w = await h.flush();
+  await w.inspect(song.sourceUrl);
+  w = await h.flush();
+  assert.equal(w.preferences.title, 'Artist - Song');
+  assert.equal(w.preferences.outputKind, 'folder');
+  assert.equal(w.preferences.artworkMode, 'perTrack');
+  assert.equal(w.preferences.mode, 'collection');
+  assert.deepEqual(w.inspection, original);
+  assert.equal(w.chosen[0].metadata.trackNumber, null);
+  assert.equal(w.chosen[0].metadata.album, '');
+  const corrected = {
+    ...w.inspection.tracks[0],
+    metadata: {
+      ...w.inspection.tracks[0].metadata,
+      title: 'Corrected song',
+      artist: 'Corrected artist',
+    },
+  };
+  w.updateTrack(0, corrected);
+  w = await h.flush();
+  assert.equal(w.preferences.title, 'Corrected artist - Corrected song');
+  assert.deepEqual(
+    w.inspection.tracks[0].sourceMetadata,
+    original.tracks[0].sourceMetadata,
+  );
+  w.setPreferences((p) => ({ ...p, title: 'My custom song folder' }));
+  w = h.render();
+  w.updateTrack(0, {
+    ...corrected,
+    metadata: { ...corrected.metadata, title: 'Another correction' },
+  });
+  w = await h.flush();
+  assert.equal(w.preferences.title, 'My custom song folder');
+  await w.exportZip();
+  assert.deepEqual(h.calls.chooseFolder, ['My custom song folder']);
+  assert.equal(h.calls.choose.length, 0);
+  assert.equal(h.calls.start[0][0].outputKind, 'folder');
+  assert.equal(
+    h.calls.start[0][0].tracks[0].metadata.title,
+    'Another correction',
+  );
+  assert.deepEqual(
+    h.calls.start[0][0].tracks[0].sourceMetadata,
+    original.tracks[0].sourceMetadata,
+  );
+});
+
+test('legacy unfinished exports retain ZIP destination and cached job after the folder default changes', async () => {
+  const h = fixture();
+  const pending = pendingFolderExport();
+  delete pending.plan.outputKind;
+  pending.outputPath = '/Music/Legacy export.zip';
+  pending.plan.title = 'Legacy export';
+  h.f.native.pendingExport = async () => pending;
+  h.render();
+  const w = await h.flush();
+  assert.equal(w.preferences.outputKind, 'zip');
+  assert.equal(w.destinationPath, pending.outputPath);
+  assert.equal(w.savePath, pending.outputPath);
+  await w.exportZip();
+  assert.equal(h.calls.chooseFolder.length, 0);
+  assert.equal(h.calls.choose.length, 0);
+  assert.equal(h.calls.start[0][0].outputKind, 'zip');
+  assert.equal(h.calls.start[0][1], pending.outputPath);
+  assert.equal(h.calls.start[0][2], pending.jobId);
+  assert.deepEqual(h.calls.start[0][3], {
+    sessionId: h.calls.saveReview.at(-1).sessionId,
+    revision: h.calls.saveReview.at(-1).revision,
+  });
 });

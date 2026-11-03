@@ -2,7 +2,7 @@
   "name": "jacket",
   "private": true,
   "version": "0.1.0-beta.3",
-  "description": "Turn YouTube albums and playlists into tagged audio archives.",
+  "description": "Prepare songs, albums, and playlists as tagged audio files.",
   "license": "GPL-3.0-or-later",
   "repository": {
     "type": "git",

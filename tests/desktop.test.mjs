@@ -177,7 +177,7 @@ test('folder export asks for one parent directory and lets native code plan the 
     '/Users/me/Music/Album _ live (2)',
   );
   assert.deepEqual(globalThis.audioDlOpenRequests.at(-1), {
-    title: 'Choose a folder for your album',
+    title: 'Choose where to save your music',
     directory: true,
     multiple: false,
     defaultPath: '/Users/me/Music/',

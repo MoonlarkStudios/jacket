@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<p align="center"><strong>From link to neatly packed.</strong><br>Turn YouTube albums and playlists into tagged audio, artwork, and a playlist—together in one ZIP or music folder.</p>
+<p align="center"><strong>From link to neatly packed.</strong><br>Prepare songs, albums, and playlists as tagged audio with artwork, ready to keep and use.</p>
 
 <p align="center">
   <a href="#get-started">Get started</a> ·
@@ -18,15 +18,18 @@
 
 *The screenshots use Jacket’s built-in fictional example album. Browser preview downloads are disabled.*
 
-Jacket is a focused desktop app from [Moonlark Studios](https://github.com/MoonlarkStudios). Paste a YouTube or YouTube Music link, review the tracks and album details, and save a portable archive or music folder. Downloads and tagging run on your computer.
+Jacket is a focused desktop app from [Moonlark Studios](https://github.com/MoonlarkStudios). Paste a YouTube or YouTube Music link, review a song or collection, and save tagged audio in a music folder or ZIP. Downloads and tagging run on your computer.
+
+Jacket prepares recordings for players and tools such as its sister product, Resonant. Export local audio, then import a recording into Resonant for listening, practice, and analysis. See the [product direction](docs/product-direction.md) for the path from individual songs to multiple-source preparation and an optional future handoff.
 
 ## What you can do
 
+- **Save one song.** Review its title, artist, album, and year. Links that include both a video and a playlist start with the song; choose the playlist explicitly when you want the collection.
 - **Finish the details.** Select tracks and correct their metadata together. Preview reversible title cleanup, or edit individual tracks and album details.
 - **Keep albums organized.** Apply shared album metadata and artwork, or keep each playlist track’s own details. Repeated entries stay in order.
 - **Choose your audio format.** Use M4A / MP3 for compatibility, preserve supported source codecs, or choose MP3 throughout.
 - **Bring your own cover.** Choose or drop a JPEG/PNG, crop it, and use it throughout an album. Jacket keeps its own copy.
-- **Preview and save.** Review the planned filenames and tags, then save a ZIP or a ready-to-play folder with artwork, an M3U playlist, and a manifest.
+- **Preview and save.** Review the planned filenames and tags, then save a music folder with artwork, an M3U playlist, and a manifest. ZIP is also available.
 - **Pick up unfinished work.** Edits and interrupted downloads survive a restart. Successful exports clear their saved working state; the files belong in your music folder or player.
 - **Recover interrupted downloads.** Retry with completed source downloads cached, or reopen Jacket to resume an unfinished export.
 - **Use public links without signing in.** Optionally select a browser profile for content your account can access.
@@ -64,17 +67,17 @@ Open `target/release/bundle/macos/Jacket.app`. The bundle includes its audio too
 mise run dev
 ```
 
-Open `http://127.0.0.1:1420` and choose **Try example**. This preview lets you explore selection, artwork, and metadata editing. Inspecting real links and saving audio require the desktop app.
+Open `http://127.0.0.1:1420` and choose **Try a song** or **Explore an album**. This preview lets you explore selection, artwork, and metadata editing. Inspecting real links and saving audio require the desktop app.
 
 ## Your first download
 
-1. Paste an HTTPS YouTube playlist, video, or YouTube Music album link into Jacket.
-2. Review the available tracks. Choose **Edit album details**, click a track’s edit button, or click the cover to change artwork.
+1. Paste an HTTPS YouTube or YouTube Music song, album, or playlist link into Jacket. For a video link with playlist context, keep **This song** or choose **Entire playlist**, then select **Find tracks**.
+2. Review the song's metadata or select tracks from the collection. Choose **Edit song details** for a song, use a track's edit button or **Edit album details** for a collection, or click the cover to change artwork.
 3. Open **Download options** to choose the format and artwork behavior.
-4. Choose **Preview files** to review the result. In **Download options**, choose **ZIP archive** or **Music folder**.
+4. Choose **Preview files** to review the result. New reviews use **Music folder**; **ZIP archive** is available in **Download options**. Saved reviews and interrupted downloads retain their output choice.
 5. Start the download and choose a destination. Folder exports can be opened immediately with **Open folder** or **Open playlist**; extract ZIP exports before playback.
 
-Existing archives are kept. If the filename is already taken, Jacket saves a numbered copy. Unavailable entries are reported before download; artwork failures produce a warning while allowing audio export to continue.
+Existing files and folders are kept. If the name is already taken, Jacket saves a numbered copy. Unavailable entries are reported before download; artwork failures produce a warning while allowing audio export to continue.
 
 <details>
 <summary>See album editing</summary>
@@ -83,7 +86,7 @@ Existing archives are kept. If the filename is already taken, Jacket saves a num
 
 </details>
 
-## What’s in the ZIP?
+## What’s in the download?
 
 ```text
 My Album/
@@ -94,7 +97,7 @@ My Album/
 └── manifest.json
 ```
 
-The exact contents depend on your choices. Per-track artwork goes in `artwork/`; choosing no artwork omits images. `playlist.m3u` uses relative paths, so the extracted folder can move with your music. The [manifest format](docs/manifest.md) records original and exported metadata, codecs, warnings, and SHA-256 hashes.
+Songs use the same portable bundle, with one audio file. The exact contents depend on your choices. Per-track artwork goes in `artwork/`; choosing no artwork omits images. `playlist.m3u` uses relative paths, so the folder can move with your music. ZIP output contains the same bundle; extract it before use. The [manifest format](docs/manifest.md) records original and exported metadata, codecs, warnings, and SHA-256 hashes.
 
 | Format option | Result |
 | --- | --- |

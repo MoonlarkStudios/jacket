@@ -28,6 +28,8 @@ The webview does not spawn processes or read browser databases. The browser-only
 
 ## Metadata and export invariants
 
+- New inspections distinguish video intent from playlist context. A watch or youtu.be link inspects one recording even when it contains a playlist ID; the UI offers the explicit playlist URL as an alternative. New inspections reject malformed video IDs and repeated target parameters. Stored source URL validation stays compatible with older reviews and recovery records.
+- Song presentation is derived from a completed one-track collection. The serialized metadata policies remain `album` and `collection`; selecting one track from an album preserves album policy and numbering. New reviews default to folder output, while restoration retains its saved output kind and older plans retain ZIP semantics.
 - Preserve source order and repeated playlist entries. Provider identity is not a deduplication key.
 - Retain original source metadata separately from user edits and the metadata actually embedded. The [manifest contract](manifest.md) defines the exported representation and compatibility rules.
 - Unknown artists and release years remain unknown; uploader names and upload dates are not substitutes. Album-header enrichment is bounded and optional, so its failure does not fail inspection.

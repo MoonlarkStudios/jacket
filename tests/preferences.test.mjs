@@ -63,7 +63,7 @@ test('shared defaults require every track to agree and preserve preferred format
   assert.equal(unknown.year, null);
 });
 
-test('album renames follow the ZIP default but retain a custom filename', () => {
+test('album renames follow the export default but retain a custom name', () => {
   const before = p.inspectionPreferences(
     inspection([track('Artist')]),
     'compatible',
@@ -277,12 +277,12 @@ test('restart recovery preserves a custom destination name, cleared fields, numb
   );
 });
 
-test('fresh reviews default to ZIP while recovery retains imported artwork and folder output', () => {
+test('fresh reviews default to folders while legacy recovery retains ZIP and imported artwork', () => {
   const defaults = p.inspectionPreferences(
     inspection([track('Artist')]),
     'compatible',
   );
-  assert.equal(defaults.outputKind, 'zip');
+  assert.equal(defaults.outputKind, 'folder');
   assert.equal(defaults.sharedArtworkAsset, null);
   const oldPlan = {
     title: 'Legacy archive',
@@ -306,4 +306,102 @@ test('fresh reviews default to ZIP while recovery retains imported artwork and f
   assert.equal(imported.sharedArtworkAsset, 'a'.repeat(64));
   assert.equal(imported.sharedArtwork, null);
   assert.equal(imported.artworkMode, 'shared');
+});
+
+test('standalone songs preserve their own metadata and numbering with folder and per-track artwork defaults', () => {
+  for (const number of [null, 7]) {
+    const item = track('Artist', null, number, 2);
+    item.metadata.album = '';
+    item.metadata.albumArtist = '';
+    item.sourceMetadata = structuredClone(item.metadata);
+    const source = {
+      ...inspection([item]),
+      title: 'Provider video title',
+      suggestedMode: 'collection',
+    };
+    const original = structuredClone(source);
+    const prepared = p.withAlbumTrackNumbers(source);
+    const preferences = p.inspectionPreferences(prepared, 'preserve');
+    assert.equal(preferences.title, 'Artist - Song');
+    assert.equal(preferences.mode, 'collection');
+    assert.equal(preferences.outputKind, 'folder');
+    assert.equal(preferences.artworkMode, 'perTrack');
+    assert.equal(preferences.format, 'preserve');
+    const exported = selectedTracks(
+      prepared.tracks,
+      new Set([0]),
+      preferences.mode,
+      {
+        title: 'Unrelated album',
+        artist: 'Unrelated artist',
+        year: 2000,
+      },
+    );
+    assert.deepEqual(exported[0].metadata, original.tracks[0].metadata);
+    assert.deepEqual(
+      exported[0].sourceMetadata,
+      original.tracks[0].sourceMetadata,
+    );
+    assert.deepEqual(source, original);
+  }
+});
+
+test('song export names follow corrected title and artist while retaining custom names', () => {
+  const before = track('Artist');
+  const preferences = p.inspectionPreferences(
+    { ...inspection([before]), suggestedMode: 'collection' },
+    'compatible',
+  );
+  const corrected = {
+    ...before,
+    metadata: {
+      ...before.metadata,
+      title: 'Corrected song',
+      artist: 'Corrected artist',
+    },
+  };
+  const updated = p.updateSongPreferences(preferences, before, corrected);
+  assert.equal(updated.title, 'Corrected artist - Corrected song');
+  assert.equal(
+    p.updateSongPreferences(
+      { ...preferences, title: 'My custom name' },
+      before,
+      corrected,
+    ).title,
+    'My custom name',
+  );
+  assert.equal(
+    p.updateSongPreferences(
+      { ...preferences, mode: 'album' },
+      before,
+      corrected,
+    ).title,
+    preferences.title,
+  );
+  assert.equal(
+    p.songExportTitle({
+      ...before,
+      metadata: { ...before.metadata, artist: '  ', title: ' Song ' },
+    }),
+    'Song',
+  );
+});
+
+test('malformed video targets and repeated source parameters do not trigger inspection', () => {
+  const playlist = 'PLvalid_playlist';
+  for (const input of [
+    `https://youtube.com/watch?v=short&list=${playlist}`,
+    `https://youtube.com/watch?v=&list=${playlist}`,
+    `https://youtube.com/watch?v=eQVkkG8Oz8c&v=abcdefghijk&list=${playlist}`,
+    `https://youtube.com/watch?v=eQVkkG8Oz8c&list=${playlist}&list=PLother_playlist`,
+    `https://youtube.com/playlist?list=${playlist}&list=${playlist}`,
+    `https://youtu.be/eQVkkG8Oz8c?list=${playlist}&list=PLother_playlist`,
+    'https://youtu.be/eQVkkG8Oz8c?v=eQVkkG8Oz8c&v=abcdefghijk',
+  ]) {
+    assert.equal(p.pastedSourceUrl(input), null, input);
+  }
+  assert.equal(
+    p.pastedSourceUrl(`https://youtube.com/watch?list=${playlist}`),
+    `https://youtube.com/watch?list=${playlist}`,
+  );
 });

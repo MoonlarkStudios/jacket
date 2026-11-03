@@ -47,7 +47,7 @@ export function ExportPreviewDialog({
       opened
       onClose={close}
       returnFocus={false}
-      title="Preview your collection"
+      title="Preview your files"
       centered
       size="lg"
       scrollAreaComponent={ScrollArea.Autosize}
@@ -84,7 +84,8 @@ export function ExportPreviewDialog({
                   {preview.rootName}/
                 </Text>
                 <Text size="sm" c="dimmed">
-                  {preview.tracks.length} tracks ·{' '}
+                  {preview.tracks.length}{' '}
+                  {preview.tracks.length === 1 ? 'track' : 'tracks'} ·{' '}
                   {preview.outputKind === 'zip'
                     ? 'Inside your ZIP archive'
                     : 'Music folder'}

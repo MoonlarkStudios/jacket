@@ -67,7 +67,7 @@ button {
   padding: clamp(36px, 10vh, 80px) 0 40px;
 }
 .start-introduction h1 {
-  font-size: clamp(28px, 3.6vw, 36px);
+  font-size: clamp(28px, 4vw, 40px);
   line-height: 1.18;
   letter-spacing: -1.1px;
   margin: 10px 0 14px;
@@ -129,6 +129,101 @@ button {
   gap: 12px;
   margin-top: 13px;
   padding: 0 2px;
+}
+.example-choices {
+  margin-top: 42px;
+}
+.example-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 10px;
+}
+.example-buttons button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--jacket-border);
+  border-radius: 10px;
+  color: var(--jacket-ink);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.example-buttons button:hover:not(:disabled) {
+  background: var(--jacket-surface);
+  border-color: #b7a898;
+}
+.example-buttons button:focus-visible {
+  outline: 2px solid var(--jacket-focus);
+  outline-offset: 3px;
+}
+.example-buttons button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.example-buttons svg {
+  flex-shrink: 0;
+  color: var(--jacket-focus);
+}
+.example-buttons span {
+  flex: 1;
+}
+.example-buttons strong,
+.example-buttons small {
+  display: block;
+}
+.example-buttons strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.example-buttons small {
+  margin-top: 3px;
+  color: var(--jacket-muted);
+  font-size: 11px;
+}
+.song-details {
+  flex: 1;
+  min-height: 100px;
+  overflow-y: auto;
+  margin: 0 0 24px;
+  padding: 24px;
+  border: 1px solid var(--jacket-border);
+  border-radius: 12px;
+  background: var(--jacket-surface);
+}
+.song-details-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.song-metadata {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px 32px;
+  margin: 24px 0 0;
+}
+.song-metadata > div {
+  min-width: 0;
+}
+.song-metadata dt {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--jacket-muted);
+  margin-bottom: 5px;
+}
+.song-metadata dd {
+  margin: 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.song-metadata dd.is-missing {
+  color: var(--jacket-muted);
+}
+.song-details > .mantine-Checkbox-root {
+  margin-top: 20px;
 }
 .source-entry {
   display: flex;
@@ -780,6 +875,20 @@ button {
   }
 }
 @media (max-height: 700px) {
+  .start-panel {
+    padding-top: 28px;
+  }
+  .example-choices {
+    margin-top: 26px;
+  }
+  .song-details {
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .song-metadata {
+    gap: 14px 24px;
+    margin-top: 18px;
+  }
   .is-reviewing .app-header {
     height: 48px;
   }
@@ -823,6 +932,12 @@ button {
   }
 }
 @media (max-width: 430px) {
+  .example-buttons {
+    grid-template-columns: 1fr;
+  }
+  .song-details-heading {
+    flex-wrap: wrap;
+  }
   .track-number {
     display: none;
   }

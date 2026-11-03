@@ -35,6 +35,7 @@ import {
   readPreference,
   recoveryPreferences,
   updateAlbumPreferences,
+  updateSongPreferences,
   withAlbumTrackNumbers,
   writePreference,
 } from './preferences';
@@ -58,7 +59,7 @@ const defaults: ExportPreferences = {
   artworkMode: 'perTrack',
   sharedArtwork: null,
   sharedArtworkAsset: null,
-  outputKind: 'zip',
+  outputKind: 'folder',
 };
 
 interface ReviewSnapshot {
@@ -777,6 +778,10 @@ export function useWorkspace() {
   function updateTrack(index: number, track: Track) {
     userStarted.current = true;
     setBulkUndo(null);
+    if (inspection?.tracks.length === 1 && index === 0)
+      setPreferences((previous) =>
+        updateSongPreferences(previous, inspection.tracks[0], track),
+      );
     if (
       inspection?.tracks[index]?.metadata.trackNumber !==
       track.metadata.trackNumber

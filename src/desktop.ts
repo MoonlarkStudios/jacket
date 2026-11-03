@@ -143,7 +143,7 @@ export function revealArchive(outputPath: string) {
 
 export async function chooseFolder(title: string) {
   const parent = await open({
-    title: 'Choose a folder for your album',
+    title: 'Choose where to save your music',
     directory: true,
     multiple: false,
     defaultPath: readPreference('save-directory') || undefined,
