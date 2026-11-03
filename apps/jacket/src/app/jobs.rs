@@ -42,6 +42,10 @@ impl App {
                     self.result = None;
                     self.cover = None;
                     self.source_cover = None;
+                    self.source_cover_error = None;
+                    self.preview_cover = None;
+                    self.preview_cover_error = None;
+                    self.crop_source = None;
                     self.track_scroll = 0.0;
                     self.preview = None;
                     self.pending_plan = None;
@@ -111,7 +115,7 @@ impl App {
     }
 
     pub(super) fn position_crop(&mut self) {
-        if let Some((asset, _)) = &self.cover {
+        if let Some((asset, _)) = self.crop_asset() {
             let size = self
                 .crop_size
                 .parse::<u32>()
@@ -140,7 +144,8 @@ impl App {
         self.review.as_ref().and_then(crate::artwork::source_url)
     }
 
-    pub(super) fn cover_preview(&self) -> Task<Message> {
+    pub(super) fn cover_preview(&mut self) -> Task<Message> {
+        self.source_cover_error = None;
         if let (Some(desktop), Some(url)) = (self.desktop.clone(), self.cover_url()) {
             let url = url.to_owned();
             let source = url.clone();
@@ -188,6 +193,7 @@ impl App {
 
     pub(super) fn preview_artwork(&mut self) -> Task<Message> {
         self.preview_cover = None;
+        self.preview_cover_error = None;
         let requested = self
             .pending_plan
             .as_ref()

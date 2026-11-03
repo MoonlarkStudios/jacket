@@ -42,7 +42,7 @@ the app; the ordinary tests run without a display or live source account.
 | `mise run test:media` | Offline exports with FFmpeg and an independent Mutagen reader. |
 | `mise run fmt` | Format native Rust code. |
 | `mise run snapshot` | Capture an isolated fictional review and quit; requires a display. |
-| `mise run qualify:ui` | Capture 57 native views across panels, themes, window sizes and scenarios for visual review. |
+| `mise run qualify:ui` | Capture 96 album, song, playlist and edge-case views across themes and sizes. |
 | `mise run licenses:native` | Collect exact Cargo sources, native notices and an integrity manifest. |
 | `mise run package:mac` | Build a local ad-hoc signed `.app` with staged tools. |
 | `mise run package:linux` | Build a portable Linux candidate with pinned tools and source companion. |

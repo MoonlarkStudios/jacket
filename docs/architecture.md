@@ -45,8 +45,8 @@ for their verified audio payloads; native packaging does not invoke Tauri.
 
 ## Presentation and artwork
 
-The `view/` modules compose the shell, ordered track table, Export inspector,
-preview, preferences and shared components. At the default 1180 × 800 size, the
+The `view/` modules compose the shell, focused song review, ordered collection
+track table, Export inspector, preview, preferences and shared components. At the default 1180 × 800 size, the
 review and Export inspector share the workspace; at the 600 × 600 minimum, Export
 options move to a separate panel. The track list keeps widget creation bounded
 to visible occurrences and overscan. Modal content scrolls independently from
@@ -67,6 +67,13 @@ bounded background request and decoding path. Imported artwork uses the app-owne
 asset. Stale preview results cannot replace artwork for a different review or
 selection. Theme switches recolor the surrounding controls and preserve image
 pixels, source metadata and audio.
+
+Standalone song inspection can resolve an exact album-linked recording from the
+public YouTube Music queue, with the original source image as a fallback. Source
+images support JPEG, PNG and WebP. Normalization caps image size without enlarging
+small originals. Remote crop preparation holds a separate staged source and
+commits a chosen owned asset only after Apply. Native destination paths are
+translated into the engine's stem/folder/archive contract before export admission.
 
 ## Review and recovery
 

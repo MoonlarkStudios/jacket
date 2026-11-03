@@ -25,10 +25,44 @@ impl App {
         self.pending_plan.as_ref()
     }
 
+    pub fn crop_asset(
+        &self,
+    ) -> Option<&(jacket_desktop::artwork_assets::Asset, std::path::PathBuf)> {
+        self.crop_source.as_ref().or(self.cover.as_ref())
+    }
+
+    pub fn can_crop_cover(&self) -> bool {
+        self.cover.is_some()
+            || self
+                .review
+                .as_ref()
+                .and_then(crate::artwork::source_url)
+                .is_some()
+    }
+
     pub fn can_preview(&self) -> bool {
         !self.busy()
             && self.review.as_ref().is_some_and(|review| {
+                let uses_shared_cover = matches!(
+                    review.preferences.artwork_mode,
+                    audio_engine::ArtworkMode::Shared
+                ) || (review.is_song()
+                    && matches!(
+                        review.preferences.artwork_mode,
+                        audio_engine::ArtworkMode::PerTrack
+                    ));
+                let cover_available = !uses_shared_cover
+                    || review
+                        .preferences
+                        .shared_artwork_asset
+                        .as_ref()
+                        .is_none_or(|id| {
+                            self.cover
+                                .as_ref()
+                                .is_some_and(|(asset, _)| asset.id == *id)
+                        });
                 !review.selected.is_empty()
+                    && cover_available
                     && (review.preferences.output_kind != audio_engine::OutputKind::File
                         || review.selected.len() == 1)
             })
@@ -320,6 +354,11 @@ impl App {
                 self.panel = panel
             }
             Message::ClosePanel => {
+                if self.dialog_open {
+                    return Task::none();
+                }
+                self.crop_source = None;
+                self.crop_dragging = false;
                 self.panel = Panel::Workspace;
                 self.pending_plan = None;
                 return self.restore_scroll();
@@ -378,17 +417,17 @@ impl App {
                     self.pending_plan = None;
                     return self.close();
                 }
+                let Some(destination) = destination else {
+                    return Task::none();
+                };
                 if let (Some(path), Some(plan), Some(desktop), Some(review)) = (
-                    destination,
+                    Some(destination),
                     self.pending_plan.take(),
                     self.desktop.clone(),
                     &self.review,
                 ) {
-                    let destination = if plan.output_kind == OutputKind::Folder {
-                        path.join(audio_engine::export::sanitize_component(&plan.title))
-                    } else {
-                        path
-                    };
+                    let destination =
+                        super::destination::resolve(plan.output_kind, &plan.title, path);
                     let draft = review.draft();
                     let identity = review.identity();
                     self.dialog_open = true;
@@ -755,21 +794,36 @@ impl App {
                     .and_then(crate::artwork::preview_url)
                     == Some(source.as_str())
                 {
-                    if let Ok(handle) = result {
-                        self.preview_cover = Some(handle);
+                    match result {
+                        Ok(handle) => {
+                            self.preview_cover = Some(handle);
+                            self.preview_cover_error = None;
+                        }
+                        Err(error) => self.preview_cover_error = Some(error),
                     }
                 }
             }
             Message::SourceCover(source, result) => {
                 if self.cover_url() == Some(source.as_str()) {
-                    if let Ok(handle) = result {
-                        self.source_cover = Some(handle);
+                    match result {
+                        Ok(handle) => {
+                            self.source_cover = Some(handle);
+                            self.source_cover_error = None;
+                        }
+                        Err(error) => self.source_cover_error = Some(error),
                     }
                 }
             }
+            Message::RetryArtwork if !self.busy() => {
+                return if self.panel == Panel::Preview {
+                    self.preview_artwork()
+                } else {
+                    self.cover_preview()
+                };
+            }
             Message::Dropped(path) if !self.busy() && !self.example && self.review.is_some() => {
                 if path.extension().is_some_and(|extension| {
-                    ["jpg", "jpeg", "png"]
+                    ["jpg", "jpeg", "png", "webp"]
                         .iter()
                         .any(|kind| extension.eq_ignore_ascii_case(kind))
                 }) {
@@ -782,7 +836,7 @@ impl App {
                     async {
                         rfd::AsyncFileDialog::new()
                             .set_title("Choose album artwork")
-                            .add_filter("JPEG or PNG", &["jpg", "jpeg", "png"])
+                            .add_filter("Cover images", &["jpg", "jpeg", "png", "webp"])
                             .pick_file()
                             .await
                             .map(|f| f.path().to_path_buf())
@@ -822,6 +876,9 @@ impl App {
                             }
                         }
                         self.cover = Some((asset, path));
+                        self.crop_source = None;
+                        self.source_cover_error = None;
+                        self.preview_cover_error = None;
                         self.panel = Panel::Workspace;
                         return self.autosave();
                     }
@@ -839,19 +896,64 @@ impl App {
                 self.position_crop();
             }
             Message::CropUp => self.crop_dragging = false,
-            Message::CropCover if !self.busy() => {
-                if let Some((asset, _)) = &self.cover {
+            Message::CropCover if !self.busy() && !self.example => {
+                if let Some((asset, path)) = &self.cover {
                     self.crop_x = "0".into();
                     self.crop_y = "0".into();
                     self.crop_size = asset.width.min(asset.height).to_string();
+                    self.crop_source = Some((asset.clone(), path.clone()));
                     self.panel = Panel::Crop;
+                } else if let (Some(desktop), Some(review), Some(url)) = (
+                    self.desktop.clone(),
+                    self.review.as_ref(),
+                    self.cover_url().map(str::to_owned),
+                ) {
+                    let identity = review.identity();
+                    self.dialog_open = true;
+                    self.notice = Some("Preparing cover for cropping…".into());
+                    return persistence::background(
+                        move || {
+                            let asset = desktop.import_remote_artwork(&url)?;
+                            let path = desktop.artwork_path(&asset.id)?;
+                            Ok((asset, path))
+                        },
+                        move |result| Message::RemoteCoverImported(identity, result),
+                    );
+                }
+            }
+            Message::RemoteCoverImported(identity, result) => {
+                self.dialog_open = false;
+                self.notice = None;
+                if self.close_after_job {
+                    return self.close();
+                }
+                if self
+                    .review
+                    .as_ref()
+                    .is_some_and(|review| review.identity() == identity)
+                {
+                    match result {
+                        Ok((asset, path)) => {
+                            self.crop_x = "0".into();
+                            self.crop_y = "0".into();
+                            self.crop_size = asset.width.min(asset.height).to_string();
+                            self.crop_source = Some((asset, path));
+                            self.panel = Panel::Crop;
+                        }
+                        Err(error) => {
+                            self.error = Some(format!(
+                                "The cover could not be prepared for cropping: {error}"
+                            ))
+                        }
+                    }
                 }
             }
             Message::CropX(value) => self.crop_x = value,
             Message::CropY(value) => self.crop_y = value,
             Message::CropSize(value) => self.crop_size = value,
             Message::ApplyCrop if !self.busy() => {
-                if let (Some((asset, _)), Some(desktop)) = (&self.cover, self.desktop.clone()) {
+                if let (Some((asset, _)), Some(desktop)) = (self.crop_asset(), self.desktop.clone())
+                {
                     match self
                         .crop_x
                         .parse::<u32>()

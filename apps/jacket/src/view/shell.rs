@@ -69,16 +69,25 @@ fn view_at(app: &App, size: iced::Size) -> Element<'_, Message> {
     } else {
         let body = panel_body(app, compact);
 
-        let title = match app.panel {
-            Panel::Appearance => "Appearance",
-            Panel::Settings => "Settings",
-            Panel::Options => "Export options",
-            Panel::Preview => "Preview export",
-            Panel::Editor => "Edit tags",
-            Panel::Crop => "Crop artwork",
-            Panel::SourceNotes => "Source notes",
-            _ => "Jacket",
-        };
+        let title =
+            match app.panel {
+                Panel::Appearance => "Appearance",
+                Panel::Settings => "Settings",
+                Panel::Options => "Export options",
+                Panel::Preview => "Preview export",
+                Panel::Editor => {
+                    if app.editor.as_ref().is_some_and(|editor| {
+                        matches!(editor.kind, crate::editor::Kind::OutputName)
+                    }) {
+                        "Output name"
+                    } else {
+                        "Edit tags"
+                    }
+                }
+                Panel::Crop => "Crop artwork",
+                Panel::SourceNotes => "Source notes",
+                _ => "Jacket",
+            };
         let mut modal = column![
             row![
                 text(title).size(14).font(style::semibold()),
@@ -371,11 +380,15 @@ fn status(app: &App) -> Element<'_, Message> {
             .iter()
             .filter_map(|index| review.inspection.tracks.get(*index)?.duration)
             .sum();
-        format!(
-            "{} selected  ·  {}",
-            review.selected.len(),
+        if review.is_song() {
             components::duration(seconds)
-        )
+        } else {
+            format!(
+                "{} selected  ·  {}",
+                review.selected.len(),
+                components::duration(seconds)
+            )
+        }
     } else {
         String::new()
     };
@@ -424,7 +437,15 @@ fn notice<'a>(app: &App, message: &'a str, error: bool) -> Element<'a, Message> 
 fn actions(app: &App) -> Option<Element<'_, Message>> {
     let p = app.presentation();
     let (label, message, enabled) = match app.panel {
-        Panel::Preview => ("Save audio…", Message::Save, app.can_export()),
+        Panel::Preview => (
+            match app.preview_plan().map(|plan| plan.output_kind) {
+                Some(audio_engine::OutputKind::Zip) => "Save ZIP…",
+                Some(audio_engine::OutputKind::Folder) => "Save folder…",
+                _ => "Save audio file…",
+            },
+            Message::Save,
+            app.can_export(),
+        ),
         Panel::Editor => (
             "Apply changes",
             Message::Editor(crate::editor::Action::Apply),
@@ -511,7 +532,7 @@ fn crop(app: &App) -> Element<'_, Message> {
     ]
     .spacing(16)
     .width(Length::Fill);
-    if let Some((asset, _)) = &app.cover {
+    if let Some((asset, _)) = app.crop_asset() {
         body = body.push(row![
             text("Crop size").size(12).color(p.colors.text_muted),
             space::horizontal(),

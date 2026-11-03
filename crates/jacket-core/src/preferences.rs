@@ -77,17 +77,26 @@ impl Preferences {
                 .flatten()
             }),
             format,
-            artwork_mode: if inspection.suggested_mode == CollectionMode::Album {
+            artwork_mode: if inspection.suggested_mode == CollectionMode::Album
+                || inspection.tracks.len() == 1
+            {
                 ArtworkMode::Shared
             } else {
                 ArtworkMode::PerTrack
             },
-            shared_artwork: inspection.artwork_url.clone().or_else(|| {
-                inspection
-                    .tracks
-                    .iter()
-                    .find_map(|track| track.artwork_url.clone())
-            }),
+            shared_artwork: if inspection.tracks.len() == 1 {
+                inspection.tracks[0]
+                    .artwork_url
+                    .clone()
+                    .or_else(|| inspection.artwork_url.clone())
+            } else {
+                inspection.artwork_url.clone().or_else(|| {
+                    inspection
+                        .tracks
+                        .iter()
+                        .find_map(|track| track.artwork_url.clone())
+                })
+            },
             shared_artwork_asset: None,
             output_kind: if song {
                 OutputKind::File

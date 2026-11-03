@@ -17,7 +17,7 @@ audio-engine = { path = "../../crates/audio-engine" }
 jacket-core = { path = "../../crates/jacket-core" }
 jacket-desktop = { path = "../../crates/jacket-desktop" }
 iced = { version = "=0.14.0", features = ["tokio", "svg", "image-without-codecs"] }
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 rfd = "0.15.4"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 serde.workspace = true

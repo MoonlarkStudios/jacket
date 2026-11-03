@@ -7,6 +7,28 @@ from pathlib import Path
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
+THEMES = ('dark', 'light', 'mocha')
+ALBUM_PANELS = (None, 'preview', 'settings', 'appearance', 'options', 'editor', 'bulk', 'crop')
+
+
+def capture_cases():
+    """Yield size, theme, filename suffix and flags for each distinct view."""
+    for compact in (False, True):
+        for theme in THEMES:
+            for panel in ALBUM_PANELS:
+                yield compact, theme, panel or 'review', (['--panel', panel] if panel else [])
+            for scenario, panels in (
+                ('song', (None, 'preview', 'editor', 'options')),
+                ('playlist', (None, 'preview')),
+            ):
+                for panel in panels:
+                    name = f'{scenario}-{panel}' if panel else scenario
+                    flags = [f'--{scenario}'] + (['--panel', panel] if panel else [])
+                    yield compact, theme, name, flags
+            yield compact, theme, 'long-song', ['--song', '--long']
+    for scenario in ('empty', 'stress'):
+        for theme in THEMES:
+            yield False, theme, scenario, [f'--{scenario}']
 
 
 def main():
@@ -19,33 +41,22 @@ def main():
     options = parser.parse_args()
     output = options.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
+    count = 0
     try:
-        for compact in (False, True):
-            for theme in ("dark", "light", "mocha"):
-                for panel in (None, 'preview', 'settings', 'appearance', 'options', 'editor', 'bulk', 'crop'):
-                    name = '-'.join(('compact' if compact else 'normal',
-                                     theme, panel or 'review'))
-                    destination = output / f'{name}.png'
-                    command = [str(options.executable.resolve()), '--screenshot', str(destination)]
-                    if compact:
-                        command.append('--compact')
-                    if theme != "dark":
-                        command.append(f"--{theme}")
-                    if panel:
-                        command.extend(['--panel', panel])
-                    subprocess.run(command, check=True, timeout=60)
-                    if not destination.is_file() or destination.stat().st_size == 0:
-                        raise ValueError(f'No screenshot was produced: {name}')
-        for scenario in ('song', 'empty', 'stress'):
-            for theme in ("dark", "light", "mocha"):
-                destination = output / f"normal-{theme}-{scenario}.png"
-                command = [str(options.executable.resolve()), '--screenshot', str(destination), f'--{scenario}']
-                if theme != "dark":
-                    command.append(f"--{theme}")
-                subprocess.run(command, check=True, timeout=60)
-                if not destination.is_file() or destination.stat().st_size == 0:
-                    raise ValueError(f'No screenshot was produced: {scenario}')
-        print(f'Captured 57 native views in {output}; inspect each for visual acceptance.')
+        for compact, theme, suffix, flags in capture_cases():
+            name = '-'.join(('compact' if compact else 'normal', theme, suffix))
+            destination = output / f'{name}.png'
+            command = [str(options.executable.resolve()), '--screenshot', str(destination)]
+            if compact:
+                command.append('--compact')
+            if theme != 'dark':
+                command.append(f'--{theme}')
+            command.extend(flags)
+            subprocess.run(command, check=True, timeout=60)
+            if not destination.is_file() or destination.stat().st_size == 0:
+                raise ValueError(f'No screenshot was produced: {name}')
+            count += 1
+        print(f'Captured {count} native views in {output}; inspect each for visual acceptance.')
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         parser.exit(1, f'Native snapshot capture failed: {error}\n')
 

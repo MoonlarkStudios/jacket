@@ -171,6 +171,7 @@ pub struct Derived {
     pub pressed: Color,
     pub disabled: Color,
     pub selection_fill: Color,
+    pub text_selection: Color,
     pub outline: Color,
     pub scrim: Color,
 }
@@ -216,6 +217,7 @@ impl ResolvedTheme {
             pressed: blend(colors.text, colors.raised, 0.08),
             disabled: blend(colors.text_muted, colors.panel, 0.65),
             selection_fill: blend(colors.selection, colors.panel, 0.10),
+            text_selection: blend(colors.selection, colors.background, 0.30),
             outline: colors.text_muted,
             scrim: if is_light {
                 Color {

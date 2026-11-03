@@ -8,6 +8,9 @@ order people need them.
 
 ## Workspace
 
+The [subsequent workflow pass](native-workflow-verification.md) adds the focused
+song review, exact song album covers and export/cancellation corrections.
+
 A compact header holds application identity, the current theme and settings.
 The source field starts an inspection and exposes song/playlist intent when the
 link contains both. The review hero shows the album cover, title, artist, year,
@@ -44,11 +47,13 @@ settings change replaces it. See [theme authoring](themes.md).
 
 ## Verification
 
-The snapshot runner defines 57 cases: review, preview, settings,
-appearance, export options, individual editing, bulk editing and cropping at two
-sizes in three presets; nine additional cases cover a song, the welcome state
-and a 10,000-entry playlist. Additional `--theme-file` captures exercise a custom
-palette without modifying the ordinary preference.
+The current snapshot runner defines 96 cases. In every preset, both window sizes
+cover eight album panels, song review/preview/editing/options, playlist
+review/preview and long-metadata song review. Normal-size welcome and 10,000-entry
+list cases complete the matrix. Additional `--theme-file` captures exercise a
+custom palette without modifying the ordinary preference. The dated results
+below describe the initial redesign's smaller matrix, not this expanded workflow
+audit.
 
 Regenerate these with `mise run qualify:ui`. Use `mise run check` for the native
 quality gate and `mise run test:media` when changing audio/export behavior.

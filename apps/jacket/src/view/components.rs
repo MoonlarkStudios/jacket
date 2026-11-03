@@ -2,7 +2,7 @@ use crate::app::{App, Message};
 use crate::icons::Icon;
 use crate::{artwork, icons};
 use audio_engine::ArtworkMode;
-use iced::widget::{container, image};
+use iced::widget::{column, container, image, text};
 use iced::{Border, Element, Length};
 
 #[derive(Clone, Copy)]
@@ -34,13 +34,13 @@ pub fn cover(app: &App, size: f32, context: CoverContext) -> Element<'_, Message
         image(path)
             .width(size)
             .height(size)
-            .content_fit(iced::ContentFit::Cover)
+            .content_fit(iced::ContentFit::Contain)
             .into()
     } else if app.example {
         image(artwork::example_cover())
             .width(size)
             .height(size)
-            .content_fit(iced::ContentFit::Cover)
+            .content_fit(iced::ContentFit::Contain)
             .into()
     } else {
         let source = app.review.as_ref().and_then(artwork::source_url);
@@ -61,12 +61,36 @@ pub fn cover(app: &App, size: f32, context: CoverContext) -> Element<'_, Message
             image(handle.clone())
                 .width(size)
                 .height(size)
-                .content_fit(iced::ContentFit::Cover)
+                .content_fit(iced::ContentFit::Contain)
                 .into()
         } else {
-            container(icons::view(Icon::Music, p.colors.text_muted, 24.0))
-                .center(Length::Fill)
-                .into()
+            let error = match context {
+                CoverContext::Source => app.source_cover_error.as_ref(),
+                CoverContext::Export => app.preview_cover_error.as_ref(),
+            };
+            let has_url = match context {
+                CoverContext::Source => source.is_some(),
+                CoverContext::Export => plan.and_then(artwork::preview_url).is_some(),
+            };
+            container(
+                column![
+                    icons::view(Icon::Music, p.colors.text_muted, 24.0),
+                    text(if error.is_some() {
+                        "Cover unavailable"
+                    } else if has_url {
+                        "Loading cover…"
+                    } else {
+                        "No cover"
+                    })
+                    .size(10)
+                    .color(p.colors.text_muted),
+                ]
+                .spacing(10)
+                .align_x(iced::Alignment::Center),
+            )
+            .center(Length::Fill)
+            .padding(8)
+            .into()
         }
     };
     container(content)

@@ -92,6 +92,14 @@ fn built_in_text_and_primary_actions_have_accessible_contrast() {
             );
         }
         assert!(
+            super::contrast(colors.text, resolved.derived.text_selection) >= 4.5,
+            "{preset} selected input text"
+        );
+        assert!(
+            super::contrast(colors.background, resolved.derived.text_selection) >= 1.5,
+            "{preset} selected range must be visible against the input"
+        );
+        assert!(
             super::contrast(colors.accent, colors.panel) >= 4.5,
             "{preset} accent"
         );

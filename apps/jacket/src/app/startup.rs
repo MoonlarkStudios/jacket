@@ -101,6 +101,9 @@ impl App {
             cover: None,
             source_cover: None,
             preview_cover: None,
+            source_cover_error: None,
+            preview_cover_error: None,
+            crop_source: None,
             track_scroll: 0.0,
             crop_x: "0".into(),
             crop_y: "0".into(),
@@ -125,6 +128,18 @@ impl App {
                 inspection.tracks.truncate(1);
                 inspection.suggested_mode = audio_engine::CollectionMode::Collection;
                 inspection.title = inspection.tracks[0].metadata.title.clone();
+            }
+            if args.iter().any(|arg| arg == "--playlist") {
+                inspection.suggested_mode = audio_engine::CollectionMode::Collection;
+                inspection.title = "Evening rotation".into();
+            }
+            if args.iter().any(|arg| arg == "--long") {
+                if let Some(track) = inspection.tracks.first_mut() {
+                    track.metadata.title = "A very long song title — live at the old theatre, remastered and expanded edition".into();
+                    track.metadata.artist =
+                        "The Paper Trails featuring the Northern Chamber Orchestra".into();
+                    track.metadata.album = "Room to breathe: the complete anniversary recordings and unreleased sessions".into();
+                }
             }
             if args.iter().any(|arg| arg == "--stress") {
                 let originals = inspection.tracks.clone();

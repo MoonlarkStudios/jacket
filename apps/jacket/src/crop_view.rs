@@ -6,7 +6,7 @@ pub const WIDTH: f32 = 360.0;
 pub const HEIGHT: f32 = 260.0;
 
 pub fn view(app: &App) -> Element<'_, Message> {
-    let Some((asset, path)) = &app.cover else {
+    let Some((asset, path)) = app.crop_asset() else {
         return container("").into();
     };
     let size = app

@@ -69,6 +69,21 @@ mod tests {
     }
 
     #[test]
+    fn source_webp_images_pass_the_same_preview_bounds_as_jpeg_and_png() {
+        for format in [
+            image::ImageFormat::Png,
+            image::ImageFormat::Jpeg,
+            image::ImageFormat::WebP,
+        ] {
+            let mut bytes = std::io::Cursor::new(Vec::new());
+            image::DynamicImage::new_rgb8(544, 544)
+                .write_to(&mut bytes, format)
+                .expect("encoded cover");
+            validate(bytes.get_ref()).expect("supported source cover");
+        }
+    }
+
+    #[test]
     fn compressed_image_dimensions_are_checked_before_ui_decoding() {
         let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
         png.extend_from_slice(&20_000_u32.to_be_bytes());

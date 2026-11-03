@@ -5,7 +5,7 @@ use crate::settings::{ArtworkChoice, FormatChoice, ModeChoice, OutputChoice};
 use crate::style;
 use audio_engine::{ArtworkMode, AudioFormat, OutputKind};
 use iced::widget::{
-    button, column, container, pick_list, row, rule, scrollable, space, text, Column,
+    button, checkbox, column, container, pick_list, row, rule, scrollable, space, text, Column,
 };
 use iced::{Alignment, Element, Length};
 
@@ -54,16 +54,35 @@ pub fn view(app: &App, docked: bool) -> Element<'_, Message> {
         ]
         .spacing(7),
     );
-    let mut artwork = column![
-        text("Artwork").size(12).color(p.colors.text_muted),
+    let artwork_control: Element<'_, Message> = if review.is_song() {
+        checkbox(!matches!(
+            review.preferences.artwork_mode,
+            ArtworkMode::None
+        ))
+        .label("Include cover")
+        .text_size(13)
+        .on_toggle_maybe((!app.busy()).then_some(|include| {
+            Message::Artwork(if include {
+                ArtworkChoice::Shared
+            } else {
+                ArtworkChoice::None
+            })
+        }))
+        .into()
+    } else {
         pick_list(
             ArtworkChoice::ALL,
             Some(ArtworkChoice::from(review.preferences.artwork_mode)),
-            Message::Artwork
+            Message::Artwork,
         )
         .text_size(13)
         .padding(9)
-        .width(Length::Fill),
+        .width(Length::Fill)
+        .into()
+    };
+    let mut artwork = column![
+        text("Artwork").size(12).color(p.colors.text_muted),
+        artwork_control,
     ]
     .spacing(7);
     if !matches!(review.preferences.artwork_mode, ArtworkMode::None) {
@@ -96,7 +115,10 @@ pub fn view(app: &App, docked: bool) -> Element<'_, Message> {
                     .align_y(Alignment::Center)
                 )
                 .padding([5, 0])
-                .on_press_maybe((!app.busy() && app.cover.is_some()).then_some(Message::CropCover))
+                .on_press_maybe(
+                    (!app.busy() && !app.example && app.can_crop_cover())
+                        .then_some(Message::CropCover)
+                )
                 .style(p.quiet()),
             ]
             .spacing(8),
@@ -145,7 +167,7 @@ pub fn view(app: &App, docked: bool) -> Element<'_, Message> {
                 space::horizontal(),
                 button(icons::view(Icon::Edit, p.colors.text_muted, 14.0))
                     .padding(3)
-                    .on_press_maybe((!app.busy()).then_some(Message::OpenEditor(Kind::Album)))
+                    .on_press_maybe((!app.busy()).then_some(Message::OpenEditor(Kind::OutputName)))
                     .style(p.quiet())
             ]
             .align_y(Alignment::Center),

@@ -74,9 +74,11 @@ The older native `dark` preference migrates to the corresponding Dark or Light
 preset. New settings default to Dark. See [themes](themes.md) and the
 [UI redesign record](ui-redesign.md).
 
-`mise run qualify:ui` captures 57 views: eight panels at two window sizes in all
-three presets, plus single-song, welcome and 10,000-occurrence list scenarios in
-each preset. Outputs go under `target/native-snapshots`. A graphical session or
+`mise run qualify:ui` defines 96 views across the three presets: 48 album panel
+views, 24 song views (review, preview, tags and options), 12 playlist views
+(review and preview), six long-metadata song reviews and six normal-size welcome
+or 10,000-occurrence list views. Album, song, playlist and long-metadata cases
+use both window sizes. Outputs go under `target/native-snapshots`. A graphical session or
 an explicitly configured virtual display is required. Inspect the rendered
 images; a written PNG alone does not establish layout or accessibility acceptance.
 
@@ -84,13 +86,16 @@ For one capture, use `mise run snapshot`. The binary accepts
 `--screenshot /absolute/path.png`,
 `--panel preview|settings|appearance|options|editor|bulk|crop`, `--compact`,
 `--light` and `--mocha`. `--dark` is also accepted for an explicit Dark preset.
-`--song`, `--empty` and `--stress` provide isolated scenario fixtures.
+`--song`, `--playlist`, `--empty` and `--stress` provide isolated scenario fixtures.
+Combine `--song --long` to inspect long title, artist and album metadata.
+`mise run example` or `--example` opens fictional content explicitly; the ordinary
+app does not expose a sample album link.
 `--theme-file /absolute/path.toml` applies a custom theme only in the isolated
 screenshot/example flow; it does not replace the ordinary saved appearance.
 These modes use fictional data, leave real saved reviews in place and disable
 downloads.
 
-The native interface supports JPEG/PNG file selection or dropping an image onto
+The native interface supports JPEG/PNG/WebP file selection or dropping an image onto
 a review, source thumbnail previews, and a draggable square crop with a size
 slider and exact numeric bounds. The native app uses the platform menus supplied
 by winit. On macOS, Quit is routed through the same save-and-cancel close pipeline as closing the window.
@@ -105,6 +110,9 @@ window. Cancelling a downloader update stops publication, although closing may
 wait for a bounded HTTP request already in progress (up to 90 seconds).
 
 ## Acceptance record
+
+See the [native workflow pass](native-workflow-verification.md) for the subsequent
+song/album/playlist, artwork, metadata, theme and export fixes and their evidence.
 
 See the [initial native port verification record](native-verification.md) for
 the original port results and the [UI redesign record](ui-redesign.md) for the

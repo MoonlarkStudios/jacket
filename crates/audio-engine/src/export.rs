@@ -8,7 +8,7 @@ use crate::{
 use sha2::{Digest, Sha256};
 use std::{
     fs,
-    io::{Read, Write},
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     process::Command,
     thread,
@@ -426,7 +426,7 @@ fn artwork(tools: &Toolchain, source: &str, dir: &Path, cancel: &Cancellation) -
     cancel.check()?;
     fs::create_dir_all(dir)?;
     let output = dir.join(format!("{}.jpg", hash_bytes(source.as_bytes())));
-    if output.is_file() {
+    if complete_jpeg(&output) {
         return Ok(output);
     }
     let client = reqwest::blocking::Client::builder()
@@ -449,25 +449,69 @@ fn artwork(tools: &Toolchain, source: &str, dir: &Path, cancel: &Cancellation) -
             "Artwork exceeds the 10 MiB image limit.".into(),
         ));
     }
-    let raw = dir.join("image-input");
+    normalize_artwork(tools, &bytes, dir, &output, cancel)?;
+    Ok(output)
+}
+
+// A previous process may have stopped while writing an image. Do not reuse a
+// truncated cache entry just because its final filename exists.
+fn complete_jpeg(path: &Path) -> bool {
+    if !fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.len() >= 4) {
+        return false;
+    }
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+    let mut marker = [0; 2];
+    file.read_exact(&mut marker).is_ok()
+        && marker == [0xff, 0xd8]
+        && file.seek(SeekFrom::End(-2)).is_ok()
+        && file.read_exact(&mut marker).is_ok()
+        && marker == [0xff, 0xd9]
+}
+
+fn normalize_artwork(
+    tools: &Toolchain,
+    bytes: &[u8],
+    dir: &Path,
+    output: &Path,
+    cancel: &Cancellation,
+) -> Result<()> {
+    let scratch = tempfile::tempdir_in(dir)?;
+    let raw = scratch.path().join("image-input");
     fs::write(&raw, bytes)?;
+    let staged = tempfile::Builder::new()
+        .suffix(".jpg")
+        .tempfile_in(scratch.path())?;
     run(
         Command::new(&tools.ffmpeg)
-            .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+            .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-threads", "1", "-i"])
             .arg(&raw)
             .args([
                 "-frames:v",
                 "1",
                 "-vf",
-                "scale=2000:2000:force_original_aspect_ratio=decrease",
+                "scale=w='min(2000,iw)':h='min(2000,ih)':force_original_aspect_ratio=decrease:force_divisible_by=1",
                 "-q:v",
                 "2",
+                "-threads",
+                "1",
+                "-filter_threads",
+                "1",
             ])
-            .arg(&output),
+            .arg(staged.path()),
         cancel,
         Duration::from_secs(30),
     )?;
-    Ok(output)
+    cancel.check()?;
+    if !complete_jpeg(staged.path()) {
+        return Err(EngineError::Invalid(
+            "The cover image could not be prepared.".into(),
+        ));
+    }
+    staged.as_file().sync_all()?;
+    staged.persist(output).map_err(|error| error.error)?;
+    Ok(())
 }
 
 pub struct AudioPreparation<'a> {
@@ -1426,6 +1470,176 @@ mod tests {
         let saved = write_folder(&[], &output, &Cancellation::default()).unwrap();
         assert_eq!(saved, dir.path().join("Album (2)"));
         assert!(output.symlink_metadata().unwrap().file_type().is_symlink());
+    }
+
+    #[test]
+    fn artwork_normalization_keeps_small_sources_and_caps_large_dimensions() {
+        let (Some(ffmpeg), Some(ffprobe)) = (
+            crate::process::find_tool("ffmpeg"),
+            crate::process::find_tool("ffprobe"),
+        ) else {
+            return;
+        };
+        let tools = Toolchain {
+            yt_dlp: "unused".into(),
+            ffmpeg,
+            ffprobe,
+            node: None,
+        };
+        let dir = tempfile::tempdir().expect("image conversion fixture");
+        for ((width, height), (expected_width, expected_height)) in [
+            ((544, 544), (544, 544)),
+            ((641, 401), (641, 401)),
+            ((3200, 1600), (2000, 1000)),
+            ((1600, 3200), (1000, 2000)),
+        ] {
+            let source = dir.path().join("source.png");
+            run(
+                Command::new(&tools.ffmpeg)
+                    .args([
+                        "-hide_banner",
+                        "-loglevel",
+                        "error",
+                        "-y",
+                        "-f",
+                        "lavfi",
+                        "-i",
+                        &format!("testsrc=size={width}x{height}"),
+                        "-frames:v",
+                        "1",
+                        "-threads",
+                        "1",
+                    ])
+                    .arg(&source),
+                &Cancellation::default(),
+                Duration::from_secs(10),
+            )
+            .expect("generated cover");
+            let output = dir.path().join("normalized.jpg");
+            normalize_artwork(
+                &tools,
+                &fs::read(source).unwrap(),
+                dir.path(),
+                &output,
+                &Cancellation::default(),
+            )
+            .expect("normalized JPEG");
+            let dimensions = run(
+                Command::new(&tools.ffprobe)
+                    .args([
+                        "-v",
+                        "error",
+                        "-select_streams",
+                        "v:0",
+                        "-show_entries",
+                        "stream=width,height",
+                        "-of",
+                        "csv=p=0",
+                    ])
+                    .arg(output),
+                &Cancellation::default(),
+                Duration::from_secs(10),
+            )
+            .expect("read normalized dimensions");
+            assert_eq!(
+                String::from_utf8_lossy(&dimensions).trim(),
+                format!("{expected_width},{expected_height}")
+            );
+        }
+    }
+
+    #[test]
+    fn artwork_cache_requires_both_jpeg_markers() {
+        let file = tempfile::NamedTempFile::new().expect("cache fixture");
+        for bytes in [b"".as_slice(), b"\xff\xd8partial", b"not jpeg\xff\xd9"] {
+            fs::write(file.path(), bytes).expect("incomplete image");
+            assert!(!complete_jpeg(file.path()));
+        }
+        fs::write(file.path(), b"\xff\xd8image\xff\xd9").expect("complete image markers");
+        assert!(complete_jpeg(file.path()));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn failed_and_cancelled_cover_conversion_never_publish_partial_cache() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().expect("conversion fixture");
+        let images = dir.path().join("images");
+        fs::create_dir(&images).expect("cache directory");
+        let output = images.join("cover.jpg");
+        let ffmpeg = dir.path().join("ffmpeg");
+        let tools = Toolchain {
+            yt_dlp: dir.path().join("unused-downloader"),
+            ffmpeg: ffmpeg.clone(),
+            ffprobe: dir.path().join("unused-probe"),
+            node: None,
+        };
+        fs::write(
+            &ffmpeg,
+            "#!/bin/sh\nfor output do :; done\nprintf '\\377\\330partial' > \"$output\"\nexit 1\n",
+        )
+        .expect("failing converter");
+        fs::set_permissions(&ffmpeg, fs::Permissions::from_mode(0o755))
+            .expect("executable fixture");
+        assert!(normalize_artwork(
+            &tools,
+            b"source",
+            &images,
+            &output,
+            &Cancellation::default()
+        )
+        .is_err());
+        assert!(!output.exists());
+        assert_eq!(fs::read_dir(&images).expect("cache").count(), 0);
+
+        let ready = dir.path().join("ready");
+        fs::write(&ffmpeg, format!("#!/bin/sh\nfor output do :; done\nprintf '\\377\\330partial' > \"$output\"\ntouch '{}'\nsleep 30\n", ready.display())).expect("cancellable converter");
+        let cancel = Cancellation::default();
+        let worker_cancel = cancel.clone();
+        let worker_images = images.clone();
+        let worker_output = output.clone();
+        let worker_tools = tools.clone();
+        let worker = thread::spawn(move || {
+            normalize_artwork(
+                &worker_tools,
+                b"source",
+                &worker_images,
+                &worker_output,
+                &worker_cancel,
+            )
+        });
+        let started = Instant::now();
+        while !ready.exists() && started.elapsed() < Duration::from_secs(2) {
+            thread::sleep(Duration::from_millis(5));
+        }
+        cancel.cancel();
+        assert!(matches!(
+            worker.join().expect("conversion worker"),
+            Err(EngineError::Cancelled)
+        ));
+        assert!(
+            ready.exists(),
+            "the converter must have started writing before cancellation"
+        );
+        assert!(!output.exists());
+        assert_eq!(fs::read_dir(&images).expect("cache").count(), 0);
+
+        // A fresh retry replaces a cache fragment left by an older version.
+        fs::write(&output, b"old partial image").expect("old incomplete cache");
+        fs::write(&ffmpeg, "#!/bin/sh\nfor output do :; done\nprintf '\\377\\330complete\\377\\331' > \"$output\"\n").expect("successful converter");
+        normalize_artwork(
+            &tools,
+            b"source",
+            &images,
+            &output,
+            &Cancellation::default(),
+        )
+        .expect("fresh conversion");
+        assert_eq!(
+            fs::read(&output).expect("completed cache"),
+            b"\xff\xd8complete\xff\xd9"
+        );
+        assert_eq!(fs::read_dir(&images).expect("cache").count(), 1);
     }
 
     #[test]

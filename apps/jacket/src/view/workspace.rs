@@ -11,151 +11,13 @@ use iced::{Alignment, Element, Length};
 pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
     let p = app.presentation();
     let content: Element<'_, Message> = if let Some(review) = &app.review {
-        let title = if review.inspection.tracks.len() == 1 {
-            review.inspection.tracks[0].metadata.title.as_str()
-        } else if review.preferences.mode == CollectionMode::Album
-            && !review.preferences.album_title.trim().is_empty()
-        {
-            review.preferences.album_title.as_str()
+        let left: Element<'_, Message> = if review.is_song() {
+            super::song::view(app, compact)
         } else {
-            review.inspection.title.as_str()
+            collection(app, compact)
         };
-        let artist = if review.inspection.tracks.len() == 1 {
-            review.inspection.tracks[0].metadata.artist.as_str()
-        } else if !review.preferences.album_artist.trim().is_empty() {
-            review.preferences.album_artist.as_str()
-        } else {
-            ""
-        };
-        let duration: f64 = review
-            .inspection
-            .tracks
-            .iter()
-            .filter_map(|track| track.duration)
-            .sum();
-        let count = review.inspection.tracks.len();
-        let metadata = [
-            (!artist.is_empty()).then(|| artist.to_owned()),
-            review.preferences.year.map(|year| year.to_string()),
-            Some(format!(
-                "{count} {}",
-                if count == 1 { "track" } else { "tracks" }
-            )),
-            (duration > 0.0).then(|| components::duration(duration)),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join("  ·  ");
-        let mut details = column![
-            iced::widget::tooltip(
-                container(
-                    text(title)
-                        .font(style::semibold())
-                        .size(if compact { 20 } else { 24 })
-                        .wrapping(iced::widget::text::Wrapping::None)
-                )
-                .width(Length::Fill)
-                .height(if compact { 28 } else { 32 })
-                .clip(true),
-                container(text(title).size(13).width(360))
-                    .padding(10)
-                    .style(move |_| p.panel()),
-                iced::widget::tooltip::Position::Bottom,
-            ),
-            container(
-                text(metadata)
-                    .size(12)
-                    .color(p.colors.text_muted)
-                    .wrapping(iced::widget::text::Wrapping::None)
-            )
-            .width(Length::Fill)
-            .height(18)
-            .clip(true),
-        ]
-        .spacing(8)
-        .width(Length::Fill);
-        let kind = if count == 1 {
-            Kind::Track(0)
-        } else {
-            Kind::Album
-        };
-        let mut actions = row![button(
-            row![
-                icons::view(Icon::Edit, p.colors.text_muted, 13.0),
-                text(if count == 1 {
-                    "Edit tags"
-                } else {
-                    "Edit album"
-                })
-                .size(12)
-            ]
-            .spacing(6)
-            .align_y(Alignment::Center)
-        )
-        .padding([5, 0])
-        .on_press_maybe((!app.busy()).then_some(Message::OpenEditor(kind)))
-        .style(p.quiet()),]
-        .spacing(12)
-        .align_y(Alignment::Center);
-        if !app.example && !review.inspection.warnings.is_empty() {
-            actions = actions.push(
-                button(
-                    text(format!(
-                        "{} source {}",
-                        review.inspection.warnings.len(),
-                        if review.inspection.warnings.len() == 1 {
-                            "note"
-                        } else {
-                            "notes"
-                        }
-                    ))
-                    .size(12)
-                    .color(p.colors.warning),
-                )
-                .padding([5, 0])
-                .on_press(Message::OpenPanel(Panel::SourceNotes))
-                .style(p.quiet()),
-            );
-        }
-        if app.example {
-            actions = actions
-                .push(
-                    container(text("Example").size(10))
-                        .padding([3, 6])
-                        .style(move |_| p.badge()),
-                )
-                .push(
-                    button("Close example")
-                        .padding([5, 0])
-                        .on_press_maybe((!app.busy()).then_some(Message::ConfirmReset))
-                        .style(p.quiet()),
-                );
-        }
-        details = details.push(actions);
-        let hero = row![
-            components::cover(
-                app,
-                if compact { 86.0 } else { 104.0 },
-                CoverContext::Source
-            ),
-            details
-        ]
-        .spacing(if compact { 16 } else { 20 })
-        .align_y(Alignment::Center);
-        let left = column![
-            container(hero)
-                .padding(if compact { 16 } else { 22 })
-                .width(Length::Fill),
-            rule::horizontal(1).style(p.line()),
-            container(crate::track_list::view(app, compact))
-                .padding(if compact { 12 } else { 16 })
-                .height(Length::Fill),
-        ]
-        .height(Length::Fill)
-        .width(Length::Fill);
         if compact {
-            left.into()
+            left
         } else {
             row![
                 left,
@@ -281,6 +143,165 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
     }
 }
 
+fn collection(app: &App, compact: bool) -> Element<'_, Message> {
+    let p = app.presentation();
+    let Some(review) = &app.review else {
+        return space().into();
+    };
+    let title = if review.preferences.mode == CollectionMode::Album
+        && !review.preferences.album_title.trim().is_empty()
+    {
+        review.preferences.album_title.as_str()
+    } else {
+        review.inspection.title.as_str()
+    };
+    let artist = if !review.preferences.album_artist.trim().is_empty() {
+        review.preferences.album_artist.as_str()
+    } else {
+        ""
+    };
+    let duration: f64 = review
+        .inspection
+        .tracks
+        .iter()
+        .filter_map(|track| track.duration)
+        .sum();
+    let count = review.inspection.tracks.len();
+    let metadata = [
+        (!artist.is_empty()).then(|| artist.to_owned()),
+        review.preferences.year.map(|year| year.to_string()),
+        Some(format!(
+            "{count} {}",
+            if count == 1 { "track" } else { "tracks" }
+        )),
+        (duration > 0.0).then(|| components::duration(duration)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join("  ·  ");
+    let mut details = column![
+        text(if review.preferences.mode == CollectionMode::Album {
+            "Album"
+        } else {
+            "Playlist"
+        })
+        .size(11)
+        .color(p.colors.accent),
+        iced::widget::tooltip(
+            container(
+                text(title)
+                    .font(style::semibold())
+                    .size(if compact { 20 } else { 24 })
+                    .wrapping(iced::widget::text::Wrapping::None)
+            )
+            .width(Length::Fill)
+            .height(if compact { 28 } else { 32 })
+            .clip(true),
+            container(text(title).size(13).width(360))
+                .padding(10)
+                .style(move |_| p.panel()),
+            iced::widget::tooltip::Position::Bottom,
+        ),
+        container(
+            text(metadata)
+                .size(12)
+                .color(p.colors.text_muted)
+                .wrapping(iced::widget::text::Wrapping::None)
+        )
+        .width(Length::Fill)
+        .height(18)
+        .clip(true),
+    ]
+    .spacing(8)
+    .width(Length::Fill);
+    let album = review.preferences.mode == CollectionMode::Album;
+    let kind = if album { Kind::Album } else { Kind::OutputName };
+    let mut actions = row![button(
+        row![
+            icons::view(Icon::Edit, p.colors.text_muted, 13.0),
+            text(if album {
+                "Edit album"
+            } else {
+                "Rename playlist"
+            })
+            .size(12)
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center)
+    )
+    .padding([5, 0])
+    .on_press_maybe((!app.busy()).then_some(Message::OpenEditor(kind)))
+    .style(p.quiet()),]
+    .spacing(12)
+    .align_y(Alignment::Center);
+    if !app.example && !review.inspection.warnings.is_empty() {
+        actions = actions.push(
+            button(
+                text(format!(
+                    "{} source {}",
+                    review.inspection.warnings.len(),
+                    if review.inspection.warnings.len() == 1 {
+                        "note"
+                    } else {
+                        "notes"
+                    }
+                ))
+                .size(12)
+                .color(p.colors.warning),
+            )
+            .padding([5, 0])
+            .on_press(Message::OpenPanel(Panel::SourceNotes))
+            .style(p.quiet()),
+        );
+    }
+    if app.source_cover_error.is_some() {
+        actions = actions.push(
+            button("Retry cover")
+                .padding([5, 0])
+                .on_press_maybe((!app.busy()).then_some(Message::RetryArtwork))
+                .style(p.quiet()),
+        );
+    }
+    if app.example {
+        actions = actions
+            .push(
+                container(text("Example").size(10))
+                    .padding([3, 6])
+                    .style(move |_| p.badge()),
+            )
+            .push(
+                button("Close example")
+                    .padding([5, 0])
+                    .on_press_maybe((!app.busy()).then_some(Message::ConfirmReset))
+                    .style(p.quiet()),
+            );
+    }
+    details = details.push(actions);
+    let hero = row![
+        components::cover(
+            app,
+            if compact { 86.0 } else { 104.0 },
+            CoverContext::Source
+        ),
+        details
+    ]
+    .spacing(if compact { 16 } else { 20 })
+    .align_y(Alignment::Center);
+    let collection = column![
+        container(hero)
+            .padding(if compact { 16 } else { 22 })
+            .width(Length::Fill),
+        rule::horizontal(1).style(p.line()),
+        container(crate::track_list::view(app, compact))
+            .padding(if compact { 12 } else { 16 })
+            .height(Length::Fill),
+    ]
+    .height(Length::Fill)
+    .width(Length::Fill);
+    collection.into()
+}
+
 fn empty_workspace(app: &App) -> Element<'_, Message> {
     let p = app.presentation();
     let emblem = container(icons::view(Icon::Link, p.colors.accent, 28.0))
@@ -307,12 +328,17 @@ fn empty_workspace(app: &App) -> Element<'_, Message> {
     .padding([11, 18])
     .on_press_maybe((!app.busy()).then_some(Message::PasteLink))
     .style(p.primary());
-    let example = button("View example album")
-        .on_press_maybe((!app.busy()).then_some(Message::Example))
-        .style(p.quiet());
-    let content = column![emblem, title, description, paste, example]
+    let mut content = column![emblem, title, description, paste]
         .spacing(18)
         .align_x(Alignment::Center)
         .max_width(390);
+    // Fictional data is an explicit developer entry point, never an ordinary CTA.
+    if app.example {
+        content = content.push(
+            button("Open example album")
+                .on_press_maybe((!app.busy()).then_some(Message::Example))
+                .style(p.quiet()),
+        );
+    }
     container(content).center(Length::Fill).padding(24).into()
 }

@@ -18,6 +18,7 @@ pub enum Icon {
     Upload,
     Check,
     Edit,
+    Info,
 }
 
 pub fn view(icon: Icon, color: Color, size: f32) -> Element<'static, Message> {
@@ -42,6 +43,7 @@ pub fn view(icon: Icon, color: Color, size: f32) -> Element<'static, Message> {
         Icon::Close => r#"<path d="m6 6 12 12M18 6 6 18"/>"#,
         Icon::Upload => r#"<path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/>"#,
         Icon::Check => r#"<path d="m5 12 4 4L19 6"/>"#,
+        Icon::Info => r#"<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v.1"/>"#,
         Icon::Edit => r#"<path d="m16 3 5 5-12 12-6 1 1-6Z"/><path d="m14 5 5 5"/>"#,
     };
     let color = format!(

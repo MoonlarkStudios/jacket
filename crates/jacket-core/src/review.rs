@@ -2,7 +2,8 @@ use crate::bulk_edit::{self, Change};
 use crate::preferences;
 use crate::{BulkEdits, BulkPreview, CompletionIdentity, Preferences, ReviewDraft};
 use audio_engine::{
-    AudioFormat, AuthOptions, CollectionMode, ExportPlan, Inspection, Metadata, OutputKind,
+    ArtworkMode, AudioFormat, AuthOptions, CollectionMode, ExportPlan, Inspection, Metadata,
+    OutputKind,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -189,6 +190,30 @@ impl Review {
         Ok(())
     }
 
+    /// A one-track source has one cover and one metadata presentation even when
+    /// its source identified it as an album. Selection does not change intent.
+    pub fn is_song(&self) -> bool {
+        self.inspection.tracks.len() == 1
+    }
+
+    /// The tags used in the export, without changing the inspected or edited
+    /// per-track values. Shared album values only override nonblank fields.
+    pub fn effective_metadata(&self, index: usize) -> Option<Metadata> {
+        let mut metadata = self.inspection.tracks.get(index)?.metadata.clone();
+        if self.preferences.mode == CollectionMode::Album {
+            if !self.preferences.album_title.trim().is_empty() {
+                metadata.album = self.preferences.album_title.trim().into();
+            }
+            if !self.preferences.album_artist.trim().is_empty() {
+                metadata.album_artist = self.preferences.album_artist.trim().into();
+            }
+            if let Some(year) = self.preferences.year {
+                metadata.release_year = Some(year);
+            }
+        }
+        Some(metadata)
+    }
+
     pub fn plan(&self, auth: AuthOptions) -> Result<ExportPlan, String> {
         if self.preferences.title.trim().is_empty() {
             return Err("Enter a name for the export.".into());
@@ -216,27 +241,38 @@ impl Review {
         let mut tracks = Vec::with_capacity(self.selected.len());
         for &index in &self.selected {
             let mut track = self.inspection.tracks[index].clone();
-            if self.preferences.mode == CollectionMode::Album {
-                if !self.preferences.album_title.trim().is_empty() {
-                    track.metadata.album = self.preferences.album_title.trim().into();
-                }
-                if !self.preferences.album_artist.trim().is_empty() {
-                    track.metadata.album_artist = self.preferences.album_artist.trim().into();
-                }
-                if let Some(year) = self.preferences.year {
-                    track.metadata.release_year = Some(year);
-                }
-            }
+            track.metadata = self
+                .effective_metadata(index)
+                .ok_or("Invalid track selection.")?;
             validate_metadata(&track.metadata)?;
             tracks.push(track);
         }
+        // Older drafts used per-track artwork for a song. Resolve the same
+        // single image as Shared so the simplified cover control, preview and
+        // actual export agree without rewriting a saved draft on restoration.
+        let artwork_mode =
+            if self.is_song() && matches!(self.preferences.artwork_mode, ArtworkMode::PerTrack) {
+                ArtworkMode::Shared
+            } else {
+                self.preferences.artwork_mode
+            };
+        let shared_artwork_url = self.preferences.shared_artwork.clone().or_else(|| {
+            self.is_song()
+                .then(|| {
+                    self.inspection.tracks[0]
+                        .artwork_url
+                        .clone()
+                        .or_else(|| self.inspection.artwork_url.clone())
+                })
+                .flatten()
+        });
         Ok(ExportPlan {
             title: self.preferences.title.clone(),
             source_url: self.inspection.source_url.clone(),
             mode: self.preferences.mode,
             format: self.preferences.format,
-            artwork_mode: self.preferences.artwork_mode,
-            shared_artwork_url: self.preferences.shared_artwork.clone(),
+            artwork_mode,
+            shared_artwork_url,
             shared_artwork_asset: self.preferences.shared_artwork_asset.clone(),
             shared_artwork_path: None,
             output_kind: self.preferences.output_kind,

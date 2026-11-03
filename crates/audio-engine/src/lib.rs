@@ -4,6 +4,7 @@ mod error;
 pub mod export;
 pub mod models;
 pub mod process;
+mod song_artwork;
 pub mod source;
 pub mod tagging;
 

@@ -41,7 +41,8 @@ Node and the check tools. Node is used by yt-dlp for JavaScript challenges;
 runs discover FFmpeg, ffprobe and yt-dlp from your installation. `mise run doctor`
 checks those prerequisites without changing the machine.
 
-Explore fictional tracks with `mise run example`. Example content is for interface
+Explore fictional tracks with `mise run example` (the binary's `--example` flag).
+The ordinary app has no example entry point. Example content is for interface
 review; real downloads require an inspected source.
 
 ## Prepare your audio
@@ -78,8 +79,9 @@ warnings and SHA-256 hashes.
 
 The workspace uses the same semantic surface hierarchy, Geist typography and
 compact controls as Resonant v2, with Jacket's copper identity. The review keeps
-album artwork and release details beside an ordered track table. The Export
-inspector groups the output, format, artwork and tag choices; the file preview
+album artwork and release details beside an ordered track table. A song has its
+own focused view for one recording's tags and cover. Albums share release details;
+playlists retain individual track details. The Export inspector groups the output, format, artwork and tag choices; the file preview
 shows the selected cover, effective tags and filenames before saving. At narrow
 window sizes, Export options open in a panel and Preview remains visible.
 
@@ -87,7 +89,8 @@ Choose **Theme** in the header to select Jacket Dark, Jacket Light or Catppuccin
 Mocha, or load a custom TOML theme. Theme definitions use Resonant v2's version 1
 semantic format. Imported definitions are retained with the application settings;
 changing appearance preserves the review and export state. See [themes](docs/themes.md)
-and the [native UI redesign](docs/ui-redesign.md).
+and the [native UI redesign](docs/ui-redesign.md). The latest artwork, editing and
+export checks are recorded in the [workflow pass](docs/native-workflow-verification.md).
 
 ## Local data and access
 
@@ -115,7 +118,7 @@ content. It is not affiliated with YouTube or Google.
 mise run check       # Native formatting, Clippy, unit tests, scripts and workflows
 mise run test:media  # Offline FFmpeg exports, archives and independent tag checks
 mise run build       # target/release/jacket
-mise run qualify:ui  # Capture 57 native views across themes and sizes; needs a display
+mise run qualify:ui  # Capture 96 native workflow views; needs a display
 ```
 
 Build output honors `CARGO_TARGET_DIR` when set. Local app candidates with a complete bundled audio runtime:

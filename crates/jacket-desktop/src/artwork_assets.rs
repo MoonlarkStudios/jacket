@@ -46,27 +46,25 @@ fn unavailable() -> String {
 }
 
 pub(crate) fn dimensions(bytes: &[u8]) -> Result<(u32, u32), String> {
-    let dimensions = if bytes.starts_with(b"\x89PNG\r\n\x1a\n")
-        && bytes.get(12..16) == Some(b"IHDR")
-        && bytes.len() >= 24
-    {
-        (
-            u32::from_be_bytes(
-                bytes[16..20]
-                    .try_into()
-                    .expect("checked four-byte PNG width"),
-            ),
-            u32::from_be_bytes(
-                bytes[20..24]
-                    .try_into()
-                    .expect("checked four-byte PNG height"),
-            ),
-        )
-    } else if bytes.starts_with(b"\xff\xd8") {
-        jpeg_dimensions(bytes).ok_or("Choose a valid JPEG or PNG image.")?
-    } else {
-        return Err("Choose a JPEG or PNG image.".into());
-    };
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|_| "Choose a valid JPEG, PNG or WebP image.")?;
+    if !matches!(
+        reader.format(),
+        Some(image::ImageFormat::Jpeg | image::ImageFormat::Png | image::ImageFormat::WebP)
+    ) {
+        return Err("Choose a JPEG, PNG or WebP image.".into());
+    }
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(64 * 1024 * 1024);
+    limits.max_image_width = Some(MAX_DIMENSION);
+    limits.max_image_height = Some(MAX_DIMENSION);
+    reader.limits(limits);
+    // Read dimensions before decoding pixels or invoking FFmpeg. The supported
+    // codec readers handle WebP's VP8, VP8L and extended headers consistently.
+    let dimensions = reader
+        .into_dimensions()
+        .map_err(|_| "Choose a valid JPEG, PNG or WebP image.")?;
     let (width, height) = dimensions;
     if width == 0
         || height == 0
@@ -79,42 +77,6 @@ pub(crate) fn dimensions(bytes: &[u8]) -> Result<(u32, u32), String> {
         );
     }
     Ok(dimensions)
-}
-
-fn jpeg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
-    let mut offset = 2;
-    while offset < bytes.len() {
-        if *bytes.get(offset)? != 0xff {
-            return None;
-        }
-        while *bytes.get(offset)? == 0xff {
-            offset += 1;
-        }
-        let marker = *bytes.get(offset)?;
-        offset += 1;
-        if marker == 0xda || marker == 0xd9 {
-            return None;
-        }
-        if marker == 0x01 || (0xd0..=0xd8).contains(&marker) {
-            continue;
-        }
-        let length = usize::from(u16::from_be_bytes(
-            bytes.get(offset..offset + 2)?.try_into().ok()?,
-        ));
-        if length < 2 || offset.checked_add(length)? > bytes.len() {
-            return None;
-        }
-        if matches!(marker, 0xc0..=0xc3 | 0xc5..=0xc7 | 0xc9..=0xcb | 0xcd..=0xcf) {
-            if length < 8 {
-                return None;
-            }
-            let height = u16::from_be_bytes(bytes.get(offset + 3..offset + 5)?.try_into().ok()?);
-            let width = u16::from_be_bytes(bytes.get(offset + 5..offset + 7)?.try_into().ok()?);
-            return Some((u32::from(width), u32::from(height)));
-        }
-        offset += length;
-    }
-    None
 }
 
 fn bounded_read(path: &Path) -> Result<Vec<u8>, String> {
@@ -163,6 +125,15 @@ pub fn import(
     normalize(root, tools, &bytes, crop)
 }
 
+/// Snapshot a source cover using the same normalization and asset ownership as
+/// an imported file. The caller has already bounded and validated the download.
+pub(crate) fn import_bytes(root: &Path, tools: &Toolchain, bytes: &[u8]) -> Result<Asset, String> {
+    if bytes.len() > MAX_IMAGE_BYTES {
+        return Err("Choose an image smaller than 10 MiB.".into());
+    }
+    normalize(root, tools, bytes, None)
+}
+
 pub fn crop(root: &Path, tools: &Toolchain, id: &str, crop: Crop) -> Result<Asset, String> {
     let bytes = asset_bytes(root, id)?;
     normalize(root, tools, &bytes, Some(crop))
@@ -199,7 +170,7 @@ fn normalize(
             .map_err(|_| unavailable())?;
     }
     source_file.write_all(bytes).map_err(|_| unavailable())?;
-    let filter = format!("{crop_filter}scale={MAX_OUTPUT_DIMENSION}:{MAX_OUTPUT_DIMENSION}:force_original_aspect_ratio=decrease:force_divisible_by=1,format=yuvj444p");
+    let filter = format!("{crop_filter}scale=w='min({MAX_OUTPUT_DIMENSION},iw)':h='min({MAX_OUTPUT_DIMENSION},ih)':force_original_aspect_ratio=decrease:force_divisible_by=1,format=yuvj444p");
     run(
         Command::new(&tools.ffmpeg)
             .args([
@@ -234,7 +205,9 @@ fn normalize(
         &Cancellation::default(),
         Duration::from_secs(30),
     )
-    .map_err(|_| "This image could not be read. Choose a valid JPEG or PNG image.".to_string())?;
+    .map_err(|_| {
+        "This image could not be read. Choose a valid JPEG, PNG or WebP image.".to_string()
+    })?;
     let bytes = bounded_read(&output)?;
     if !bytes.starts_with(b"\xff\xd8") {
         return Err(unavailable());
@@ -428,6 +401,60 @@ mod tests {
     }
 
     #[test]
+    fn remote_webp_bytes_normalize_to_an_owned_crop_ready_jpeg() {
+        let Some(tools) = tools() else {
+            return;
+        };
+        let root = tempfile::tempdir().unwrap();
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(544, 544)
+            .write_to(&mut bytes, image::ImageFormat::WebP)
+            .expect("WebP source cover");
+        let imported =
+            import_bytes(root.path(), &tools, bytes.get_ref()).expect("own remote cover");
+        let path = resolve(root.path(), &imported.id).expect("owned JPEG path");
+        assert!(fs::read(path).unwrap().starts_with(b"\xff\xd8"));
+        assert_eq!((imported.width, imported.height), (544, 544));
+        let cropped = crop(
+            root.path(),
+            &tools,
+            &imported.id,
+            Crop {
+                x: 44,
+                y: 44,
+                size: 456,
+            },
+        )
+        .expect("crop normalized source cover");
+        assert_eq!((cropped.width, cropped.height), (456, 456));
+        assert!(
+            load(root.path(), &imported.id).is_ok(),
+            "crop keeps the source asset"
+        );
+    }
+
+    #[test]
+    fn normalization_keeps_small_sources_and_caps_large_covers_without_distortion() {
+        let Some(tools) = tools() else {
+            return;
+        };
+        let root = tempfile::tempdir().unwrap();
+        for ((width, height), expected) in [
+            ((641, 401), (641, 401)),
+            ((3200, 1600), (2000, 1000)),
+            ((1600, 3200), (1000, 2000)),
+        ] {
+            let mut bytes = std::io::Cursor::new(Vec::new());
+            image::DynamicImage::new_rgb8(width, height)
+                .write_to(&mut bytes, image::ImageFormat::Png)
+                .expect("source cover");
+            let asset =
+                import_bytes(root.path(), &tools, bytes.get_ref()).expect("normalized cover");
+            assert_eq!((asset.width, asset.height), expected);
+        }
+    }
+
+    #[test]
     fn imported_and_cropped_jpegs_survive_original_deletion() {
         let Some(tools) = tools() else {
             return;
@@ -474,8 +501,8 @@ mod tests {
         }
         fs::remove_file(&original).unwrap();
         let restored = load(&assets, &imported.id).unwrap();
-        assert_eq!(restored.width, 2000);
-        assert_eq!(restored.height, 1200);
+        assert_eq!(restored.width, 100);
+        assert_eq!(restored.height, 60);
         assert_eq!(restored.preview_data_url, imported.preview_data_url);
         assert!(restored
             .preview_data_url
@@ -488,13 +515,13 @@ mod tests {
             &tools,
             &imported.id,
             Crop {
-                x: 400,
+                x: 20,
                 y: 0,
-                size: 1200,
+                size: 60,
             },
         )
         .unwrap();
-        assert_eq!(cropped.width, cropped.height);
+        assert_eq!((cropped.width, cropped.height), (60, 60));
         assert_ne!(cropped.id, imported.id);
         assert!(load(&assets, &imported.id).is_ok());
         assert!(crop(

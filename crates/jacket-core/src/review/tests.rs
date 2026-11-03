@@ -1,6 +1,6 @@
 use crate::{BulkEdits, Review, SourceIntent, SourceLink, TitleCleanup};
 use audio_engine::{
-    AudioFormat, AuthOptions, CollectionMode, Inspection, Metadata, OutputKind, Track,
+    ArtworkMode, AudioFormat, AuthOptions, CollectionMode, Inspection, Metadata, OutputKind, Track,
 };
 
 fn inspection(mode: CollectionMode, count: usize) -> Inspection {
@@ -259,4 +259,102 @@ fn source_intent_uses_same_validated_link_as_review() {
         link.target(SourceIntent::Playlist),
         "https://www.youtube.com/playlist?list=PLabcdefghijk"
     );
+}
+
+#[test]
+fn a_song_has_one_cover_and_prefers_its_track_artwork() {
+    let mut source = inspection(CollectionMode::Collection, 1);
+    source.artwork_url = Some("https://i.ytimg.com/source.jpg".into());
+    source.tracks[0].artwork_url = Some("https://lh3.googleusercontent.com/album-cover".into());
+    let review = Review::new(source, AudioFormat::Compatible);
+    assert!(review.is_song());
+    assert!(matches!(
+        review.preferences.artwork_mode,
+        ArtworkMode::Shared
+    ));
+    assert_eq!(
+        review.preferences.shared_artwork.as_deref(),
+        Some("https://lh3.googleusercontent.com/album-cover")
+    );
+    assert!(matches!(
+        review
+            .plan(AuthOptions::default())
+            .expect("song plan")
+            .artwork_mode,
+        ArtworkMode::Shared
+    ));
+    assert!(!Review::new(inspection(CollectionMode::Album, 2), AudioFormat::Mp3).is_song());
+}
+
+#[test]
+fn legacy_song_cover_settings_resolve_without_mutating_the_saved_review() {
+    let mut source = inspection(CollectionMode::Collection, 1);
+    source.tracks[0].artwork_url = Some("https://i.ytimg.com/song.jpg".into());
+    let mut review = Review::new(source, AudioFormat::Mp3);
+    review.preferences.artwork_mode = ArtworkMode::PerTrack;
+    review.preferences.shared_artwork = None;
+    let before = serde_json::to_string(&review.draft()).expect("saved review");
+    let plan = review
+        .plan(AuthOptions::default())
+        .expect("legacy song plan");
+    assert!(matches!(plan.artwork_mode, ArtworkMode::Shared));
+    assert_eq!(
+        plan.shared_artwork_url.as_deref(),
+        Some("https://i.ytimg.com/song.jpg")
+    );
+    assert_eq!(
+        serde_json::to_string(&review.draft()).expect("saved review"),
+        before
+    );
+    review.preferences.artwork_mode = ArtworkMode::None;
+    assert!(matches!(
+        review
+            .plan(AuthOptions::default())
+            .expect("without cover")
+            .artwork_mode,
+        ArtworkMode::None
+    ));
+    review.preferences.artwork_mode = ArtworkMode::Shared;
+    review.preferences.shared_artwork_asset = Some("chosen-local-cover".into());
+    assert_eq!(
+        review
+            .plan(AuthOptions::default())
+            .expect("local cover")
+            .shared_artwork_asset
+            .as_deref(),
+        Some("chosen-local-cover")
+    );
+}
+
+#[test]
+fn effective_metadata_matches_export_and_never_changes_source_tags() {
+    let mut review = Review::new(inspection(CollectionMode::Album, 2), AudioFormat::Mp3);
+    review
+        .update_album(
+            " Shared album ".into(),
+            " Shared artist ".into(),
+            Some(2025),
+        )
+        .expect("album tags");
+    let tags = review.effective_metadata(0).expect("effective metadata");
+    assert_eq!(tags.album, "Shared album");
+    assert_eq!(tags.album_artist, "Shared artist");
+    assert_eq!(tags.release_year, Some(2025));
+    let plan = review.plan(AuthOptions::default()).expect("export");
+    assert_eq!(
+        serde_json::to_value(&tags).expect("tags"),
+        serde_json::to_value(&plan.tracks[0].metadata).expect("planned tags")
+    );
+    assert_eq!(review.inspection.tracks[0].metadata.album, "Example album");
+    assert_eq!(
+        review.inspection.tracks[0].source_metadata.release_year,
+        Some(2019)
+    );
+    assert!(review.effective_metadata(99).is_none());
+    review
+        .set_mode(CollectionMode::Collection)
+        .expect("individual tags");
+    let tags = review.effective_metadata(0).expect("individual metadata");
+    assert_eq!(tags.album, "Example album");
+    assert_eq!(tags.release_year, Some(2019));
 }

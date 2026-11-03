@@ -37,8 +37,9 @@ Every color is an opaque six-digit sRGB `#RRGGBB` value. Alpha, shorthand, named
 colors, unknown fields and unsupported versions are rejected with a useful
 error. Authoring controls semantic roles rather than individual widgets or
 interaction states. Hover, pressed, selection and scrim colors are derived once
-when a theme is selected. Overriding `accent` also changes `accent_strong` unless
-the file supplies an explicit strong accent.
+when a theme is selected. Text fields use a stronger selection highlight than
+selected table rows, keeping editing selections visible. Overriding `accent` also
+changes `accent_strong` unless the file supplies an explicit strong accent.
 
 Jacket uses `background`, `chrome`, `panel`, `raised`, `border`, `text`,
 `text_muted`, `accent`, `accent_strong`, `accent_text`, `success`, `warning`,

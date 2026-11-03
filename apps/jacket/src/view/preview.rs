@@ -4,7 +4,7 @@ use crate::app::{App, Message};
 use crate::icons::{self, Icon};
 use crate::style::{self, Presentation};
 use audio_engine::{ArtworkMode, AudioFormat, ExportPlan, ExportPreview, Metadata, OutputKind};
-use iced::widget::{column, container, row, rule, text, Column};
+use iced::widget::{button, column, container, row, rule, text, Column};
 use iced::{Alignment, Element, Length};
 use std::collections::HashSet;
 
@@ -51,8 +51,10 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
         heading = heading.push(text(year.to_string()).size(12).color(p.colors.text_muted));
     }
     let artwork_label = match plan.artwork_mode {
+        ArtworkMode::Shared if preview.tracks.len() == 1 => "Song cover",
+        ArtworkMode::Shared if plan.mode == audio_engine::CollectionMode::Album => "Album cover",
         ArtworkMode::Shared => "Shared cover",
-        ArtworkMode::PerTrack if preview.tracks.len() == 1 => "Track artwork",
+        ArtworkMode::PerTrack if preview.tracks.len() == 1 => "Song cover",
         ArtworkMode::PerTrack => "Artwork from each track",
         ArtworkMode::None => "No artwork",
     };
@@ -77,6 +79,14 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
     ]
     .spacing(14)
     .width(Length::Fill);
+    if app.preview_cover_error.is_some() {
+        body = body.push(
+            button("Retry cover preview")
+                .padding([5, 0])
+                .on_press_maybe((!app.busy()).then_some(Message::RetryArtwork))
+                .style(p.quiet()),
+        );
+    }
     if plan.output_kind == OutputKind::File {
         if let Some(track) = preview.tracks.first() {
             let metadata = &track.metadata;
@@ -253,7 +263,7 @@ struct Summary {
 
 impl Summary {
     fn new(preview: &ExportPreview, plan: &ExportPlan) -> Self {
-        let album = shared(
+        let shared_album = shared(
             preview
                 .tracks
                 .iter()
@@ -304,9 +314,17 @@ impl Summary {
                 .first()
                 .map(|track| track.metadata.title.clone())
                 .unwrap_or_else(|| plan.title.clone())
+        } else if plan.mode == audio_engine::CollectionMode::Album {
+            shared_album.clone().unwrap_or_else(|| plan.title.clone())
         } else {
-            album.clone().unwrap_or_else(|| plan.title.clone())
+            plan.title.clone()
         };
+        // A playlist may happen to contain songs from one album. Keep that
+        // album on its track rows instead of presenting it as the playlist name.
+        let album = (plan.mode == audio_engine::CollectionMode::Album
+            || plan.output_kind == OutputKind::File)
+            .then_some(shared_album)
+            .flatten();
         let year = shared(
             preview
                 .tracks
@@ -388,5 +406,33 @@ fn output_icon(kind: OutputKind) -> Icon {
         OutputKind::File => Icon::File,
         OutputKind::Folder => Icon::Folder,
         OutputKind::Zip => Icon::Archive,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Summary;
+    use audio_engine::{AudioFormat, AuthOptions, CollectionMode, OutputKind};
+    use jacket_core::Review;
+
+    #[test]
+    fn a_playlists_common_album_does_not_replace_its_name_or_hide_track_albums() {
+        let mut inspection = crate::example::album();
+        inspection.suggested_mode = CollectionMode::Collection;
+        inspection.title = "Evening rotation".into();
+        let review = Review::new(inspection, AudioFormat::Mp3);
+        let mut plan = review.plan(AuthOptions::default()).expect("playlist");
+        for kind in [OutputKind::Folder, OutputKind::Zip] {
+            plan.output_kind = kind;
+            let preview = audio_engine::preview_export(&plan).expect("preview");
+            let summary = Summary::new(&preview, &plan);
+            assert_eq!(summary.title, "Evening rotation");
+            assert!(summary
+                .track_detail(&preview.tracks[0].metadata)
+                .contains("Room to breathe"));
+        }
+        plan.mode = CollectionMode::Album;
+        let preview = audio_engine::preview_export(&plan).expect("album preview");
+        assert_eq!(Summary::new(&preview, &plan).title, "Room to breathe");
     }
 }

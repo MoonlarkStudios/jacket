@@ -6,6 +6,9 @@ use crate::{
 use serde_json::Value;
 use std::{process::Command, time::Duration};
 
+pub(crate) const ARTWORK_WARNING: &str =
+    "Artwork candidates are source images and may be video thumbnails rather than album covers.";
+
 pub fn validate_source_url(input: &str) -> Result<String> {
     let url = url::Url::parse(input.trim())
         .map_err(|_| EngineError::Invalid("Enter a valid YouTube or YouTube Music URL.".into()))?;
@@ -135,10 +138,21 @@ pub fn artwork_url(value: &Value) -> Option<String> {
         .get("thumbnails")
         .and_then(Value::as_array)
         .and_then(|images| {
-            images.iter().rev().find_map(|image| {
-                let candidate = string(image, "url");
-                usable_artwork_candidate(&candidate).then_some(candidate)
-            })
+            let candidate = |image: &&Value| usable_artwork_candidate(&string(image, "url"));
+            // Music sources can include both the square album art and larger
+            // widescreen video stills. Keep a real album cover when supplied.
+            images
+                .iter()
+                .rev()
+                .filter(candidate)
+                .filter(|image| {
+                    let width = image.get("width").and_then(Value::as_u64).unwrap_or(0);
+                    let height = image.get("height").and_then(Value::as_u64).unwrap_or(0);
+                    width > 0 && width == height
+                })
+                .max_by_key(|image| image.get("width").and_then(Value::as_u64).unwrap_or(0))
+                .or_else(|| images.iter().rev().find(candidate))
+                .map(|image| string(image, "url"))
         })
         .or_else(|| {
             let candidate = string(value, "thumbnail");
@@ -279,7 +293,7 @@ pub fn inspection_from_json(value: &Value, input: &str) -> Result<Inspection> {
             ));
         }
     }
-    warnings.push("Artwork candidates are source images and may be video thumbnails rather than album covers.".into());
+    warnings.push(ARTWORK_WARNING.into());
     let title = if entries.is_none() {
         tracks[0].metadata.title.clone()
     } else {
@@ -402,7 +416,7 @@ impl StreamingInspection {
                 "{missing} unavailable or incomplete entries were omitted."
             ));
         }
-        warnings.push("Artwork candidates are source images and may be video thumbnails rather than album covers.".into());
+        warnings.push(ARTWORK_WARNING.into());
         Ok(Inspection {
             suggested_mode: self.mode(),
             title: self.title,
@@ -427,6 +441,11 @@ pub fn inspect_streaming(
     let album_cancel = cancel.clone();
     let album_lookup = (collection_mode(&input) == CollectionMode::Album)
         .then(|| std::thread::spawn(move || crate::album::lookup(&album_source, &album_cancel)));
+    let song_source = input.clone();
+    let song_cancel = cancel.clone();
+    let song_artwork = is_video_source(&input).then(|| {
+        std::thread::spawn(move || crate::song_artwork::lookup(&song_source, &song_cancel))
+    });
     let mut cmd = inspection_command(tools, &input, auth)?;
     let mut inspection = StreamingInspection::new(input);
     run_lines(&mut cmd, cancel, Duration::from_secs(600), |line| {
@@ -438,6 +457,9 @@ pub fn inspect_streaming(
     let mut result = inspection.finish()?;
     if let Some(album) = album_lookup.and_then(|job| job.join().ok()).flatten() {
         crate::album::apply(&mut result, album);
+    }
+    if let Some(artwork) = song_artwork.and_then(|job| job.join().ok()).flatten() {
+        crate::song_artwork::apply(&mut result, artwork);
     }
     cancel.check()?;
     Ok(result)
@@ -652,6 +674,24 @@ mod tests {
             .iter()
             .any(|warning| warning.contains("unavailable")));
         assert_eq!(inspection_from_json(&entry, source).unwrap().title, "Song");
+    }
+
+    #[test]
+    fn square_music_cover_wins_over_a_larger_widescreen_video_thumbnail() {
+        let value = json!({"thumbnails": [
+            {"url":"https://lh3.googleusercontent.com/album", "width":544,"height":544},
+            {"url":"https://i.ytimg.com/vi_webp/track/maxresdefault.webp", "width":1920,"height":1080},
+            {"url":"https://lh3.googleusercontent.com/tiny", "width":60,"height":60}
+        ]});
+        assert_eq!(
+            artwork_url(&value).as_deref(),
+            Some("https://lh3.googleusercontent.com/album")
+        );
+        let video = json!({"thumbnails":[{"url":"https://i.ytimg.com/low.jpg"},{"url":"https://i.ytimg.com/high.webp"}]});
+        assert_eq!(
+            artwork_url(&video).as_deref(),
+            Some("https://i.ytimg.com/high.webp")
+        );
     }
 
     #[test]

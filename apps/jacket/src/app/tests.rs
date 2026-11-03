@@ -584,3 +584,322 @@ fn preview_and_source_shortcuts_do_not_leave_other_modal_contexts() {
         "export options may open their file preview"
     );
 }
+
+#[test]
+fn cancelling_a_destination_keeps_the_captured_preview_ready_to_retry() {
+    use audio_engine::OutputKind;
+    for kind in [OutputKind::File, OutputKind::Folder, OutputKind::Zip] {
+        let (_root, desktop) = desktop();
+        let mut app = app(desktop);
+        let review = app.review.as_mut().expect("review");
+        review.selected = [0].into_iter().collect();
+        review.preferences.output_kind = kind;
+        app.prepare_preview().expect("valid captured preview");
+        let plan = serde_json::to_value(app.pending_plan.as_ref()).expect("plan snapshot");
+        let preview = serde_json::to_value(app.preview.as_ref()).expect("preview snapshot");
+        let identity = app.review.as_ref().expect("review").identity();
+        app.dialog_open = true;
+
+        assert_eq!(app.update(Message::Destination(None)).units(), 0);
+
+        assert!(
+            !app.dialog_open,
+            "cancelled destination releases the dialog"
+        );
+        assert_eq!(app.panel, Panel::Preview);
+        assert_eq!(
+            serde_json::to_value(app.pending_plan.as_ref()).expect("retained plan"),
+            plan
+        );
+        assert_eq!(
+            serde_json::to_value(app.preview.as_ref()).expect("retained preview"),
+            preview
+        );
+        assert_eq!(app.review.as_ref().expect("review").identity(), identity);
+        assert_eq!(app.save_pending, 0);
+        assert!(
+            app.update(Message::Save).units() > 0,
+            "Save can reopen the destination dialog"
+        );
+        assert!(app.dialog_open);
+    }
+}
+
+#[test]
+fn editing_the_output_name_keeps_tags_selection_and_other_preferences_unchanged() {
+    use crate::editor::{Action, Field, Kind};
+    let (_root, desktop) = desktop();
+    let mut app = app(desktop);
+    let review = app.review.as_ref().expect("review");
+    let inspection = serde_json::to_value(&review.inspection).expect("original tags");
+    let selected = review.selected.clone();
+    let identity = review.identity();
+    let mut preferences = serde_json::to_value(&review.preferences).expect("original preferences");
+    preferences["title"] = serde_json::json!("Library copy");
+    let _ = app.update(Message::OpenEditor(Kind::OutputName));
+    let _ = app.update(Message::Editor(Action::Input(
+        Field::Title,
+        "  Library copy  ".into(),
+    )));
+    let _ = app.update(Message::Editor(Action::Apply));
+
+    let review = app.review.as_ref().expect("edited review");
+    assert_eq!(
+        serde_json::to_value(&review.inspection).expect("retained tags"),
+        inspection
+    );
+    assert_eq!(
+        serde_json::to_value(&review.preferences).expect("edited preferences"),
+        preferences
+    );
+    assert_eq!(review.selected, selected);
+    assert_eq!(review.identity().session_id, identity.session_id);
+    assert_eq!(review.identity().revision, identity.revision + 1);
+    assert_eq!(app.panel, Panel::Workspace);
+    assert!(app.editor.is_none());
+    assert_eq!(app.save_pending, 1);
+}
+
+#[test]
+fn an_empty_output_name_stays_open_without_changing_the_review() {
+    use crate::editor::{Action, Field, Kind};
+    let (_root, desktop) = desktop();
+    let mut app = app(desktop);
+    let original =
+        serde_json::to_value(app.review.as_ref().expect("review").draft()).expect("snapshot");
+    let _ = app.update(Message::OpenEditor(Kind::OutputName));
+    let _ = app.update(Message::Editor(Action::Input(
+        Field::Title,
+        "  \n  ".into(),
+    )));
+    let _ = app.update(Message::Editor(Action::Apply));
+
+    assert_eq!(app.panel, Panel::Editor);
+    assert!(app.editor.as_ref().expect("form retained").error.is_some());
+    assert_eq!(
+        serde_json::to_value(app.review.as_ref().expect("review").draft())
+            .expect("unchanged snapshot"),
+        original
+    );
+    assert_eq!(app.save_pending, 0);
+}
+
+#[test]
+fn preparing_a_remote_cover_for_crop_does_not_commit_artwork_or_metadata() {
+    let (_root, desktop) = desktop();
+    let mut app = app(desktop);
+    let original =
+        serde_json::to_value(app.review.as_ref().expect("review").draft()).expect("snapshot");
+    let identity = app.review.as_ref().expect("review").identity();
+    let (asset, file) = example::cover().expect("isolated cover");
+    let path = file.path().to_path_buf();
+    app.dialog_open = true;
+
+    let _ = app.update(Message::RemoteCoverImported(
+        identity,
+        Ok((asset.clone(), path.clone())),
+    ));
+
+    assert!(!app.dialog_open);
+    assert_eq!(app.panel, Panel::Crop);
+    let (staged, staged_path) = app.crop_source.as_ref().expect("staged remote cover");
+    assert_eq!(staged.id, asset.id);
+    assert_eq!(*staged_path, path);
+    assert_eq!(app.crop_size, asset.width.min(asset.height).to_string());
+    assert!(
+        app.cover.is_none(),
+        "staging must not choose an export cover"
+    );
+    assert_eq!(
+        serde_json::to_value(app.review.as_ref().expect("review").draft())
+            .expect("unchanged snapshot"),
+        original
+    );
+    assert_eq!(app.save_pending, 0);
+}
+
+#[test]
+fn closing_a_staged_crop_preserves_the_chosen_cover_and_review_without_saving() {
+    let (_root, desktop) = desktop();
+    let mut app = app(desktop);
+    let (mut original_asset, original_file) = example::cover().expect("original cover");
+    original_asset.id = "original-cover".into();
+    let original_path = original_file.path().to_path_buf();
+    app.review
+        .as_mut()
+        .expect("review")
+        .preferences
+        .shared_artwork_asset = Some(original_asset.id.clone());
+    app.cover = Some((original_asset.clone(), original_path.clone()));
+    let original =
+        serde_json::to_value(app.review.as_ref().expect("review").draft()).expect("snapshot");
+    let (staged, staged_file) = example::cover().expect("staged cover");
+    app.crop_source = Some((staged, staged_file.path().to_path_buf()));
+    app.crop_dragging = true;
+    app.panel = Panel::Crop;
+
+    let _ = app.update(Message::ClosePanel);
+
+    assert_eq!(app.panel, Panel::Workspace);
+    assert!(app.crop_source.is_none());
+    assert!(!app.crop_dragging);
+    let (chosen, path) = app.cover.as_ref().expect("original cover retained");
+    assert_eq!(chosen.id, original_asset.id);
+    assert_eq!(*path, original_path);
+    assert_eq!(
+        serde_json::to_value(app.review.as_ref().expect("review").draft())
+            .expect("unchanged snapshot"),
+        original
+    );
+    assert_eq!(app.save_pending, 0);
+}
+
+#[test]
+fn a_remote_cover_completion_cannot_stage_artwork_for_a_newer_review() {
+    let (_root, desktop) = desktop();
+    let mut app = app(desktop);
+    let identity = app.review.as_ref().expect("review").identity();
+    app.review
+        .as_mut()
+        .expect("review")
+        .changed()
+        .expect("newer edit");
+    let original =
+        serde_json::to_value(app.review.as_ref().expect("review").draft()).expect("newer snapshot");
+    let (asset, file) = example::cover().expect("isolated cover");
+    app.dialog_open = true;
+
+    let _ = app.update(Message::RemoteCoverImported(
+        identity,
+        Ok((asset, file.path().to_path_buf())),
+    ));
+
+    assert!(!app.dialog_open);
+    assert_eq!(app.panel, Panel::Workspace);
+    assert!(app.crop_source.is_none());
+    assert!(app.cover.is_none());
+    assert_eq!(
+        serde_json::to_value(app.review.as_ref().expect("review").draft())
+            .expect("retained snapshot"),
+        original
+    );
+    assert_eq!(app.save_pending, 0);
+}
+
+#[test]
+fn source_cover_failures_are_fenced_and_a_successful_retry_clears_the_error() {
+    let (_root, desktop) = desktop();
+    let mut app = app(desktop);
+    let current = "https://i.ytimg.com/current.jpg";
+    app.review
+        .as_mut()
+        .expect("review")
+        .preferences
+        .shared_artwork = Some(current.into());
+    let stale = "https://i.ytimg.com/previous.jpg";
+    let _ = app.update(Message::SourceCover(
+        stale.into(),
+        Err("stale failure".into()),
+    ));
+    assert!(app.source_cover_error.is_none());
+    let _ = app.update(Message::SourceCover(
+        current.into(),
+        Err("network unavailable".into()),
+    ));
+    assert_eq!(
+        app.source_cover_error.as_deref(),
+        Some("network unavailable")
+    );
+    let handle = crate::artwork::example_cover();
+    let _ = app.update(Message::SourceCover(stale.into(), Ok(handle.clone())));
+    assert!(app.source_cover.is_none());
+    assert_eq!(
+        app.source_cover_error.as_deref(),
+        Some("network unavailable")
+    );
+    let _ = app.update(Message::SourceCover(current.into(), Ok(handle.clone())));
+    assert_eq!(app.source_cover, Some(handle));
+    assert!(app.source_cover_error.is_none());
+    let _ = app.update(Message::SourceCover(
+        stale.into(),
+        Err("late stale failure".into()),
+    ));
+    assert!(app.source_cover_error.is_none());
+}
+
+#[test]
+fn preview_cover_callbacks_follow_the_captured_plan_and_retry_clears_the_error() {
+    let (_root, desktop) = desktop();
+    let mut app = app(desktop);
+    let current = "https://i.ytimg.com/preview.jpg";
+    app.review
+        .as_mut()
+        .expect("review")
+        .preferences
+        .shared_artwork = Some(current.into());
+    app.prepare_preview().expect("captured plan");
+    // Editing the ordinary review after capture must not retarget its preview.
+    app.review
+        .as_mut()
+        .expect("review")
+        .preferences
+        .shared_artwork = Some("https://i.ytimg.com/new-review.jpg".into());
+    let stale = "https://i.ytimg.com/previous.jpg";
+    let _ = app.update(Message::PreviewCover(
+        stale.into(),
+        Err("stale failure".into()),
+    ));
+    assert!(app.preview_cover_error.is_none());
+    let _ = app.update(Message::PreviewCover(
+        current.into(),
+        Err("network unavailable".into()),
+    ));
+    assert_eq!(
+        app.preview_cover_error.as_deref(),
+        Some("network unavailable")
+    );
+    let handle = crate::artwork::example_cover();
+    let _ = app.update(Message::PreviewCover(stale.into(), Ok(handle.clone())));
+    assert!(app.preview_cover.is_none());
+    let _ = app.update(Message::PreviewCover(current.into(), Ok(handle.clone())));
+    assert_eq!(app.preview_cover, Some(handle));
+    assert!(app.preview_cover_error.is_none());
+    let _ = app.update(Message::PreviewCover(
+        stale.into(),
+        Err("late stale failure".into()),
+    ));
+    assert!(app.preview_cover_error.is_none());
+}
+
+#[test]
+fn a_missing_owned_cover_blocks_export_until_artwork_is_changed() {
+    let (_root, desktop) = desktop();
+    let mut app = app(desktop);
+    app.review
+        .as_mut()
+        .expect("review")
+        .preferences
+        .shared_artwork_asset = Some("missing-cover".into());
+    assert!(
+        !app.can_preview(),
+        "missing selected cover needs recovery before export"
+    );
+    app.review
+        .as_mut()
+        .expect("review")
+        .preferences
+        .artwork_mode = audio_engine::ArtworkMode::None;
+    assert!(
+        app.can_preview(),
+        "explicit no-artwork mode does not require the unavailable asset"
+    );
+    app.review
+        .as_mut()
+        .expect("review")
+        .preferences
+        .artwork_mode = audio_engine::ArtworkMode::PerTrack;
+    assert!(
+        app.can_preview(),
+        "playlist track covers do not use the shared asset"
+    );
+}

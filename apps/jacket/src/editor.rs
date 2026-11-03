@@ -9,6 +9,7 @@ use jacket_core::{BulkEdits, Review, TitleCleanup};
 pub enum Kind {
     Track(usize),
     Album,
+    OutputName,
     Bulk,
 }
 
@@ -117,6 +118,7 @@ impl Editor {
                     .map(|number| number.to_string())
                     .unwrap_or_default();
             }
+            Kind::OutputName => result.title.clone_from(&review.preferences.title),
             Kind::Bulk => {}
         }
         result
@@ -242,6 +244,16 @@ impl Editor {
                     review.preferences.title = title;
                 }
             }
+            Kind::OutputName => {
+                if self.title.trim().is_empty() {
+                    return Err("Enter an output name.".into());
+                }
+                if self.title.len() > 16_384 {
+                    return Err("The output name is too long.".into());
+                }
+                review.changed()?;
+                review.preferences.title = self.title.trim().into();
+            }
             Kind::Bulk => {
                 review.apply_bulk(&self.bulk(review)?)?;
             }
@@ -257,6 +269,7 @@ impl Editor {
         let heading = match self.kind {
             Kind::Track(_) => "Edit track tags",
             Kind::Album => "Album details",
+            Kind::OutputName => "Output name",
             Kind::Bulk => "Edit selected tracks",
         };
         let field = |label: &'static str,
@@ -296,7 +309,7 @@ impl Editor {
             .into()
         };
         let mut body = Column::new().spacing(12).push(text(heading).size(18));
-        if !matches!(self.kind, Kind::Album) {
+        if matches!(self.kind, Kind::Track(_) | Kind::Bulk) {
             if let Some(notice) = inheritance_notice(review) {
                 body = body.push(text(notice).size(12).color(p.colors.text_muted));
             }
@@ -351,6 +364,11 @@ impl Editor {
                     .push(field("Album artist",&self.album_artist,Field::AlbumArtist,true))
                     .push(field("Release year",&self.year,Field::Year,true))
                     .push(text(if review.preferences.mode==CollectionMode::Album{"These album tags apply to every selected track. Leave a field empty to keep each track’s own value."}else{"Individual tags are active. Switch to shared album tags in Export options to apply these details to every track."}).size(12).color(p.colors.text_muted));
+            }
+            Kind::OutputName => {
+                body = body
+                    .push(field("Name", &self.title, Field::Title, true))
+                    .push(text("Used for the exported file, folder or ZIP. Audio extensions are added automatically.").size(12).color(p.colors.text_muted));
             }
             Kind::Bulk => {
                 body = body.push(

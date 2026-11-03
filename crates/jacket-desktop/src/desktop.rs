@@ -456,6 +456,14 @@ impl Desktop {
         crate::artwork_preview::fetch(url)
     }
 
+    /// Own a bounded public source cover before allowing a crop to modify it.
+    /// Call this on the desktop blocking executor, like file artwork imports.
+    pub fn import_remote_artwork(&self, url: &str) -> Result<Asset, String> {
+        let _lease = Lease::acquire(&self.0.admission)?;
+        let bytes = crate::artwork_preview::fetch(url)?;
+        artwork_assets::import_bytes(&self.artwork_root(), &self.base_tools()?, &bytes)
+    }
+
     pub fn import_artwork(&self, path: &Path, crop: Option<Crop>) -> Result<Asset, String> {
         let _lease = Lease::acquire(&self.0.admission)?;
         artwork_assets::import(&self.artwork_root(), &self.base_tools()?, path, crop)
@@ -671,7 +679,9 @@ fn validate_destination(plan: &ExportPlan, output: &Path) -> Result<(), String> 
         return Err("Choose an available destination using the save dialog.".into());
     }
     if plan.output_kind == OutputKind::Zip
-        && output.extension().and_then(|extension| extension.to_str()) != Some("zip")
+        && !output
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
     {
         return Err("Choose a ZIP filename for the archive.".into());
     }
@@ -772,6 +782,25 @@ mod tests {
             .export(plan, root.path().join("wrong.mp3"), None)
             .is_err());
         assert!(desktop.pending_export().is_none());
+    }
+
+    #[test]
+    fn archive_destination_accepts_the_pickers_case_preserving_zip_suffix() {
+        let root = tempfile::tempdir().expect("destination fixture");
+        let plan: ExportPlan = serde_json::from_value(serde_json::json!({
+            "title": "Album", "sourceUrl": "https://www.youtube.com/watch?v=fixture",
+            "mode": "album", "format": "mp3", "artworkMode": "none",
+            "sharedArtworkUrl": null, "auth": {}, "tracks": []
+        }))
+        .expect("archive plan");
+        for extension in ["zip", "ZIP", "ZiP"] {
+            let destination = root.path().join(format!("Album.{extension}"));
+            assert!(super::validate_destination(&plan, &destination).is_ok());
+            assert!(!destination.exists());
+        }
+        for name in ["Album", "Album.zipx", "Album.mp3"] {
+            assert!(super::validate_destination(&plan, &root.path().join(name)).is_err());
+        }
     }
 
     #[test]
@@ -916,6 +945,12 @@ mod tests {
                         size: 1
                     }
                 )
+                .unwrap_err(),
+            busy
+        );
+        assert_eq!(
+            desktop
+                .import_remote_artwork("https://i.ytimg.com/cover.jpg")
                 .unwrap_err(),
             busy
         );

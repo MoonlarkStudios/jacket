@@ -211,7 +211,7 @@ impl Presentation {
             } else {
                 self.colors.text
             },
-            selection: self.derived.selection_fill,
+            selection: self.derived.text_selection,
         }
     }
 }

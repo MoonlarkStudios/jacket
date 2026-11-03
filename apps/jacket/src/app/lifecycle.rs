@@ -83,6 +83,7 @@ impl App {
             url: self.url.clone(),
             cover: self.cover.take(),
             source_cover: self.source_cover.take(),
+            source_cover_error: self.source_cover_error.take(),
             track_scroll: self.track_scroll,
             result: self.result.take(),
             appearance: self.appearance.clone(),
@@ -94,6 +95,9 @@ impl App {
         self.url = previous.url;
         self.cover = previous.cover;
         self.source_cover = previous.source_cover;
+        self.source_cover_error = previous.source_cover_error;
+        self.preview_cover_error = None;
+        self.crop_source = None;
         self.track_scroll = previous.track_scroll;
         self.result = previous.result;
         self.appearance = previous.appearance;
@@ -110,6 +114,9 @@ impl App {
         self.url.clear();
         self.cover = None;
         self.source_cover = None;
+        self.source_cover_error = None;
+        self.preview_cover_error = None;
+        self.crop_source = None;
         self.track_scroll = 0.0;
         self.result = None;
         self.preview = None;

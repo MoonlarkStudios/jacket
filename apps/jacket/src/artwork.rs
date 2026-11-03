@@ -132,22 +132,24 @@ mod tests {
     #[test]
     fn cover_decoding_rejects_bad_data_and_bounds_the_ui_image() {
         assert!(decode(b"not an image").is_err());
-        let mut encoded = Cursor::new(Vec::new());
-        image::DynamicImage::new_rgb8(1280, 640)
-            .write_to(&mut encoded, image::ImageFormat::Png)
-            .expect("synthetic PNG");
-        let handle = decode(encoded.get_ref()).expect("decodable cover");
-        match handle {
-            Handle::Rgba {
-                width,
-                height,
-                pixels,
-                ..
-            } => {
-                assert_eq!((width, height), (640, 320));
-                assert_eq!(pixels.len(), 640 * 320 * 4);
+        for format in [image::ImageFormat::Png, image::ImageFormat::WebP] {
+            let mut encoded = Cursor::new(Vec::new());
+            image::DynamicImage::new_rgb8(1280, 640)
+                .write_to(&mut encoded, format)
+                .expect("synthetic source cover");
+            let handle = decode(encoded.get_ref()).expect("decodable cover");
+            match handle {
+                Handle::Rgba {
+                    width,
+                    height,
+                    pixels,
+                    ..
+                } => {
+                    assert_eq!((width, height), (640, 320));
+                    assert_eq!(pixels.len(), 640 * 320 * 4);
+                }
+                _ => panic!("decoded covers must use bounded pixels"),
             }
-            _ => panic!("decoded covers must use bounded pixels"),
         }
     }
 
