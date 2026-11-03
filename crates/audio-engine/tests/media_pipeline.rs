@@ -658,6 +658,84 @@ fn archive_reuses_sources_preserves_repeats_and_records_original_metadata() {
 
 #[test]
 #[ignore = "Requires FFmpeg and Python with Mutagen"]
+fn standalone_song_folder_matches_preview_and_keeps_original_music_tags() {
+    let tools = tools();
+    let dir = tempfile::tempdir().unwrap();
+    let url = "https://music.youtube.com/watch?v=fixture&list=OLAK5uy_fixture";
+    let source_dir = dir
+        .path()
+        .join("sources")
+        .join(hex::encode(Sha256::digest(url.as_bytes())));
+    fs::create_dir_all(&source_dir).unwrap();
+    let source = source_dir.join("source.mp3");
+    make_audio(&tools, &source, "libmp3lame");
+    fs::write(
+        source_dir.join("receipt.json"),
+        serde_json::to_vec(&source).unwrap(),
+    )
+    .unwrap();
+    let original = tags();
+    let mut reviewed = original.clone();
+    reviewed.track_number = None;
+    reviewed.disc_number = None;
+    let plan = ExportPlan {
+        title: reviewed.title.clone(),
+        source_url: url.into(),
+        mode: CollectionMode::Collection,
+        format: AudioFormat::Mp3,
+        artwork_mode: ArtworkMode::None,
+        shared_artwork_url: None,
+        shared_artwork_asset: None,
+        shared_artwork_path: None,
+        output_kind: OutputKind::Folder,
+        auth: AuthOptions::default(),
+        tracks: vec![Track {
+            id: "fixture".into(),
+            source_url: url.into(),
+            uploader: String::new(),
+            duration: Some(0.25),
+            artwork_url: None,
+            source_metadata: original,
+            metadata: reviewed,
+        }],
+    };
+    let preview = preview_export(&plan).unwrap();
+    let destination = dir.path().join("Song");
+    let result = export_collection(
+        &tools,
+        &plan,
+        &destination,
+        dir.path(),
+        &Cancellation::default(),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(result.track_count, 1);
+    let filename = "Artist & Guest - Björk _ Live.mp3";
+    assert_eq!(preview.tracks[0].relative_path, filename);
+    assert!(destination.join(filename).is_file());
+    let physical = physical_tags(&destination.join(filename));
+    assert_eq!(physical["tags"]["TALB"][0], "An album");
+    assert!(physical["tags"].get("TRCK").is_none());
+    assert!(physical["tags"].get("TPOS").is_none());
+    assert_eq!(physical["tags"]["COMM"][0]["text"][0], url);
+    assert_eq!(
+        audio_payloads(&tools, &source),
+        audio_payloads(&tools, &destination.join(filename))
+    );
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(destination.join("manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest["sourceUrl"], url);
+    assert_eq!(manifest["tracks"][0]["sourceMetadata"]["trackNumber"], 7);
+    assert!(manifest["tracks"][0]["metadata"]["trackNumber"].is_null());
+    assert_eq!(manifest["tracks"][0]["relativePath"], filename);
+    assert!(fs::read_to_string(destination.join("playlist.m3u"))
+        .unwrap()
+        .contains(filename));
+}
+
+#[test]
+#[ignore = "Requires FFmpeg and Python with Mutagen"]
 fn folder_and_zip_exports_match_preview_and_embed_the_imported_cover_bytes() {
     let tools = tools();
     let dir = tempfile::tempdir().unwrap();

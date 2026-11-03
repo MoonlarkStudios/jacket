@@ -28,6 +28,56 @@ pub fn validate_source_url(input: &str) -> Result<String> {
     Ok(url.to_string())
 }
 
+// Inspection accepts a narrower set of new input than the stored source-URL
+// contract. Keep legacy reviews and export recovery readable while preventing
+// an ambiguous or malformed song link from expanding into a playlist.
+fn validate_inspection_source_url(input: &str) -> Result<String> {
+    let validated = validate_source_url(input)?;
+    let url = url::Url::parse(&validated).expect("validated source URL");
+    if ["v", "list"]
+        .iter()
+        .any(|key| url.query_pairs().filter(|(name, _)| name == key).count() > 1)
+    {
+        return Err(EngineError::Invalid(
+            "This link has repeated video or playlist identifiers. Copy a fresh YouTube link."
+                .into(),
+        ));
+    }
+    let requires_video = url.host_str() == Some("youtu.be")
+        || (url.path() == "/watch" && url.query_pairs().any(|(key, _)| key == "v"));
+    if requires_video && video_id(&url).is_none_or(|id| id.len() != 11) {
+        return Err(EngineError::Invalid(
+            "This song link has an invalid video identifier. Copy a complete YouTube song link."
+                .into(),
+        ));
+    }
+    Ok(validated)
+}
+
+fn video_id(url: &url::Url) -> Option<String> {
+    let id = match url.host_str()? {
+        "youtu.be" => url.path().strip_prefix('/')?.to_owned(),
+        "youtube.com" | "www.youtube.com" | "music.youtube.com" | "m.youtube.com"
+            if url.path() == "/watch" =>
+        {
+            url.query_pairs()
+                .find(|(key, _)| key == "v")?
+                .1
+                .into_owned()
+        }
+        _ => return None,
+    };
+    (!id.is_empty()
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'))
+    .then_some(id)
+}
+
+fn is_video_source(input: &str) -> bool {
+    url::Url::parse(input).is_ok_and(|url| video_id(&url).is_some())
+}
+
 pub fn downloader(tools: &Toolchain, auth: &AuthOptions) -> Result<Command> {
     let mut cmd = Command::new(&tools.yt_dlp);
     cmd.args(["--ignore-config", "--no-progress"]);
@@ -120,9 +170,10 @@ fn collection_mode(input: &str) -> CollectionMode {
     );
     let album = youtube
         && ((url.host_str() == Some("music.youtube.com") && url.path().starts_with("/browse/MP"))
-            || url
-                .query_pairs()
-                .any(|(key, value)| key == "list" && value.starts_with("OLAK5uy")));
+            || (url.path() == "/playlist"
+                && url
+                    .query_pairs()
+                    .any(|(key, value)| key == "list" && value.starts_with("OLAK5uy"))));
     if album {
         CollectionMode::Album
     } else {
@@ -229,7 +280,11 @@ pub fn inspection_from_json(value: &Value, input: &str) -> Result<Inspection> {
         }
     }
     warnings.push("Artwork candidates are source images and may be video thumbnails rather than album covers.".into());
-    let title = first(value, &["title", "playlist_title"]);
+    let title = if entries.is_none() {
+        tracks[0].metadata.title.clone()
+    } else {
+        first(value, &["title", "playlist_title"])
+    };
     Ok(Inspection {
         title: if title.is_empty() {
             "Audio collection".into()
@@ -264,11 +319,12 @@ struct StreamingInspection {
 
 impl StreamingInspection {
     fn new(input: String) -> Self {
+        let total = is_video_source(&input).then_some(1);
         Self {
             input,
             title: String::new(),
             artwork_url: None,
-            total: None,
+            total,
             tracks: Vec::new(),
         }
     }
@@ -290,10 +346,13 @@ impl StreamingInspection {
             .and_then(Value::as_u64)
             .or_else(|| value.get("n_entries").and_then(Value::as_u64))
             .and_then(|count| usize::try_from(count).ok());
-        if let Some(total) = total {
+        if let Some(total) = total.filter(|_| !is_video_source(&self.input)) {
             self.total = Some(self.total.unwrap_or(0).max(total));
         }
         if summary.is_some() {
+            if is_video_source(&self.input) {
+                return Ok(None);
+            }
             let title = first(&value, &["title", "playlist_title"]);
             if !title.is_empty() {
                 self.title = title;
@@ -305,7 +364,11 @@ impl StreamingInspection {
             return Ok(None);
         };
         if self.title.is_empty() {
-            self.title = first(&value, &["playlist_title", "title"]);
+            self.title = if is_video_source(&self.input) {
+                track.metadata.title.clone()
+            } else {
+                first(&value, &["playlist_title", "title"])
+            };
         }
         if self.artwork_url.is_none() {
             self.artwork_url = track.artwork_url.clone();
@@ -359,21 +422,12 @@ pub fn inspect_streaming(
     cancel: &Cancellation,
     mut emit: impl FnMut(InspectionUpdate) + Send,
 ) -> Result<Inspection> {
-    let input = validate_source_url(input)?;
+    let input = validate_inspection_source_url(input)?;
     let album_source = input.clone();
     let album_cancel = cancel.clone();
     let album_lookup = (collection_mode(&input) == CollectionMode::Album)
         .then(|| std::thread::spawn(move || crate::album::lookup(&album_source, &album_cancel)));
-    let mut cmd = downloader(tools, auth)?;
-    cmd.args([
-        "--dump-json",
-        "--skip-download",
-        "--ignore-errors",
-        "--print",
-        "playlist:PLAYLIST %(.{title,playlist_title,thumbnail,thumbnails,playlist_count})j",
-        "--",
-        &input,
-    ]);
+    let mut cmd = inspection_command(tools, &input, auth)?;
     let mut inspection = StreamingInspection::new(input);
     run_lines(&mut cmd, cancel, Duration::from_secs(600), |line| {
         if let Some(update) = inspection.read_line(line)? {
@@ -387,6 +441,30 @@ pub fn inspect_streaming(
     }
     cancel.check()?;
     Ok(result)
+}
+
+fn inspection_command(tools: &Toolchain, input: &str, auth: &AuthOptions) -> Result<Command> {
+    let mut source =
+        url::Url::parse(&validate_inspection_source_url(input)?).expect("validated source URL");
+    let mut cmd = downloader(tools, auth)?;
+    if let Some(id) = video_id(&source) {
+        // A shared song link often carries an album, radio, or playlist context.
+        // Keep the original URL as provenance, but inspect only the song. An
+        // explicit playlist or album link continues to inspect the collection.
+        source = url::Url::parse("https://www.youtube.com/watch").expect("static YouTube URL");
+        source.query_pairs_mut().append_pair("v", &id);
+        cmd.arg("--no-playlist");
+    }
+    cmd.args([
+        "--dump-json",
+        "--skip-download",
+        "--ignore-errors",
+        "--print",
+        "playlist:PLAYLIST %(.{title,playlist_title,thumbnail,thumbnails,playlist_count})j",
+        "--",
+        source.as_str(),
+    ]);
+    Ok(cmd)
 }
 
 #[cfg(test)]
@@ -457,19 +535,123 @@ mod tests {
         for input in [
             "https://music.youtube.com/playlist?list=OLAK5uy_mUJg8SRBv0XUvkn4To7sIQs1TBjAhJYE4",
             "https://www.youtube.com/playlist?list=OLAK5uy_example",
-            "https://music.youtube.com/watch?v=abc&list=OLAK5uy_example",
             "https://music.youtube.com/browse/MPexample",
         ] {
             assert_eq!(collection_mode(input), CollectionMode::Album);
         }
         for input in [
             "https://music.youtube.com/playlist?list=PLmix",
+            "https://music.youtube.com/watch?v=abc&list=OLAK5uy_example",
+            "https://youtu.be/abc?list=OLAK5uy_example",
             "https://music.youtube.com/watch?v=OLAK5uy_example",
             "https://music.youtube.com/playlist?other=OLAK5uy_example&list=PLmix",
             "https://example.com/playlist?list=OLAK5uy_example",
         ] {
             assert_eq!(collection_mode(input), CollectionMode::Collection);
         }
+    }
+
+    #[test]
+    fn song_inspection_discards_playlist_context_only_for_the_downloader() {
+        let tools = Toolchain {
+            yt_dlp: "yt-dlp".into(),
+            ffmpeg: "ffmpeg".into(),
+            ffprobe: "ffprobe".into(),
+            node: None,
+        };
+        for input in [
+            "https://music.youtube.com/watch?v=eQVkkG8Oz8c&list=OLAK5uy_example&index=7",
+            "https://www.youtube.com/watch?v=eQVkkG8Oz8c&list=PLmix&start_radio=1",
+            "https://youtu.be/eQVkkG8Oz8c?si=share&list=OLAK5uy_example&t=30",
+        ] {
+            let command = inspection_command(&tools, input, &AuthOptions::default()).unwrap();
+            let args: Vec<_> = command.get_args().collect();
+            assert!(args.contains(&std::ffi::OsStr::new("--no-playlist")));
+            assert_eq!(
+                *args.last().unwrap(),
+                "https://www.youtube.com/watch?v=eQVkkG8Oz8c"
+            );
+            assert_eq!(validate_source_url(input).unwrap(), input);
+            assert_eq!(collection_mode(input), CollectionMode::Collection);
+        }
+        for input in [
+            "https://music.youtube.com/playlist?list=OLAK5uy_example",
+            "https://www.youtube.com/playlist?list=PLmix",
+            "https://music.youtube.com/browse/MPexample",
+        ] {
+            let command = inspection_command(&tools, input, &AuthOptions::default()).unwrap();
+            let args: Vec<_> = command.get_args().collect();
+            assert!(!args.contains(&std::ffi::OsStr::new("--no-playlist")));
+            assert_eq!(*args.last().unwrap(), input);
+        }
+    }
+
+    #[test]
+    fn new_inspections_reject_ambiguous_or_malformed_song_identifiers_without_invalidating_recovery(
+    ) {
+        let tools = Toolchain {
+            yt_dlp: "yt-dlp".into(),
+            ffmpeg: "ffmpeg".into(),
+            ffprobe: "ffprobe".into(),
+            node: None,
+        };
+        for input in [
+            "https://www.youtube.com/watch?v=short&list=OLAK5uy_example",
+            "https://www.youtube.com/watch?v=&list=OLAK5uy_example",
+            "https://www.youtube.com/watch?v=eQVkkG8Oz8c&v=invalid",
+            "https://www.youtube.com/watch?v=eQVkkG8Oz8c&%76=eQVkkG8Oz8c",
+            "https://www.youtube.com/playlist?list=PLcollection&list=PLanotherlist",
+            "https://music.youtube.com/watch?v=eQVkkG8Oz8c&list=OLAK5uy_example&list=PLanotherlist",
+            "https://youtu.be/short?list=OLAK5uy_example",
+            "https://youtu.be/eQVkkG8Oz8c/extra",
+            "https://youtu.be/",
+        ] {
+            assert!(
+                inspection_command(&tools, input, &AuthOptions::default()).is_err(),
+                "{input}"
+            );
+            assert!(
+                validate_source_url(input).is_ok(),
+                "legacy source URLs stay readable: {input}"
+            );
+        }
+        assert!(inspection_command(
+            &tools,
+            "https://www.youtube.com/watch?list=OLAK5uy_example",
+            &AuthOptions::default(),
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn standalone_review_uses_music_title_and_retains_source_tags_and_url() {
+        let source = "https://music.youtube.com/watch?v=eQVkkG8Oz8c&list=OLAK5uy_example";
+        let entry = json!({
+            "id":"eQVkkG8Oz8c", "title":"Artist - Song (Official Audio)",
+            "track":"Song", "artist":"Artist", "album":"Original album",
+            "track_number":7, "playlist_title":"Listening mix", "playlist_count":20
+        });
+        let mut stream = StreamingInspection::new(source.into());
+        let update = stream
+            .read_line(&serde_json::to_vec(&entry).unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(update.title, "Song");
+        assert_eq!(update.total, Some(1));
+        stream
+            .read_line(br#"PLAYLIST {"title":"Listening mix", "playlist_count":20}"#)
+            .unwrap();
+        let inspection = stream.finish().unwrap();
+        assert_eq!(inspection.title, "Song");
+        assert_eq!(inspection.source_url, source);
+        assert_eq!(inspection.suggested_mode, CollectionMode::Collection);
+        assert_eq!(inspection.tracks[0].source_metadata.track_number, Some(7));
+        assert_eq!(inspection.tracks[0].metadata.album, "Original album");
+        assert!(!inspection
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("unavailable")));
+        assert_eq!(inspection_from_json(&entry, source).unwrap().title, "Song");
     }
 
     #[test]
@@ -532,7 +714,8 @@ mod tests {
         assert!(stream.read_line(b"not JSON").is_err());
         assert!(stream.read_line(b"null").is_err());
         assert!(stream.finish().is_err());
-        let mut stream = StreamingInspection::new("https://www.youtube.com/watch?v=abc".into());
+        let mut stream =
+            StreamingInspection::new("https://www.youtube.com/playlist?list=PLmix".into());
         let update = stream
             .read_line(br#"{"id":"abc","title":"Song", "playlist_count":null,"n_entries":5}"#)
             .unwrap()

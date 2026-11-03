@@ -24,6 +24,6 @@ Metadata contains `title`, `artist`, `album`, `albumArtist`, `trackNumber`, `dis
 
 Source URLs are also written into the canonical comment field: MP3 `COMM`, M4A `©cmt`, FLAC/Opus/Vorbis `COMMENT`, or WAV `ICMT`. MP3 uses ID3v2.4 with an `APIC` front-cover frame; M4A uses `covr`; FLAC uses a picture block; Opus and Vorbis use `METADATA_BLOCK_PICTURE`. Separate image files remain available in the ZIP. WAV does not embed artwork.
 
-The array's order preserves the selected source order. Filenames in collection mode carry sequential ordering for convenience; those prefixes do not imply music track-number tags. Album filenames prefer a real track number when provided. Filename collisions gain a `(2)` suffix. Identity alone should not be used to deduplicate repeated playlist entries.
+The array's order preserves the selected source order. A one-track collection uses `Artist - Title` as its audio filename, or `Title` when the artist is unknown. Collections with multiple selected tracks carry sequential filename prefixes for convenience; those prefixes do not imply music track-number tags. Album filenames prefer a real track number when provided, including when only one album track is selected. Filename collisions gain a `(2)` suffix. Identity alone should not be used to deduplicate repeated playlist entries.
 
 The manifest does not include credentials, browser-cookie contents, temporary local download paths, or a matching claim against an external music catalog. SHA-256 identifies these exact output bytes; it is not an acoustic fingerprint.

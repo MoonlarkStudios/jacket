@@ -120,16 +120,25 @@ struct TrackNamer {
 impl TrackNamer {
     fn filename(&mut self, plan: &ExportPlan, index: usize, extension: &str) -> String {
         let track = &plan.tracks[index];
-        let prefix = if plan.mode == CollectionMode::Album {
-            track.metadata.track_number.unwrap_or((index + 1) as u32)
+        let stem = if plan.mode == CollectionMode::Collection && plan.tracks.len() == 1 {
+            let artist = track.metadata.artist.trim();
+            sanitize_component(&if artist.is_empty() {
+                track.metadata.title.clone()
+            } else {
+                format!("{artist} - {}", track.metadata.title)
+            })
         } else {
-            (index + 1) as u32
+            let prefix = if plan.mode == CollectionMode::Album {
+                track.metadata.track_number.unwrap_or((index + 1) as u32)
+            } else {
+                (index + 1) as u32
+            };
+            format!(
+                "{:02} - {}",
+                prefix,
+                sanitize_component(&track.metadata.title)
+            )
         };
-        let stem = format!(
-            "{:02} - {}",
-            prefix,
-            sanitize_component(&track.metadata.title)
-        );
         let mut unique_stem = stem.clone();
         let mut duplicate = 2;
         // Reserve stems before the codec is known so preview and export keep
@@ -971,6 +980,47 @@ mod tests {
         );
         assert!(preview.files.contains(&"playlist.m3u".into()));
         assert_eq!(plan.tracks[0].source_metadata.title, "Original");
+    }
+
+    #[test]
+    fn standalone_song_names_use_artist_and_title_without_inventing_track_numbers() {
+        let mut plan = fixture_plan();
+        plan.mode = CollectionMode::Collection;
+        plan.tracks.truncate(1);
+        plan.tracks[0].metadata.artist = "Juniper / Guest".into();
+        let preview = preview_export(&plan).unwrap();
+        assert_eq!(
+            preview.tracks[0].relative_path,
+            "Juniper _ Guest - Björk _ Live.mp3"
+        );
+        assert_eq!(preview.tracks[0].metadata.track_number, Some(7));
+        assert_eq!(plan.tracks[0].source_metadata.title, "Original");
+        assert_eq!(
+            TrackNamer::default().filename(&plan, 0, "mp3"),
+            preview.tracks[0].relative_path
+        );
+        plan.tracks[0].metadata.artist = "  ".into();
+        plan.tracks[0].metadata.track_number = None;
+        let preview = preview_export(&plan).unwrap();
+        assert_eq!(preview.tracks[0].relative_path, "Björk _ Live.mp3");
+        assert_eq!(preview.tracks[0].metadata.track_number, None);
+        plan.tracks[0].metadata.artist = "東京".repeat(80);
+        assert!(preview_export(&plan).unwrap().tracks[0].relative_path.len() < 255);
+    }
+
+    #[test]
+    fn single_album_selections_and_multitrack_collections_keep_their_ordering() {
+        let mut plan = fixture_plan();
+        plan.tracks.truncate(1);
+        assert_eq!(
+            preview_export(&plan).unwrap().tracks[0].relative_path,
+            "07 - Björk _ Live.mp3"
+        );
+        plan.mode = CollectionMode::Collection;
+        plan.tracks.push(plan.tracks[0].clone());
+        let preview = preview_export(&plan).unwrap();
+        assert_eq!(preview.tracks[0].relative_path, "01 - Björk _ Live.mp3");
+        assert_eq!(preview.tracks[1].relative_path, "02 - Björk _ Live.mp3");
     }
 
     #[test]
