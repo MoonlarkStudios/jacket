@@ -51,8 +51,9 @@ by default and offers the playlist as an explicit alternative. Playlist-only
 links continue to inspect the playlist. Intent is resolved before invoking the
 downloader so inspection and export agree about the requested source.
 
-New reviews default to **Music folder**, giving immediate access to portable
-audio without an extraction step. **ZIP archive** remains available. Existing
+New song reviews default to **Audio file**: one tagged recording with its cover
+embedded where supported, without a directory or sidecar files. Albums and
+playlists default to **Music folder**. **ZIP archive** remains available. Existing
 saved reviews and unfinished exports retain their chosen output kind; older
 recovery records keep their legacy ZIP interpretation.
 
@@ -70,18 +71,26 @@ Acceptance criteria:
   track/disc numbers survive review, export, saved-review restoration, and retry.
 - Original source metadata remains distinct from edits and effective exported
   tags. Repeated playlist occurrences remain distinct selections.
-- Folder output is the new-review default; explicit ZIP choices, saved reviews,
-  and interrupted-job output/destination choices survive restoration.
+- Audio file is the new-song default; album and playlist reviews default to
+  folders. Explicit output choices, saved reviews, and interrupted-job
+  output/destination choices survive restoration.
 - Preview and export share canonical naming and tagging. Existing files remain
   intact, cancellation publishes no incomplete output, and successful output
   clears only its associated unfinished work.
 - Song and album examples, keyboard navigation, focus, reduced motion, and the
   600 × 600 minimum window are verified. Existing album editing remains usable.
 
-This milestone retains the existing export bundle: audio, available artwork, a
-relative-path playlist, and a provenance manifest inside a named folder or ZIP.
-A direct loose-audio-file export can be evaluated separately; song support does
-not require changing the manifest schema or inventing a third metadata mode.
+Audio file output uses the existing tagging and artwork pipeline and publishes
+only the completed audio file. Its extension follows the actual codec; choosing
+a location does not force an unnecessary conversion. It requires one selected
+track, including a selection from an album, and keeps the effective music tags.
+MP3/M4A embed cover artwork when available. WAV cannot embed artwork; file output
+reports missing tags/artwork without adding sidecars.
+
+Folder and ZIP output retain audio, available artwork, a relative-path playlist,
+and the provenance manifest of original and edited metadata. File output has no
+manifest; its source URL remains in the audio comment. Changing delivery does not
+change album/collection metadata policy or the manifest schema.
 
 Implementation status: the first slice is implemented with regression coverage
 for source intent, song review, metadata, export naming, and legacy recovery.

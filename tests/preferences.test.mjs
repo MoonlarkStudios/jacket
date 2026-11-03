@@ -308,7 +308,7 @@ test('fresh reviews default to folders while legacy recovery retains ZIP and imp
   assert.equal(imported.artworkMode, 'shared');
 });
 
-test('standalone songs preserve their own metadata and numbering with folder and per-track artwork defaults', () => {
+test('standalone songs preserve their metadata and numbering with audio-file and per-track artwork defaults', () => {
   for (const number of [null, 7]) {
     const item = track('Artist', null, number, 2);
     item.metadata.album = '';
@@ -324,7 +324,7 @@ test('standalone songs preserve their own metadata and numbering with folder and
     const preferences = p.inspectionPreferences(prepared, 'preserve');
     assert.equal(preferences.title, 'Artist - Song');
     assert.equal(preferences.mode, 'collection');
-    assert.equal(preferences.outputKind, 'folder');
+    assert.equal(preferences.outputKind, 'file');
     assert.equal(preferences.artworkMode, 'perTrack');
     assert.equal(preferences.format, 'preserve');
     const exported = selectedTracks(
@@ -362,6 +362,7 @@ test('song export names follow corrected title and artist while retaining custom
   };
   const updated = p.updateSongPreferences(preferences, before, corrected);
   assert.equal(updated.title, 'Corrected artist - Corrected song');
+  assert.equal(updated.outputKind, 'file');
   assert.equal(
     p.updateSongPreferences(
       { ...preferences, title: 'My custom name' },
@@ -403,5 +404,43 @@ test('malformed video targets and repeated source parameters do not trigger insp
   assert.equal(
     p.pastedSourceUrl(`https://youtube.com/watch?list=${playlist}`),
     `https://youtube.com/watch?list=${playlist}`,
+  );
+});
+
+test('a single-entry album remains a music folder while explicit file recovery keeps its exact plan', () => {
+  const item = track('Artist');
+  const album = inspection([item]);
+  assert.equal(
+    p.inspectionPreferences(album, 'compatible').outputKind,
+    'folder',
+  );
+  assert.equal(
+    p.inspectionPreferences(
+      { ...album, suggestedMode: 'collection', tracks: [item, item] },
+      'compatible',
+    ).outputKind,
+    'folder',
+  );
+  const plan = {
+    title: 'Exact custom song name',
+    mode: 'collection',
+    format: 'mp3',
+    outputKind: 'file',
+    artworkMode: 'perTrack',
+    sharedArtworkUrl: null,
+    tracks: [item],
+  };
+  const restored = p.recoveryPreferences(plan);
+  assert.equal(restored.outputKind, 'file');
+  assert.equal(restored.title, plan.title);
+  assert.equal(restored.format, plan.format);
+  assert.equal(restored.artworkMode, plan.artworkMode);
+  assert.equal(
+    p.recoveryPreferences({ ...plan, outputKind: 'folder' }).outputKind,
+    'folder',
+  );
+  assert.equal(
+    p.recoveryPreferences({ ...plan, outputKind: undefined }).outputKind,
+    'zip',
   );
 });

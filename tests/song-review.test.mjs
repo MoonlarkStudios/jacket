@@ -7,7 +7,7 @@ import { build } from 'esbuild';
 const result = await build({
   stdin: {
     contents:
-      "export { default as App } from './src/App'; export { songExample } from './src/example'; export { inspectionPreferences } from './src/preferences';",
+      "export { default as App } from './src/App'; export { songExample } from './src/example'; export { inspectionPreferences } from './src/preferences'; export { ExportPreviewDialog } from './src/components/ExportPreviewDialog';",
     resolveDir: process.cwd(),
   },
   bundle: true,
@@ -22,14 +22,14 @@ const result = await build({
         build.onResolve(
           {
             filter:
-              /^(react(\/jsx-runtime)?|@mantine\/core|@tabler\/icons-react|\.\/useWorkspace|\.\/useDesktopShell|\.\/desktop|\.\/components\/(BulkTrackEditor|DownloadFeedback|ExportPreviewDialog|SourceField|WorkspaceDialogs))$/,
+              /^(react(\/jsx-runtime)?|@mantine\/core|@tabler\/icons-react|\.\/useWorkspace|\.\/useDesktopShell|\.\.?\/desktop|\.\/components\/(BulkTrackEditor|DownloadFeedback|ExportPreviewDialog|SourceField|WorkspaceDialogs))$/,
           },
           ({ path }) => ({ path, namespace: 'fixture' }),
         );
         build.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path }) => {
           const symbols = {
             '@mantine/core':
-              'ActionIcon Alert Button Checkbox Group Image Text TextInput Title Tooltip',
+              'ActionIcon Alert Button Checkbox Group Image Loader Modal ScrollArea Stack Text TextInput Title Tooltip',
             '@tabler/icons-react':
               'IconArrowRight IconCheck IconChevronDown IconDownload IconEdit IconFolder IconLoader2 IconMusic IconPlus IconRotateClockwise IconSearch IconSettings IconVinyl IconX',
             './components/BulkTrackEditor': 'BulkTrackEditor',
@@ -41,15 +41,15 @@ const result = await build({
           };
           const contents =
             path === 'react'
-              ? 'export const useState = (initial) => [typeof initial === "function" ? initial() : initial, () => {}]; export const useRef = (current) => ({current}); export const useEffect = () => {};'
+              ? 'export const useState = (initial) => [globalThis.songReviewFixture.previewStates?.length ? globalThis.songReviewFixture.previewStates.shift() : typeof initial === "function" ? initial() : initial, () => {}]; export const useRef = (current) => ({current}); export const useEffect = () => {};'
               : path === 'react/jsx-runtime'
                 ? 'export const Fragment = "Fragment"; export const jsx = (type, props) => ({type, props}); export const jsxs = jsx;'
                 : path === './useWorkspace'
                   ? 'export const useWorkspace = () => globalThis.songReviewFixture.workspace;'
                   : path === './useDesktopShell'
                     ? 'export const useDesktopShell = () => {};'
-                    : path === './desktop'
-                      ? 'export const desktopAvailable = true; export const artworkAsset = () => Promise.resolve(null); export const openPlaylist = () => Promise.resolve(); export const revealArchive = () => Promise.resolve();'
+                    : path.endsWith('/desktop')
+                      ? 'export const desktopAvailable = true; export const artworkAsset = () => Promise.resolve(null); export const previewExport = () => Promise.resolve(null); export const openPlaylist = (path) => { globalThis.songReviewFixture.played.push(path); return Promise.resolve(); }; export const revealArchive = (path) => { globalThis.songReviewFixture.revealed.push(path); return Promise.resolve(); };'
                       : symbols[path]
                           .split(' ')
                           .map((name) => `export const ${name} = '${name}';`)
@@ -60,9 +60,10 @@ const result = await build({
     },
   ],
 });
-const { App, songExample, inspectionPreferences } = await import(
-  `data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`
-);
+const { App, songExample, inspectionPreferences, ExportPreviewDialog } =
+  await import(
+    `data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`
+  );
 
 const song = structuredClone(songExample);
 const metadata = song.tracks[0].metadata;
@@ -74,14 +75,20 @@ Object.assign(metadata, {
 
 function fixture({
   inspection = song,
-  outputKind = 'folder',
+  outputKind = inspection?.suggestedMode === 'collection' &&
+  inspection.tracks.length === 1
+    ? 'file'
+    : 'folder',
   mode = 'collection',
   exampleMode = false,
   selected = new Set([0]),
+  progress = null,
 } = {}) {
   const loads = [];
   let exports = 0;
   globalThis.songReviewFixture = {
+    revealed: [],
+    played: [],
     workspace: {
       inspection,
       inspectionStatus: inspection ? 'complete' : 'idle',
@@ -95,6 +102,7 @@ function fixture({
         outputKind,
       },
       exampleMode,
+      progress,
       toolsReady: true,
       eventsReady: true,
       draftReady: true,
@@ -104,6 +112,8 @@ function fixture({
   };
   return {
     nodes: elements(App()),
+    revealed: globalThis.songReviewFixture.revealed,
+    played: globalThis.songReviewFixture.played,
     loads,
     get exports() {
       return exports;
@@ -141,15 +151,15 @@ function button(nodes, label) {
   return found.props;
 }
 
-test('a completed song review shows song metadata, its edit action, and the matching folder or ZIP action', () => {
-  for (const outputKind of ['folder', 'zip']) {
+test('a completed song review offers audio-file and folder saves plus ZIP downloads', () => {
+  for (const outputKind of ['file', 'folder', 'zip']) {
     const h = fixture({ outputKind });
     const nodes = h.nodes;
     assert.ok(labelled(nodes, 'Song details'));
     assert.equal(labelled(nodes, 'Collection tracks'), undefined);
     const action = button(
       nodes,
-      outputKind === 'folder' ? 'Save song…' : 'Download song…',
+      outputKind === 'zip' ? 'Download song…' : 'Save song…',
     );
     assert.equal(action.disabled, false);
     action.onClick();
@@ -208,4 +218,121 @@ test('start examples expose both song and album paths and never enable example d
     button(fixture({ exampleMode: true }).nodes, 'Save song…').disabled,
     true,
   );
+});
+
+test('single-audio output has a clear summary and cannot save or preview zero or multiple selections', () => {
+  const nodes = fixture().nodes;
+  const summary = nodes.find(
+    (node) => node.props?.className === 'export-options-summary',
+  );
+  assert.match(text(summary), /Audio file/);
+  assert.doesNotMatch(text(summary), /Folder|ZIP/);
+  const album = {
+    ...song,
+    suggestedMode: 'album',
+    tracks: [song.tracks[0], { ...song.tracks[0], id: 'second' }],
+  };
+  for (const selected of [new Set(), new Set([0, 1])]) {
+    const nodes = fixture({
+      inspection: album,
+      mode: 'album',
+      outputKind: 'file',
+      selected,
+    }).nodes;
+    assert.equal(
+      nodes.find((node) => node.props?.className === 'save-button').props
+        .disabled,
+      true,
+    );
+    assert.equal(button(nodes, 'Preview files').disabled, true);
+  }
+  const single = fixture({
+    inspection: album,
+    mode: 'album',
+    outputKind: 'file',
+    selected: new Set([1]),
+  }).nodes;
+  assert.equal(
+    single.find((node) => node.props?.className === 'save-button').props
+      .disabled,
+    false,
+  );
+});
+
+test('a completed audio file reports the song ready and reveals the actual file without playlist playback', async () => {
+  const outputPath = '/Music/Actual song (2).m4a';
+  const h = fixture({
+    progress: {
+      stage: 'complete',
+      result: {
+        outputKind: 'file',
+        outputPath,
+        trackCount: 1,
+        warnings: [],
+        playlistPath: null,
+      },
+    },
+  });
+  const success = h.nodes.find(
+    (node) => node.props?.className === 'success-copy',
+  );
+  assert.match(text(success), /Your song is ready/);
+  assert.match(text(success), /Actual song \(2\).m4a/);
+  const reveal = h.nodes.find(
+    (node) =>
+      node.type === 'Button' &&
+      /Show in Finder|Show in folder/.test(text(node)),
+  );
+  assert.ok(reveal);
+  await reveal.props.onClick();
+  assert.deepEqual(h.revealed, [outputPath]);
+  assert.deepEqual(h.played, []);
+  assert.equal(
+    h.nodes.some((node) => text(node) === 'Open playlist'),
+    false,
+  );
+});
+
+test('audio-file preview shows the file without a directory slash or empty companion-file section', () => {
+  const filename = 'Artist - Song.mp3';
+  globalThis.songReviewFixture = {
+    previewStates: [
+      {
+        rootName: filename,
+        outputKind: 'file',
+        tracks: [
+          {
+            relativePath: filename,
+            metadata,
+            artworkPath: null,
+            extensionProvisional: false,
+          },
+        ],
+        files: [filename],
+        warnings: [],
+      },
+      null,
+    ],
+  };
+  const nodes = elements(
+    ExportPreviewDialog({
+      plan: {
+        title: 'Artist - Song',
+        outputKind: 'file',
+        tracks: song.tracks,
+        auth: { browser: null },
+      },
+      cover: null,
+      close() {},
+    }),
+  );
+  const heading = nodes.find(
+    (node) => node.props?.className === 'file-preview-name',
+  );
+  assert.equal(text(heading), filename);
+  assert.equal(
+    nodes.some((node) => text(node) === 'Also included'),
+    false,
+  );
+  assert.ok(nodes.some((node) => /Audio file/.test(text(node))));
 });

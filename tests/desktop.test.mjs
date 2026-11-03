@@ -317,3 +317,41 @@ test('export binds an optional committed review identity without adding it to th
   await desktop.startExport(plan, '/Music/Another.zip', 'memory-only-job');
   assert.equal(globalThis.audioDlInvocations.at(-1).args.reviewIdentity, null);
 });
+
+test('single audio output chooses an existing parent and receives a filename stem from native planning', async () => {
+  values.set('audio-dl.save-directory', '/Users/me/Music/');
+  globalThis.audioDlOpenResponse = '/Users/me/Downloads';
+  globalThis.audioDlCommandResponses.set(
+    'file_destination',
+    '/Users/me/Downloads/Artist - Song',
+  );
+  const saves = globalThis.audioDlSaveRequests.length;
+  assert.equal(
+    await desktop.chooseAudioFile('Artist - Song'),
+    '/Users/me/Downloads/Artist - Song',
+  );
+  const picker = globalThis.audioDlOpenRequests.at(-1);
+  assert.equal(picker.directory, true);
+  assert.equal(picker.multiple, false);
+  assert.equal(picker.defaultPath, '/Users/me/Music/');
+  assert.deepEqual(globalThis.audioDlInvocations.at(-1), {
+    command: 'file_destination',
+    args: { directory: '/Users/me/Downloads', title: 'Artist - Song' },
+  });
+  assert.equal(values.get('audio-dl.save-directory'), '/Users/me/Downloads/');
+  assert.equal(
+    globalThis.audioDlSaveRequests.length,
+    saves,
+    'the final extension is not chosen before acquisition',
+  );
+
+  globalThis.audioDlOpenResponse = 'C:\\Music\\';
+  globalThis.audioDlCommandResponses.set('file_destination', 'C:\\Music\\Song');
+  assert.equal(await desktop.chooseAudioFile('Song'), 'C:\\Music\\Song');
+  assert.equal(values.get('audio-dl.save-directory'), 'C:\\Music\\');
+  const invocations = globalThis.audioDlInvocations.length;
+  globalThis.audioDlOpenResponse = null;
+  assert.equal(await desktop.chooseAudioFile('Song'), null);
+  assert.equal(globalThis.audioDlInvocations.length, invocations);
+  assert.equal(values.get('audio-dl.save-directory'), 'C:\\Music\\');
+});

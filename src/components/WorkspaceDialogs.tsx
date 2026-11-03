@@ -122,13 +122,32 @@ export function WorkspaceDialogs({
             value={p.outputKind}
             allowDeselect={false}
             onChange={(value) =>
-              patch({ outputKind: value === 'folder' ? 'folder' : 'zip' })
+              patch({
+                outputKind:
+                  value === 'file'
+                    ? 'file'
+                    : value === 'folder'
+                      ? 'folder'
+                      : 'zip',
+              })
             }
             data={[
-              { value: 'zip', label: 'ZIP archive' },
+              {
+                value: 'file',
+                label: 'Audio file · one song',
+                disabled: w.chosen.length !== 1,
+              },
               { value: 'folder', label: 'Music folder · ready to play' },
+              { value: 'zip', label: 'ZIP archive' },
             ]}
           />
+          {p.outputKind === 'file' && (
+            <Text size="sm" c="dimmed">
+              One audio file with its tags and embedded artwork where supported.
+              Choose a save location; Jacket adds the correct file extension
+              after download.
+            </Text>
+          )}
           <div>
             <Select
               label="Audio format"
@@ -314,7 +333,11 @@ function DetailsEditor({
           )}
           <TextInput
             label="Export name"
-            description="Used for the music folder or ZIP filename. Your music tags stay the same."
+            description={
+              draft.outputKind === 'file'
+                ? 'Audio filename without the extension. Jacket adds the correct extension after download. Your music tags stay the same.'
+                : 'Used for the music folder or ZIP filename. Your music tags stay the same.'
+            }
             value={draft.title}
             disabled={w.busy}
             onChange={(event) => {
@@ -392,7 +415,9 @@ function ArtworkOptions({
           ]}
         />
         <Text size="sm" c="dimmed" mt={8}>
-          Images are embedded where supported and included with your collection.
+          {p.outputKind === 'file'
+            ? 'Artwork is embedded in the audio file where supported. WAV cannot embed artwork; choose M4A / MP3 to include a cover.'
+            : 'Images are embedded where supported and included with your collection.'}
         </Text>
       </div>
       {p.artworkMode === 'shared' && candidates.length > 0 && (

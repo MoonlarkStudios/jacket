@@ -142,8 +142,19 @@ export function revealArchive(outputPath: string) {
 }
 
 export async function chooseFolder(title: string) {
+  return chooseMusicDestination(title, 'folder');
+}
+
+export async function chooseAudioFile(title: string) {
+  return chooseMusicDestination(title, 'file');
+}
+
+async function chooseMusicDestination(title: string, kind: 'folder' | 'file') {
   const parent = await open({
-    title: 'Choose where to save your music',
+    title:
+      kind === 'file'
+        ? 'Choose where to save the audio file'
+        : 'Choose where to save your music',
     directory: true,
     multiple: false,
     defaultPath: readPreference('save-directory') || undefined,
@@ -154,7 +165,15 @@ export async function chooseFolder(title: string) {
     'save-directory',
     `${parent.replace(/[\\/]$/, '')}${separator}`,
   );
-  return invoke<string>('folder_destination', { directory: parent, title });
+  // File output keeps a stem until the downloaded codec determines its real
+  // extension. Native publication appends that extension without overwriting.
+  return invoke<string>(
+    kind === 'file' ? 'file_destination' : 'folder_destination',
+    {
+      directory: parent,
+      title,
+    },
+  );
 }
 
 export function previewExport(plan: ExportPlan) {

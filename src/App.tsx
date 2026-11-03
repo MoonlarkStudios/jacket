@@ -102,6 +102,7 @@ export default function App() {
   const retry = ['failed', 'cancelled', 'interrupted'].includes(
     progress?.stage || '',
   );
+  const validOutput = p.outputKind !== 'file' || w.chosen.length === 1;
   const canExport =
     desktopAvailable &&
     !w.exampleMode &&
@@ -109,6 +110,7 @@ export default function App() {
     w.eventsReady &&
     w.draftReady &&
     !!w.chosen.length &&
+    validOutput &&
     !!p.title.trim() &&
     reviewReady &&
     !w.busy;
@@ -841,9 +843,11 @@ export default function App() {
                     </span>
                     <div className="success-copy">
                       <Text fw={600} size="sm">
-                        {success.outputKind === 'folder'
-                          ? 'Your music folder is ready'
-                          : 'Your archive is ready'}
+                        {success.outputKind === 'file'
+                          ? 'Your song is ready'
+                          : success.outputKind === 'folder'
+                            ? 'Your music folder is ready'
+                            : 'Your archive is ready'}
                       </Text>
                       <Text size="xs" c="dimmed" className="output-path">
                         {success.outputPath}
@@ -942,9 +946,11 @@ export default function App() {
                       >
                         <span>
                           {w.savePath?.split(/[\\/]/).pop() ||
-                            (p.outputKind === 'folder'
-                              ? `${p.title}/`
-                              : archiveFilename(p.title))}
+                            (p.outputKind === 'file'
+                              ? p.title
+                              : p.outputKind === 'folder'
+                                ? `${p.title}/`
+                                : archiveFilename(p.title))}
                         </span>
                         <IconEdit size={14} aria-hidden="true" />
                       </button>
@@ -964,13 +970,17 @@ export default function App() {
                         <span className="export-options-summary">
                           {formatNames[p.format]} ·{' '}
                           {artworkNames[p.artworkMode]} ·{' '}
-                          {p.outputKind === 'folder' ? 'Folder' : 'ZIP'}
+                          {p.outputKind === 'file'
+                            ? 'Audio file'
+                            : p.outputKind === 'folder'
+                              ? 'Folder'
+                              : 'ZIP'}
                         </span>
                       </button>
                       <button
                         type="button"
                         className="text-action preview-files"
-                        disabled={w.busy || !w.chosen.length}
+                        disabled={w.busy || !w.chosen.length || !validOutput}
                         onClick={(event) =>
                           openDialog('preview', event.currentTarget)
                         }
@@ -1014,11 +1024,13 @@ export default function App() {
                                   ? 'Connecting to the audio tools…'
                                   : !w.draftReady
                                     ? 'Restoring unfinished work…'
-                                    : w.selected.size === 0
-                                      ? 'Select at least one track'
-                                      : !p.title.trim()
-                                        ? `Add a collection name in ${p.mode === 'album' ? 'Edit album details' : 'Edit details'}`
-                                        : `${mac ? '⌘' : 'Ctrl'} + Enter`
+                                    : !validOutput
+                                      ? 'Select one track for an audio file, or choose Music folder or ZIP in Download options'
+                                      : w.selected.size === 0
+                                        ? 'Select at least one track'
+                                        : !p.title.trim()
+                                          ? `Add a collection name in ${p.mode === 'album' ? 'Edit album details' : 'Edit details'}`
+                                          : `${mac ? '⌘' : 'Ctrl'} + Enter`
                           }
                           events={{ hover: true, focus: true, touch: false }}
                         >
@@ -1039,15 +1051,23 @@ export default function App() {
                                 ? 'Resume download'
                                 : retry
                                   ? 'Retry download'
-                                  : p.outputKind === 'folder'
-                                    ? `Save ${contentName}…`
-                                    : `Download ${contentName}…`}
+                                  : p.outputKind === 'file'
+                                    ? 'Save song…'
+                                    : p.outputKind === 'folder'
+                                      ? `Save ${contentName}…`
+                                      : `Download ${contentName}…`}
                             </Button>
                           </span>
                         </Tooltip>
                       )}
                     </div>
                   </div>
+                  {!w.exporting && !validOutput && (
+                    <Text size="xs" c="dimmed" role="status" mt={8}>
+                      Audio file saves one selected track. Select one track, or
+                      choose Music folder or ZIP in Download options.
+                    </Text>
+                  )}
                   {!w.exporting && missingArtists > 0 && (
                     <Text className="tag-reminder" size="xs" c="dimmed">
                       {missingArtists} selected{' '}

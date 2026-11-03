@@ -18,13 +18,13 @@
 
 *The screenshots use Jacket’s built-in fictional example album. Browser preview downloads are disabled.*
 
-Jacket is a focused desktop app from [Moonlark Studios](https://github.com/MoonlarkStudios). Paste a YouTube or YouTube Music link, review a song or collection, and save tagged audio in a music folder or ZIP. Downloads and tagging run on your computer.
+Jacket is a focused desktop app from [Moonlark Studios](https://github.com/MoonlarkStudios). Paste a YouTube or YouTube Music link, review a song or collection, and save a tagged audio file, music folder, or ZIP. Downloads and tagging run on your computer.
 
 Jacket prepares recordings for players and tools such as its sister product, Resonant. Export local audio, then import a recording into Resonant for listening, practice, and analysis. See the [product direction](docs/product-direction.md) for the path from individual songs to multiple-source preparation and an optional future handoff.
 
 ## What you can do
 
-- **Save one song.** Review its title, artist, album, and year. Links that include both a video and a playlist start with the song; choose the playlist explicitly when you want the collection.
+- **Save one song.** Get one audio file with its tags and embedded cover, without an extra folder. Review its title, artist, album, and year. Links that include both a video and a playlist start with the song; choose the playlist explicitly when you want the collection.
 - **Finish the details.** Select tracks and correct their metadata together. Preview reversible title cleanup, or edit individual tracks and album details.
 - **Keep albums organized.** Apply shared album metadata and artwork, or keep each playlist track’s own details. Repeated entries stay in order.
 - **Choose your audio format.** Use M4A / MP3 for compatibility, preserve supported source codecs, or choose MP3 throughout.
@@ -78,7 +78,7 @@ Open `http://127.0.0.1:1420` and choose **Try a song** or **Explore an album**. 
 1. Paste an HTTPS YouTube or YouTube Music song, album, or playlist link into Jacket. For a video link with playlist context, keep **This song** or choose **Entire playlist**, then select **Find tracks**.
 2. Review the song's metadata or select tracks from the collection. Choose **Edit song details** for a song, use a track's edit button or **Edit album details** for a collection, or click the cover to change artwork.
 3. Open **Download options** to choose the format and artwork behavior.
-4. Choose **Preview files** to review the result. New reviews use **Music folder**; **ZIP archive** is available in **Download options**. Saved reviews and interrupted downloads retain their output choice.
+4. Choose **Preview files** to review the result. New song reviews use **Audio file**; albums and playlists use **Music folder**. All three output choices are available in **Download options**, with Audio file requiring one selected track. Saved reviews and interrupted downloads retain their output choice.
 5. Start the download and choose a destination. Folder exports can be opened immediately with **Open folder** or **Open playlist**; extract ZIP exports before playback.
 
 Existing files and folders are kept. If the name is already taken, Jacket saves a numbered copy. Unavailable entries are reported before download; artwork failures produce a warning while allowing audio export to continue.
@@ -101,7 +101,7 @@ My Album/
 └── manifest.json
 ```
 
-Songs use the same portable bundle, with one audio file. The exact contents depend on your choices. Per-track artwork goes in `artwork/`; choosing no artwork omits images. `playlist.m3u` uses relative paths, so the folder can move with your music. ZIP output contains the same bundle; extract it before use. The [manifest format](docs/manifest.md) records original and exported metadata, codecs, warnings, and SHA-256 hashes.
+A song defaults to one audio file such as `Artist - Title.m4a`, with its artwork embedded when available. No playlist, manifest, or separate image is saved. Choose its destination folder; Jacket adds the correct codec extension after download. Music folder and ZIP output include the bundle shown above. The exact contents depend on your choices. Per-track artwork goes in `artwork/`; choosing no artwork omits images. `playlist.m3u` uses relative paths, so the folder can move with your music. ZIP output contains the same bundle; extract it before use. The [manifest format](docs/manifest.md) records original and exported metadata, codecs, warnings, and SHA-256 hashes.
 
 | Format option | Result |
 | --- | --- |
@@ -109,7 +109,7 @@ Songs use the same portable bundle, with one audio file. The exact contents depe
 | **Keep source codec** | Preserves supported AAC, ALAC, MP3, Opus, Vorbis, FLAC, or PCM audio without re-encoding the audio stream. |
 | **MP3** | Produces MP3 files; existing MP3 audio is copied without re-encoding. |
 
-Preserving a codec retains the quality available from the source; it does not make lossy audio lossless. Artwork may be a video thumbnail. WAV has limited tag support and uses separate artwork; Jacket reports metadata it cannot embed.
+Preserving a codec retains the quality available from the source; it does not make lossy audio lossless. Artwork may be a video thumbnail. WAV has limited tag support and cannot embed artwork. A folder or ZIP can keep its separate image and metadata manifest; Audio file output reports the omitted artwork/tags without creating extra files.
 
 ## Privacy and browser access
 

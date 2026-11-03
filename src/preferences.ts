@@ -3,6 +3,7 @@ import type {
   CollectionMode,
   ExportPlan,
   Inspection,
+  OutputKind,
   Track,
 } from './domain';
 
@@ -16,7 +17,7 @@ export interface ExportPreferences {
   artworkMode: 'perTrack' | 'shared' | 'none';
   sharedArtwork: string | null;
   sharedArtworkAsset: string | null;
-  outputKind: 'zip' | 'folder';
+  outputKind: OutputKind;
 }
 
 export function readPreference(key: string): string | null {
@@ -141,7 +142,10 @@ export function inspectionPreferences(
       value.tracks.find((track) => track.artworkUrl)?.artworkUrl ||
       null,
     sharedArtworkAsset: null,
-    outputKind: 'folder',
+    outputKind:
+      value.suggestedMode === 'collection' && value.tracks.length === 1
+        ? 'file'
+        : 'folder',
   };
 }
 

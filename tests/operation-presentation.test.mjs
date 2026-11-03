@@ -3,15 +3,45 @@ import { test } from 'node:test';
 import { build } from 'esbuild';
 
 const result = await build({
-  entryPoints: ['src/operationPresentation.ts'],
+  stdin: {
+    contents:
+      "export * from './src/operationPresentation'; export { DownloadFeedback } from './src/components/DownloadFeedback';",
+    resolveDir: process.cwd(),
+  },
   bundle: true,
   write: false,
   platform: 'node',
   format: 'esm',
+  plugins: [
+    {
+      name: 'download-feedback-fixture',
+      setup(build) {
+        build.onResolve(
+          {
+            filter:
+              /^(react\/jsx-runtime|@mantine\/core|@tabler\/icons-react)$/,
+          },
+          ({ path }) => ({ path, namespace: 'fixture' }),
+        );
+        build.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path }) => ({
+          contents:
+            path === 'react/jsx-runtime'
+              ? 'export const Fragment = "Fragment"; export const jsx = (type, props) => ({type, props}); export const jsxs = jsx;'
+              : (path === '@mantine/core'
+                  ? ['Alert', 'Button', 'Group', 'Progress', 'Text']
+                  : ['IconLoader2']
+                )
+                  .map((name) => `export const ${name} = '${name}';`)
+                  .join('\n'),
+        }));
+      },
+    },
+  ],
 });
-const { getDownloadPresentation, presentOperationError } = await import(
-  `data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`
-);
+const { DownloadFeedback, getDownloadPresentation, presentOperationError } =
+  await import(
+    `data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`
+  );
 
 function progress(overrides = {}) {
   return {
@@ -170,4 +200,99 @@ test('disk, tool, source and unavailable errors have distinct recovery guidance'
     'network',
   );
   assert.equal(presentOperationError(null).kind, 'unknown');
+});
+
+function elements(node) {
+  if (Array.isArray(node)) return node.flatMap(elements);
+  if (!node || typeof node !== 'object') return [];
+  return [
+    node,
+    ...elements(
+      typeof node.type === 'function'
+        ? node.type(node.props)
+        : node.props?.children,
+    ),
+  ];
+}
+function text(node) {
+  if (Array.isArray(node)) return node.map(text).join('');
+  if (node && typeof node === 'object') return text(node.props?.children);
+  return typeof node === 'string' ? node : '';
+}
+
+test('file, folder and ZIP publication use accurate progress titles and supporting details', () => {
+  for (const [message, title, detail] of [
+    [
+      'Saving your audio file',
+      'Saving audio file…',
+      'Your tagged audio is ready. Saving the file…',
+    ],
+    [
+      'Saving your audio folder',
+      'Saving music folder…',
+      'Your audio is ready. Saving the music folder…',
+    ],
+    [
+      'Building your audio archive',
+      'Creating ZIP…',
+      'Your audio is ready. Saving the ZIP archive…',
+    ],
+    [
+      'Future technical engine message',
+      'Saving your music…',
+      'Your audio is ready. Finishing the export…',
+    ],
+  ]) {
+    const event = progress({ stage: 'packaging', message, completed: 12 });
+    const presentation = getDownloadPresentation(event);
+    assert.equal(presentation.title, title);
+    assert.equal(presentation.detail, detail);
+    assert.equal(presentation.indeterminate, true);
+    const nodes = elements(
+      DownloadFeedback({
+        progress: event,
+        exporting: true,
+        cancelling: false,
+        onOpenSettings() {},
+      }),
+    );
+    assert.ok(
+      nodes.some((node) => node.type === 'Text' && text(node) === title),
+    );
+    assert.ok(
+      nodes.some((node) => node.type === 'Text' && text(node) === detail),
+    );
+    if (message !== 'Building your audio archive')
+      assert.equal(
+        nodes.some((node) => /ZIP/.test(text(node))),
+        false,
+      );
+    assert.equal(
+      nodes.some((node) =>
+        text(node).includes('Future technical engine message'),
+      ),
+      false,
+    );
+  }
+});
+
+test('an unavailable file destination offers a new folder instead of retrying the same missing parent', () => {
+  const error = 'Choose an available folder for your audio file.';
+  assert.equal(presentOperationError(error).kind, 'destination');
+  let chosen = 0;
+  const nodes = elements(
+    DownloadFeedback({
+      progress: progress({ stage: 'failed', error }),
+      exporting: false,
+      cancelling: false,
+      onOpenSettings() {},
+      onChooseDestination: () => chosen++,
+    }),
+  );
+  const choose = nodes.find(
+    (node) => node.type === 'Button' && text(node) === 'Choose another folder',
+  );
+  assert.ok(choose);
+  choose.props.onClick();
+  assert.equal(chosen, 1);
 });

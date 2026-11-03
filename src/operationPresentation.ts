@@ -69,7 +69,7 @@ export function presentOperationError(
     };
   }
   if (
-    /permission denied|access (?:is )?denied|read-only file system|os error (?:13|30)\b|cannot (?:create|write)|could not (?:create|write|save).*?(?:file|folder|archive)|destination.*(?:missing|unavailable|not found)|no such file or directory/i.test(
+    /permission denied|access (?:is )?denied|read-only file system|os error (?:13|30)\b|cannot (?:create|write)|could not (?:create|write|save).*?(?:file|folder|archive)|destination.*(?:missing|unavailable|not found)|choose an available folder for your audio file|no such file or directory/i.test(
       detail,
     )
   ) {
@@ -114,6 +114,7 @@ export function presentOperationError(
 
 export interface DownloadPresentation {
   title: string;
+  detail: string | null;
   currentTrack: string | null;
   completed: number;
   total: number;
@@ -134,9 +135,22 @@ export function getDownloadPresentation(
   const next = Math.min(completed + 1, total);
   const countLabel = `${completed} of ${total} ${total === 1 ? 'track' : 'tracks'} prepared`;
   let title = 'Starting download…';
+  let detail: string | null = null;
   let currentTrack: string | null = null;
   if (progress.stage === 'packaging') {
-    title = 'Creating ZIP…';
+    if (progress.message === 'Saving your audio file') {
+      title = 'Saving audio file…';
+      detail = 'Your tagged audio is ready. Saving the file…';
+    } else if (progress.message === 'Saving your audio folder') {
+      title = 'Saving music folder…';
+      detail = 'Your audio is ready. Saving the music folder…';
+    } else if (progress.message === 'Building your audio archive') {
+      title = 'Creating ZIP…';
+      detail = 'Your audio is ready. Saving the ZIP archive…';
+    } else {
+      title = 'Saving your music…';
+      detail = 'Your audio is ready. Finishing the export…';
+    }
   } else if (progress.stage === 'downloading') {
     title = total
       ? `Downloading track ${next} of ${total}`
@@ -156,6 +170,7 @@ export function getDownloadPresentation(
   }
   return {
     title,
+    detail,
     currentTrack: currentTrack || null,
     completed,
     total,

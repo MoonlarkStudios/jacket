@@ -84,9 +84,9 @@ export function DownloadFeedback({
         >
           {cancelling
             ? 'Downloaded audio is kept so you can try again.'
-            : progress.stage === 'packaging'
-              ? 'Audio and artwork are ready. Saving your ZIP…'
-              : presentation.currentTrack || 'Preparing your selected tracks…'}
+            : presentation.detail ||
+              presentation.currentTrack ||
+              'Preparing your selected tracks…'}
         </Text>
         {!cancelling && progress.message.startsWith('Retrying ') && (
           <Text size="xs" c="dimmed" mt={4}>

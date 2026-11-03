@@ -32,7 +32,7 @@ const result = await build({
                   ? 'export function useDownloader() { return {}; }'
                   : path.endsWith('useBrowserSession')
                     ? `import { useState, useCallback } from 'react'; export function useBrowserSession() { const [selection, setSelection] = useState({browser:null,profileId:null}); return {selection, testing:false, attach:(browser,profileId)=>setSelection({browser,profileId}), restore:useCallback(({browser,browserProfile})=>setSelection({browser,profileId:browserProfile??null}),[])}; }`
-                    : `export const desktopAvailable = true; ${['archiveDestination', 'cancelExport', 'cancelInspection', 'chooseArchive', 'chooseFolder', 'dependencyStatus', 'dismissRecovery', 'inspectSource', 'pendingExport', 'startExport', 'loadReviewDraft', 'saveReviewDraft', 'discardReviewDraft'].map((name) => `export const ${name} = (...args) => globalThis.workspaceFixture.native.${name}(...args);`).join('\n')}`;
+                    : `export const desktopAvailable = true; ${['archiveDestination', 'cancelExport', 'cancelInspection', 'chooseArchive', 'chooseFolder', 'chooseAudioFile', 'dependencyStatus', 'dismissRecovery', 'inspectSource', 'pendingExport', 'startExport', 'loadReviewDraft', 'saveReviewDraft', 'discardReviewDraft'].map((name) => `export const ${name} = (...args) => globalThis.workspaceFixture.native.${name}(...args);`).join('\n')}`;
           return { contents };
         });
       },
@@ -55,6 +55,8 @@ function fixture() {
     inspect: [],
     choose: [],
     chooseFolder: [],
+    chooseFile: [],
+    archive: [],
     loadReview: [],
     saveReview: [],
     discardReview: [],
@@ -78,7 +80,10 @@ function fixture() {
         calls.discardReview.push(args);
         return true;
       },
-      archiveDestination: async (title) => `/Downloads/${title}.zip`,
+      archiveDestination: async (title) => {
+        calls.archive.push(title);
+        return `/Downloads/${title}.zip`;
+      },
       chooseArchive: async (title) => {
         calls.choose.push(title);
         return '/Music/Album.zip';
@@ -86,6 +91,10 @@ function fixture() {
       chooseFolder: async (title) => {
         calls.chooseFolder.push(title);
         return '/Music/Album';
+      },
+      chooseAudioFile: async (title) => {
+        calls.chooseFile.push(title);
+        return `/Music/${title}`;
       },
       dismissRecovery: async (id) => {
         calls.dismiss.push(id);
@@ -505,7 +514,7 @@ test('renaming a failed download clears the retry destination hint and asks for 
 });
 
 test('saved reviews restore committed null numbering, URL, selection, artwork and output preferences exactly', async () => {
-  for (const outputKind of ['folder', 'zip']) {
+  for (const outputKind of ['folder', 'zip', 'file']) {
     const h = fixture();
     const draft = savedReview();
     draft.preferences.outputKind = outputKind;
@@ -1544,7 +1553,7 @@ test('export waits for startup review arbitration so a delayed unrelated review 
   assert.deepEqual(h.calls.start[0][3], pending.reviewIdentity);
 });
 
-test('standalone song inspection and edits preserve source tags and choose a music folder', async () => {
+test('standalone song inspection and edits preserve source tags and choose an audio file', async () => {
   const h = fixture();
   const song = {
     ...structuredClone(album),
@@ -1563,10 +1572,12 @@ test('standalone song inspection and edits preserve source tags and choose a mus
   await w.inspect(song.sourceUrl);
   w = await h.flush();
   assert.equal(w.preferences.title, 'Artist - Song');
-  assert.equal(w.preferences.outputKind, 'folder');
+  assert.equal(w.preferences.outputKind, 'file');
   assert.equal(w.preferences.artworkMode, 'perTrack');
   assert.equal(w.preferences.mode, 'collection');
   assert.deepEqual(w.inspection, original);
+  assert.equal(w.savePath, null);
+  assert.equal(h.calls.archive.length, 0);
   assert.equal(w.chosen[0].metadata.trackNumber, null);
   assert.equal(w.chosen[0].metadata.album, '');
   const corrected = {
@@ -1593,9 +1604,10 @@ test('standalone song inspection and edits preserve source tags and choose a mus
   w = await h.flush();
   assert.equal(w.preferences.title, 'My custom song folder');
   await w.exportZip();
-  assert.deepEqual(h.calls.chooseFolder, ['My custom song folder']);
+  assert.deepEqual(h.calls.chooseFile, ['My custom song folder']);
+  assert.equal(h.calls.chooseFolder.length, 0);
   assert.equal(h.calls.choose.length, 0);
-  assert.equal(h.calls.start[0][0].outputKind, 'folder');
+  assert.equal(h.calls.start[0][0].outputKind, 'file');
   assert.equal(
     h.calls.start[0][0].tracks[0].metadata.title,
     'Another correction',
@@ -1628,4 +1640,127 @@ test('legacy unfinished exports retain ZIP destination and cached job after the 
     sessionId: h.calls.saveReview.at(-1).sessionId,
     revision: h.calls.saveReview.at(-1).revision,
   });
+});
+
+function standaloneSong() {
+  return {
+    ...structuredClone(album),
+    sourceUrl: 'https://www.youtube.com/watch?v=eQVkkG8Oz8c',
+    suggestedMode: 'collection',
+    tracks: [structuredClone(album.tracks[0])],
+  };
+}
+
+test('single-file retries retain the filename stem and cached job while changing output kind chooses a new destination', async () => {
+  const h = fixture();
+  h.render().loadInspection(standaloneSong());
+  let w = await h.flush();
+  await w.exportZip();
+  const [plan, stem, id] = h.calls.start[0];
+  assert.equal(plan.outputKind, 'file');
+  assert.equal(stem, '/Music/Artist - Song');
+  assert.deepEqual(h.calls.chooseFile, ['Artist - Song']);
+  stopExport(h, id);
+  w = await h.flush();
+  assert.equal(w.destinationPath, stem);
+  await w.exportZip();
+  assert.equal(h.calls.chooseFile.length, 1);
+  assert.deepEqual(h.calls.start[1].slice(0, 3), [plan, stem, id]);
+  stopExport(h, id);
+  w = h.render();
+  w.setPreferences((p) => ({ ...p, outputKind: 'zip' }));
+  w = await h.flush();
+  assert.equal(w.destinationPath, null);
+  await w.exportZip();
+  assert.equal(h.calls.start[2][0].outputKind, 'zip');
+  assert.equal(h.calls.start[2][2], id);
+  assert.equal(h.calls.choose.length, 1);
+  stopExport(h, id);
+  w = h.render();
+  w.setPreferences((p) => ({ ...p, outputKind: 'file' }));
+  w = await h.flush();
+  assert.equal(w.destinationPath, null);
+  assert.equal(w.savePath, null);
+  await w.exportZip();
+  assert.equal(h.calls.chooseFile.length, 2);
+  assert.equal(h.calls.start[3][0].outputKind, 'file');
+  assert.equal(h.calls.start[3][1], stem);
+  assert.equal(h.calls.start[3][2], id);
+});
+
+test('cancelling a file destination preserves review and any prior retry stem', async () => {
+  const h = fixture();
+  h.render().loadInspection(standaloneSong());
+  let w = await h.flush();
+  h.f.native.chooseAudioFile = async () => null;
+  const writes = h.calls.saveReview.length;
+  await w.exportZip();
+  w = await h.flush();
+  assert.equal(h.calls.start.length, 0);
+  assert.equal(h.calls.saveReview.length, writes);
+  assert.equal(w.preferences.outputKind, 'file');
+  assert.equal(w.inspection.tracks.length, 1);
+  h.f.native.chooseAudioFile = async () => '/Other/My song';
+  await w.exportZip();
+  const id = h.calls.start[0][2];
+  stopExport(h, id);
+  w = await h.flush();
+  h.f.native.chooseAudioFile = async () => null;
+  await w.chooseAnotherDestination();
+  w = await h.flush();
+  assert.equal(w.destinationPath, '/Other/My song');
+  assert.equal(w.savePath, '/Other/My song');
+  await w.exportZip();
+  assert.equal(h.calls.start[1][1], '/Other/My song');
+  assert.equal(h.calls.start[1][2], id);
+});
+
+test('file output requires exactly one selected occurrence, including when picking a song from an album', async () => {
+  const h = fixture();
+  h.render().loadInspection(album);
+  let w = await h.flush();
+  w.setPreferences((p) => ({ ...p, outputKind: 'file' }));
+  for (const selected of [new Set(), new Set([0, 1])]) {
+    w = h.render();
+    w.setSelected(selected);
+    w = await h.flush();
+    await w.exportZip();
+    await w.chooseAnotherDestination();
+    assert.equal(w.preferences.outputKind, 'file');
+    assert.deepEqual(h.calls.saveReview.at(-1).selected, [...selected]);
+    assert.equal(h.calls.chooseFile.length, 0);
+    assert.equal(h.calls.start.length, 0);
+  }
+  w.setSelected(new Set([1]));
+  w = await h.flush();
+  await w.exportZip();
+  assert.equal(h.calls.chooseFile.length, 1);
+  assert.equal(h.calls.start[0][0].outputKind, 'file');
+  assert.equal(h.calls.start[0][0].tracks.length, 1);
+  assert.equal(h.calls.start[0][0].tracks[0].id, album.tracks[1].id);
+});
+
+test('single-file recovery retains the exact output stem and cache across restart', async () => {
+  const h = fixture();
+  const pending = pendingFolderExport();
+  pending.plan.mode = 'collection';
+  pending.plan.outputKind = 'file';
+  pending.plan.tracks = standaloneSong().tracks;
+  pending.plan.artworkMode = 'perTrack';
+  pending.outputPath = '/Music/Original custom song stem';
+  h.f.native.pendingExport = async () => pending;
+  h.render();
+  const w = await h.flush();
+  assert.equal(w.preferences.outputKind, 'file');
+  assert.equal(w.preferences.title, pending.plan.title);
+  assert.equal(w.destinationPath, pending.outputPath);
+  assert.equal(w.savePath, pending.outputPath);
+  assert.equal(h.calls.archive.length, 0);
+  await w.exportZip();
+  assert.equal(h.calls.chooseFile.length, 0);
+  assert.equal(h.calls.chooseFolder.length, 0);
+  assert.equal(h.calls.choose.length, 0);
+  assert.equal(h.calls.start[0][0].outputKind, 'file');
+  assert.equal(h.calls.start[0][1], pending.outputPath);
+  assert.equal(h.calls.start[0][2], pending.jobId);
 });
