@@ -21,31 +21,31 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     try:
         for compact in (False, True):
-            for dark in (False, True):
-                for panel in (None, 'preview', 'settings', 'editor', 'bulk', 'crop'):
+            for theme in ("dark", "light", "mocha"):
+                for panel in (None, 'preview', 'settings', 'appearance', 'options', 'editor', 'bulk', 'crop'):
                     name = '-'.join(('compact' if compact else 'normal',
-                                     'dark' if dark else 'light', panel or 'review'))
+                                     theme, panel or 'review'))
                     destination = output / f'{name}.png'
                     command = [str(options.executable.resolve()), '--screenshot', str(destination)]
                     if compact:
                         command.append('--compact')
-                    if dark:
-                        command.append('--dark')
+                    if theme != "dark":
+                        command.append(f"--{theme}")
                     if panel:
                         command.extend(['--panel', panel])
                     subprocess.run(command, check=True, timeout=60)
                     if not destination.is_file() or destination.stat().st_size == 0:
                         raise ValueError(f'No screenshot was produced: {name}')
         for scenario in ('song', 'empty', 'stress'):
-            for dark in (False, True):
-                destination = output / f'normal-{"dark" if dark else "light"}-{scenario}.png'
+            for theme in ("dark", "light", "mocha"):
+                destination = output / f"normal-{theme}-{scenario}.png"
                 command = [str(options.executable.resolve()), '--screenshot', str(destination), f'--{scenario}']
-                if dark:
-                    command.append('--dark')
+                if theme != "dark":
+                    command.append(f"--{theme}")
                 subprocess.run(command, check=True, timeout=60)
                 if not destination.is_file() or destination.stat().st_size == 0:
                     raise ValueError(f'No screenshot was produced: {scenario}')
-        print(f'Captured 30 native views in {output}; inspect each for visual acceptance.')
+        print(f'Captured 57 native views in {output}; inspect each for visual acceptance.')
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         parser.exit(1, f'Native snapshot capture failed: {error}\n')
 

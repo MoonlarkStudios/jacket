@@ -43,6 +43,31 @@ The retained `src/` and `src-tauri/` tree records the previous React/Tauri behav
 It is excluded from the native Cargo workspace. Runtime staging scripts are reused
 for their verified audio payloads; native packaging does not invoke Tauri.
 
+## Presentation and artwork
+
+The `view/` modules compose the shell, ordered track table, Export inspector,
+preview, preferences and shared components. At the default 1180 × 800 size, the
+review and Export inspector share the workspace; at the 600 × 600 minimum, Export
+options move to a separate panel. The track list keeps widget creation bounded
+to visible occurrences and overscan. Modal content scrolls independently from
+its persistent action footer.
+
+The app owns one resolved theme snapshot: semantic colors, derived interaction
+colors, iced's extended palette and a revision. Jacket Dark, Jacket Light and
+Catppuccin Mocha are compiled presets. Custom definitions use the same version 1
+TOML schema as Resonant v2. Theme imports are bounded, validated off the event
+loop and retained in the appearance preference. Widgets receive resolved colors;
+view construction does not parse files or regenerate the palette. Appearance
+changes do not enter review history, export plans or recovery records.
+
+Review and export preview resolve artwork for their own context. The preview
+shows the chosen shared cover or applicable track artwork; choosing no artwork
+omits the cover from that export presentation. Provider images load through a
+bounded background request and decoding path. Imported artwork uses the app-owned
+asset. Stale preview results cannot replace artwork for a different review or
+selection. Theme switches recolor the surrounding controls and preserve image
+pixels, source metadata and audio.
+
 ## Review and recovery
 
 Review storage records unfinished work, not an export history. The versioned

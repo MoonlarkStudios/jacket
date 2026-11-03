@@ -1,5 +1,5 @@
 use audio_engine::{ArtworkMode, AudioFormat, Browser, CollectionMode, OutputKind};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 
 macro_rules! choices {
@@ -103,12 +103,35 @@ impl BrowserChoice {
     }
 }
 
-/// Native preferences contain no authentication selection or source URLs.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+/// Application appearance is independent of review and export data.
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Appearance {
-    pub dark: bool,
+    pub theme: crate::theme::Selection,
     pub default_format: FormatPreference,
+}
+
+impl<'de> Deserialize<'de> for Appearance {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Default, Deserialize)]
+        #[serde(default, deny_unknown_fields)]
+        struct Stored {
+            theme: Option<crate::theme::Selection>,
+            dark: Option<bool>,
+            default_format: FormatPreference,
+        }
+        let stored = Stored::deserialize(deserializer)?;
+        let theme = stored.theme.unwrap_or(crate::theme::Selection::Preset {
+            preset: match stored.dark {
+                Some(false) => crate::theme::Preset::Light,
+                _ => crate::theme::Preset::Dark,
+            },
+        });
+        Ok(Self {
+            theme,
+            default_format: stored.default_format,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]

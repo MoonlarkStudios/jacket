@@ -44,6 +44,7 @@ impl App {
             .ok_or("Find a song or collection first.")?;
         let plan = review.plan(self.auth.clone())?;
         self.preview = Some(audio_engine::preview_export(&plan).map_err(|e| e.to_string())?);
+        self.preview_cover = None;
         self.pending_plan = Some(plan);
         self.panel = Panel::Preview;
         Ok(())
@@ -63,14 +64,9 @@ impl App {
         if !self.example {
             if let Some(desktop) = self.desktop.clone() {
                 let draft = self.review.as_ref().map(Review::draft);
-                let appearance = self.appearance.clone();
+                let appearance = self.appearance_valid.then(|| self.appearance.clone());
                 return persistence::background(
-                    move || {
-                        if let Some(draft) = draft {
-                            persistence::persist_review(&desktop, draft)?;
-                        }
-                        persistence::write_appearance(&desktop, &appearance)
-                    },
+                    move || persistence::persist_before_close(&desktop, draft, appearance),
                     Message::CloseReady,
                 );
             }
@@ -80,6 +76,7 @@ impl App {
 
     pub(super) fn suspend_review(&mut self) -> SuspendedReview {
         self.preview = None;
+        self.preview_cover = None;
         self.pending_plan = None;
         SuspendedReview {
             review: self.review.take(),
@@ -100,7 +97,11 @@ impl App {
         self.track_scroll = previous.track_scroll;
         self.result = previous.result;
         self.appearance = previous.appearance;
+        if let Ok(theme) = self.appearance.theme.resolve(self.theme.revision + 1) {
+            self.theme = theme;
+        }
         self.preview = None;
+        self.preview_cover = None;
         self.pending_plan = None;
     }
 
@@ -112,6 +113,7 @@ impl App {
         self.track_scroll = 0.0;
         self.result = None;
         self.preview = None;
+        self.preview_cover = None;
         self.pending_plan = None;
         self.save_failed = false;
     }
@@ -140,6 +142,8 @@ impl App {
         if self.example {
             return Task::none();
         }
+        // Explicit settings changes authorize replacing a failed restored preference.
+        self.appearance_valid = true;
         self.appearance_dirty = true;
         self.flush_appearance()
     }

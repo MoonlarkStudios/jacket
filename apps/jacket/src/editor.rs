@@ -249,10 +249,14 @@ impl Editor {
         Ok(())
     }
 
-    pub fn view<'a>(&'a self, review: &'a Review) -> Element<'a, Message> {
+    pub fn view<'a>(
+        &'a self,
+        review: &'a Review,
+        p: crate::style::Presentation,
+    ) -> Element<'a, Message> {
         let heading = match self.kind {
-            Kind::Track(_) => "Song details",
-            Kind::Album => "Album & export details",
+            Kind::Track(_) => "Edit track tags",
+            Kind::Album => "Album details",
             Kind::Bulk => "Edit selected tracks",
         };
         let field = |label: &'static str,
@@ -261,21 +265,40 @@ impl Editor {
                      enabled: bool|
          -> Element<'a, Message> {
             column![
-                text(label).size(13),
-                text_input(label, value)
-                    .on_input_maybe(
-                        enabled
-                            .then_some(move |value| Message::Editor(Action::Input(which, value)))
-                    )
-                    .padding(10)
+                text(label).size(12).color(p.colors.text_muted),
+                text_input(
+                    if matches!(which, Field::Year) {
+                        "YYYY"
+                    } else {
+                        ""
+                    },
+                    value
+                )
+                .id(match which {
+                    Field::Title => "metadata-title",
+                    Field::Artist => "metadata-artist",
+                    Field::Album => "metadata-album",
+                    Field::AlbumArtist => "metadata-album-artist",
+                    Field::Year => "metadata-year",
+                    Field::Track => "metadata-track",
+                    Field::Disc => "metadata-disc",
+                    Field::Prefix => "metadata-prefix",
+                    Field::Suffix => "metadata-suffix",
+                })
+                .on_input_maybe(
+                    enabled.then_some(move |value| Message::Editor(Action::Input(which, value)))
+                )
+                .padding([8, 10])
+                .size(14)
+                .style(p.input())
             ]
             .spacing(5)
             .into()
         };
-        let mut body = Column::new().spacing(14).push(text(heading).size(26));
+        let mut body = Column::new().spacing(12).push(text(heading).size(18));
         if !matches!(self.kind, Kind::Album) {
             if let Some(notice) = inheritance_notice(review) {
-                body = body.push(text(notice).size(13));
+                body = body.push(text(notice).size(12).color(p.colors.text_muted));
             }
         }
         match self.kind {
@@ -285,7 +308,7 @@ impl Editor {
                     .push(field("Artist", &self.artist, Field::Artist, true))
                     .push(field(
                         if inherited(review, Field::Album) {
-                            "Album · shared album value"
+                            "Album · shared"
                         } else {
                             "Album"
                         },
@@ -295,7 +318,7 @@ impl Editor {
                     ))
                     .push(field(
                         if inherited(review, Field::AlbumArtist) {
-                            "Album artist · shared album value"
+                            "Album artist · shared"
                         } else {
                             "Album artist"
                         },
@@ -307,7 +330,7 @@ impl Editor {
                         row![
                             field(
                                 if inherited(review, Field::Year) {
-                                    "Year · shared album value"
+                                    "Year · shared"
                                 } else {
                                     "Year"
                                 },
@@ -316,30 +339,32 @@ impl Editor {
                                 !inherited(review, Field::Year)
                             ),
                             field("Track number", &self.track, Field::Track, true),
-                            field("Disc number", &self.disc, Field::Disc, true),
+                            field("Disc number", &self.disc, Field::Disc, true)
                         ]
                         .spacing(12),
                     );
             }
             Kind::Album => {
-                body = body
-                    .push(field("Export name", &self.title, Field::Title, true))
-                    .push(field("Album title", &self.album, Field::Album, true))
-                    .push(field("Album artist", &self.album_artist, Field::AlbumArtist, true))
-                    .push(field("Release year", &self.year, Field::Year, true))
-                    .push(text(if review.preferences.mode == CollectionMode::Album {
-                        "Album mode applies these shared tags to selected tracks. Empty shared fields preserve each track’s own tags. The export name follows the album title until you choose a custom name."
-                    } else {
-                        "Playlist mode preserves each track’s own tags. Choose Album mode in Download options to apply these shared album details."
-                    }).size(13));
+                body=body.push(field("Output name",&self.title,Field::Title,true))
+                    .push(text("Used for the exported file, folder or ZIP.").size(12).color(p.colors.text_muted))
+                    .push(field("Album title",&self.album,Field::Album,true))
+                    .push(field("Album artist",&self.album_artist,Field::AlbumArtist,true))
+                    .push(field("Release year",&self.year,Field::Year,true))
+                    .push(text(if review.preferences.mode==CollectionMode::Album{"These album tags apply to every selected track. Leave a field empty to keep each track’s own value."}else{"Individual tags are active. Switch to shared album tags in Export options to apply these details to every track."}).size(12).color(p.colors.text_muted));
             }
             Kind::Bulk => {
                 body = body.push(
                     text(format!(
-                        "{} selected occurrences · source metadata stays intact",
-                        review.selected.len()
+                        "{} {} selected",
+                        review.selected.len(),
+                        if review.selected.len() == 1 {
+                            "track"
+                        } else {
+                            "tracks"
+                        }
                     ))
-                    .size(13),
+                    .size(12)
+                    .color(p.colors.text_muted),
                 );
                 for (index, label, value, which, bulk_field) in [
                     (
@@ -376,35 +401,50 @@ impl Editor {
                                 .unwrap_or_default(),
                             _ => String::new(),
                         };
-                        body = body
-                            .push(text(format!("{label}: {shared} · shared album value")).size(13));
+                        body = body.push(
+                            row![
+                                text(label).size(12).color(p.colors.text_muted).width(88),
+                                text(shared).size(13),
+                                text("Shared").size(11).color(p.colors.text_muted)
+                            ]
+                            .spacing(10),
+                        );
                         continue;
                     }
                     body = body.push(
                         row![
-                            container(text(label).size(13)).width(100),
+                            container(text(label).size(12).color(p.colors.text_muted)).width(88),
                             pick_list(EditAction::ALL, Some(self.actions[index]), move |action| {
                                 Message::Editor(Action::Choose(bulk_field, action))
                             })
-                            .width(100),
-                            text_input("New value", value)
+                            .width(88)
+                            .padding([7, 8])
+                            .text_size(13),
+                            text_input("", value)
                                 .on_input_maybe((self.actions[index] == EditAction::Set).then_some(
                                     move |value| Message::Editor(Action::Input(which, value))
                                 ))
-                                .padding(8),
+                                .padding([8, 10])
+                                .size(14)
+                                .style(p.input())
                         ]
                         .spacing(8)
                         .align_y(iced::Alignment::Center),
                     );
                 }
                 body = body
-                    .push(text("Title cleanup · exact matches only").size(14))
+                    .push(text("Clean up titles").size(14))
                     .push(
                         row![
-                            field("Remove prefix", &self.prefix, Field::Prefix, true),
-                            field("Remove suffix", &self.suffix, Field::Suffix, true)
+                            field("Remove from start", &self.prefix, Field::Prefix, true),
+                            field("Remove from end", &self.suffix, Field::Suffix, true)
                         ]
                         .spacing(12),
+                    )
+                    .push(
+                        text("Only matching text is removed.")
+                            .size(12)
+                            .color(p.colors.text_muted),
                     );
                 match self
                     .bulk(review)
@@ -412,31 +452,102 @@ impl Editor {
                 {
                     Ok(preview) => {
                         body = body.push(
-                            text(format!("{} tracks will change", preview.changed_count)).size(13),
+                            text(if preview.changed_count == 0 {
+                                "No changes yet".into()
+                            } else {
+                                format!(
+                                    "{} {} will change",
+                                    preview.changed_count,
+                                    if preview.changed_count == 1 {
+                                        "track"
+                                    } else {
+                                        "tracks"
+                                    }
+                                )
+                            })
+                            .size(12)
+                            .color(p.colors.text_muted),
                         );
-                        for change in preview
-                            .rows
-                            .iter()
-                            .filter(|row| row.before.title != row.after.title)
-                            .take(6)
-                        {
+                        for change in preview.rows.iter().filter(|row| row.changed).take(6) {
+                            let mut details = Column::new().spacing(4).push(
+                                text(format!("{:02}  {}", change.index + 1, change.before.title))
+                                    .size(13),
+                            );
+                            for (label, before, after) in [
+                                (
+                                    "Title",
+                                    change.before.title.as_str(),
+                                    change.after.title.as_str(),
+                                ),
+                                (
+                                    "Artist",
+                                    change.before.artist.as_str(),
+                                    change.after.artist.as_str(),
+                                ),
+                                (
+                                    "Album",
+                                    change.before.album.as_str(),
+                                    change.after.album.as_str(),
+                                ),
+                                (
+                                    "Album artist",
+                                    change.before.album_artist.as_str(),
+                                    change.after.album_artist.as_str(),
+                                ),
+                            ] {
+                                if before != after {
+                                    details = details.push(
+                                        text(format!(
+                                            "{label}: {} → {}",
+                                            display_value(before),
+                                            display_value(after)
+                                        ))
+                                        .size(12)
+                                        .color(p.colors.text_muted),
+                                    );
+                                }
+                            }
+                            if change.before.release_year != change.after.release_year {
+                                details = details.push(
+                                    text(format!(
+                                        "Year: {} → {}",
+                                        change
+                                            .before
+                                            .release_year
+                                            .map(|year| year.to_string())
+                                            .unwrap_or_else(|| "Not set".into()),
+                                        change
+                                            .after
+                                            .release_year
+                                            .map(|year| year.to_string())
+                                            .unwrap_or_else(|| "Not set".into())
+                                    ))
+                                    .size(12)
+                                    .color(p.colors.text_muted),
+                                );
+                            }
                             body = body.push(
-                                text(format!(
-                                    "{}  →  {}",
-                                    change.before.title, change.after.title
-                                ))
-                                .size(13),
+                                container(details)
+                                    .width(Length::Fill)
+                                    .padding([8, 10])
+                                    .style(move |_| container::Style {
+                                        background: Some(p.colors.background.into()),
+                                        border: iced::Border {
+                                            width: 1.0,
+                                            color: p.colors.border,
+                                            radius: 4.0.into(),
+                                        },
+                                        ..container::Style::default()
+                                    }),
                             );
                         }
                     }
-                    Err(error) => {
-                        body = body.push(text(error).color(iced::color!(0xBE4940)).size(13))
-                    }
+                    Err(error) => body = body.push(text(error).color(p.colors.danger).size(12)),
                 }
             }
         }
         if let Some(error) = &self.error {
-            body = body.push(text(error).color(iced::color!(0xBE4940)).size(13));
+            body = body.push(text(error).color(p.colors.danger).size(12));
         }
         body.width(Length::Fill).into()
     }
@@ -463,7 +574,15 @@ fn inheritance_notice(review: &Review) -> Option<String> {
     .into_iter()
     .filter_map(|(field, label)| inherited(review, field).then_some(label))
     .collect();
-    (!fields.is_empty()).then(|| format!("Shared album details control {}. Change them in Album & export details, or clear the shared values there to use each track’s own tags.", fields.join(", ")))
+    (!fields.is_empty()).then(|| format!("Album details set {}. Edit them there, or clear the shared values to keep each track’s own tags.", fields.join(", ")))
+}
+
+fn display_value(value: &str) -> &str {
+    if value.is_empty() {
+        "Not set"
+    } else {
+        value
+    }
 }
 
 fn year(value: &str) -> Result<Option<u32>, String> {

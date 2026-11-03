@@ -4,9 +4,12 @@ mod artwork;
 mod crop_view;
 mod editor;
 mod example;
+mod icons;
 mod platform;
 mod settings;
 mod style;
+mod theme;
+mod theme_iced;
 mod track_list;
 mod view;
 
@@ -28,9 +31,10 @@ fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
         .settings(iced::Settings {
             id: Some("com.moonlark.audio-dl".into()),
+            default_text_size: iced::Pixels(13.0),
             ..iced::Settings::default()
         })
-        .title("Jacket — From link to neatly packed")
+        .title("Jacket")
         .theme(App::theme)
         .font(include_bytes!("../../../assets/fonts/Geist.ttf").as_slice())
         .default_font(iced::Font::with_name("Geist"))
@@ -39,7 +43,7 @@ fn main() -> iced::Result {
             size: if std::env::args().any(|arg| arg == "--compact") {
                 iced::Size::new(600.0, 600.0)
             } else {
-                iced::Size::new(1120.0, 820.0)
+                iced::Size::new(1180.0, 800.0)
             },
             min_size: Some(iced::Size::new(600.0, 600.0)),
             position: window::Position::Centered,

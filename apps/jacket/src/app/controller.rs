@@ -2,7 +2,7 @@ use super::persistence;
 use super::{App, Message, Panel, ProfileChoice};
 use crate::editor::{self, Editor};
 use crate::settings::BrowserChoice;
-use crate::{example, style, view};
+use crate::{example, view};
 use audio_engine::{AuthOptions, OutputKind};
 use iced::{keyboard, window, Element, Subscription, Task, Theme};
 use jacket_core::{Review, SourceLink};
@@ -12,8 +12,28 @@ use std::time::Duration;
 
 impl App {
     pub fn theme(&self) -> Theme {
-        style::theme(self.appearance.dark)
+        self.theme.iced.clone()
     }
+    pub fn presentation(&self) -> crate::style::Presentation {
+        crate::style::Presentation {
+            colors: self.theme.colors,
+            derived: self.theme.derived,
+        }
+    }
+
+    pub fn preview_plan(&self) -> Option<&audio_engine::ExportPlan> {
+        self.pending_plan.as_ref()
+    }
+
+    pub fn can_preview(&self) -> bool {
+        !self.busy()
+            && self.review.as_ref().is_some_and(|review| {
+                !review.selected.is_empty()
+                    && (review.preferences.output_kind != audio_engine::OutputKind::File
+                        || review.selected.len() == 1)
+            })
+    }
+
     pub fn view(&self) -> Element<'_, Message> {
         view::view(self)
     }
@@ -25,9 +45,7 @@ impl App {
             || self.save_pending > 0
     }
     pub fn can_export(&self) -> bool {
-        !self.busy()
-            && !self.example
-            && self.review.as_ref().is_some_and(|r| !r.selected.is_empty())
+        self.can_preview() && !self.example
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -57,6 +75,25 @@ impl App {
                     {
                         Some(Message::Quit)
                     }
+                    keyboard::Key::Named(keyboard::key::Named::Enter) => {
+                        Some(Message::PrimaryAction)
+                    }
+                    keyboard::Key::Character(ref value) if !modifiers.command() && value == "1" => {
+                        Some(Message::ThemeShortcut(crate::theme::Preset::Dark))
+                    }
+                    keyboard::Key::Character(ref value) if !modifiers.command() && value == "2" => {
+                        Some(Message::ThemeShortcut(crate::theme::Preset::Light))
+                    }
+                    keyboard::Key::Character(ref value) if !modifiers.command() && value == "3" => {
+                        Some(Message::ThemeShortcut(
+                            crate::theme::Preset::CatppuccinMocha,
+                        ))
+                    }
+                    keyboard::Key::Named(keyboard::key::Named::Tab) => Some(if modifiers.shift() {
+                        Message::FocusPrevious
+                    } else {
+                        Message::FocusNext
+                    }),
                     keyboard::Key::Named(keyboard::key::Named::Escape) => Some(Message::Escape),
                     keyboard::Key::Character(ref value)
                         if modifiers.command() && value.eq_ignore_ascii_case("l") =>
@@ -68,8 +105,15 @@ impl App {
                     {
                         Some(Message::Preview)
                     }
-                    keyboard::Key::Character(ref value) if modifiers.command() && value == "," => {
-                        Some(Message::OpenPanel(Panel::Settings))
+                    keyboard::Key::Character(ref value)
+                        if modifiers.command()
+                            && (value == "," || (modifiers.shift() && value == "<")) =>
+                    {
+                        Some(Message::OpenPanel(if modifiers.shift() {
+                            Panel::Appearance
+                        } else {
+                            Panel::Settings
+                        }))
                     }
                     _ => None,
                 }
@@ -85,6 +129,18 @@ impl App {
                     Ok(boot) => {
                         self.recovery = boot.recovery;
                         self.appearance = boot.appearance;
+                        self.appearance_valid = boot.appearance_valid;
+                        match self.appearance.theme.resolve(self.theme.revision + 1) {
+                            Ok(theme) => self.theme = theme,
+                            Err(error) => {
+                                self.appearance_valid = false;
+                                self.error = Some(format!("Could not restore the theme: {error}"));
+                                self.theme = crate::theme::ResolvedTheme::preset(
+                                    crate::theme::Preset::Dark,
+                                    self.theme.revision + 1,
+                                );
+                            }
+                        }
                         self.downloader_preferences = boot.downloader_preferences;
                         self.notice = boot.warning;
                         if let Some(draft) = boot.draft {
@@ -121,6 +177,23 @@ impl App {
                 }
             }
             Message::Tick => return self.tick(),
+            Message::ThemeShortcut(preset) if self.panel == Panel::Appearance => {
+                return self.update(Message::ThemePreset(preset))
+            }
+            Message::PrimaryAction => {
+                return match self.panel {
+                    Panel::Workspace | Panel::Options if self.can_preview() => {
+                        self.update(Message::Preview)
+                    }
+                    Panel::Preview if self.can_export() => self.update(Message::Save),
+                    Panel::Editor if !self.busy() => {
+                        self.update(Message::Editor(editor::Action::Apply))
+                    }
+                    Panel::Crop if !self.busy() && !self.example => self.update(Message::ApplyCrop),
+                    Panel::Settings | Panel::Appearance => self.update(Message::ClosePanel),
+                    _ => Task::none(),
+                }
+            }
             Message::NativeReady => crate::platform::window_ready(),
             Message::Quit => {
                 return window::oldest()
@@ -170,6 +243,7 @@ impl App {
                 self.preview = None;
                 self.pending_plan = None;
                 self.panel = Panel::Workspace;
+                self.initialize_example_cover();
             }
             Message::TrackScrolled(offset) if offset.is_finite() => {
                 self.track_scroll = offset.max(0.0)
@@ -184,6 +258,11 @@ impl App {
                 if let Some(review) = &self.review {
                     self.editor = Some(Editor::new(kind, review));
                     self.panel = Panel::Editor;
+                    return iced::widget::operation::focus(if matches!(kind, editor::Kind::Bulk) {
+                        "metadata-prefix"
+                    } else {
+                        "metadata-title"
+                    });
                 }
             }
             Message::Editor(editor::Action::Apply) if !self.busy() => {
@@ -233,15 +312,28 @@ impl App {
             Message::UndoNumbering if !self.busy() => {
                 return self.change_review(|review| review.undo_numbering().map(|_| ()))
             }
-            Message::OpenPanel(panel) if !self.dialog_open => self.panel = panel,
+            Message::OpenPanel(panel)
+                if !self.dialog_open
+                    && (!matches!(self.panel, Panel::Editor | Panel::Crop)
+                        || panel == self.panel) =>
+            {
+                self.panel = panel
+            }
             Message::ClosePanel => {
                 self.panel = Panel::Workspace;
                 self.pending_plan = None;
                 return self.restore_scroll();
             }
-            Message::Preview if !self.busy() => {
+            Message::Preview if !self.busy() && self.panel == Panel::Editor => {
+                return self.update(Message::Editor(editor::Action::Apply));
+            }
+            Message::Preview
+                if !self.busy() && matches!(self.panel, Panel::Workspace | Panel::Options) =>
+            {
                 if let Err(error) = self.prepare_preview() {
                     self.error = Some(error);
+                } else {
+                    return self.preview_artwork();
                 }
             }
             Message::Save if self.can_export() => {
@@ -479,6 +571,9 @@ impl App {
                 }
             },
             Message::Browser(browser) if !self.busy() => {
+                if browser == BrowserChoice::Public {
+                    return self.update(Message::PublicAccess);
+                }
                 self.browser = browser;
                 self.profile = None;
                 self.profiles.clear();
@@ -514,14 +609,14 @@ impl App {
                         browser_profile: Some(profile.id.clone()),
                         ..AuthOptions::default()
                     };
-                    self.notice=Some("This browser profile will be used for new inspections and downloads in this window.".into());
+                    self.notice = Some("Browser session connected.".into());
                 }
             }
             Message::PublicAccess if !self.busy() => {
                 self.auth = AuthOptions::default();
                 self.browser = BrowserChoice::Public;
                 self.profile = None;
-                self.notice = Some("New work uses public access.".into());
+                self.notice = Some("Public access enabled.".into());
             }
             Message::TestAccess if !self.busy() => {
                 if let Some(desktop) = &self.desktop {
@@ -536,10 +631,57 @@ impl App {
                     }
                 }
             }
-            Message::Dark(dark) if !self.close_after_job => {
-                self.appearance.dark = dark;
+            Message::ThemePreset(preset) if !self.close_after_job => {
+                let selection = crate::theme::Selection::Preset { preset };
+                self.theme = crate::theme::ResolvedTheme::preset(preset, self.theme.revision + 1);
+                self.appearance.theme = selection;
                 return self.save_appearance();
             }
+            Message::ImportTheme if !self.dialog_open && !self.close_after_job => {
+                self.dialog_open = true;
+                return Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Load theme")
+                            .add_filter("TOML theme", &["toml"])
+                            .pick_file()
+                            .await
+                            .map(|file| file.path().to_owned())
+                    },
+                    Message::ThemeFile,
+                );
+            }
+            Message::ThemeFile(path) => {
+                self.dialog_open = false;
+                if let Some(path) = path {
+                    self.dialog_open = true;
+                    return persistence::background(
+                        move || crate::theme::Selection::import(&path),
+                        Message::ThemeImported,
+                    );
+                }
+            }
+            Message::ThemeImported(result) => {
+                self.dialog_open = false;
+                match result.and_then(|selection| {
+                    selection
+                        .resolve(self.theme.revision + 1)
+                        .map(|theme| (selection, theme))
+                }) {
+                    Ok((selection, theme)) => {
+                        self.theme = theme;
+                        self.appearance.theme = selection;
+                        return self.save_appearance();
+                    }
+                    Err(error) => self.error = Some(format!("Theme could not be loaded: {error}")),
+                }
+            }
+            Message::PasteLink if !self.busy() => {
+                return iced::clipboard::read()
+                    .map(|value| Message::Pasted(value.unwrap_or_default()))
+            }
+            Message::FocusNext => return iced::widget::operation::focus_next(),
+            Message::FocusPrevious => return iced::widget::operation::focus_previous(),
             Message::DefaultFormat(format) if !self.close_after_job => {
                 self.appearance.default_format = format.into();
                 return self.save_appearance();
@@ -604,6 +746,18 @@ impl App {
                     prefs.mode = downloader_updates::Mode::Local;
                     prefs.local_path = Some(path.to_string_lossy().into_owned());
                     self.admit(desktop.configure_downloader(prefs));
+                }
+            }
+            Message::PreviewCover(source, result) => {
+                if self
+                    .pending_plan
+                    .as_ref()
+                    .and_then(crate::artwork::preview_url)
+                    == Some(source.as_str())
+                {
+                    if let Ok(handle) = result {
+                        self.preview_cover = Some(handle);
+                    }
                 }
             }
             Message::SourceCover(source, result) => {
@@ -744,7 +898,7 @@ impl App {
                 }
             }
             Message::Opened(Err(error)) => self.error = Some(error),
-            Message::FocusSource if !self.busy() => {
+            Message::FocusSource if !self.busy() && self.panel == Panel::Workspace => {
                 return iced::widget::operation::focus("source-url")
             }
             Message::Escape => {

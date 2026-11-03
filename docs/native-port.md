@@ -66,17 +66,29 @@ They should point to separate disposable directories for qualification.
 
 ## Native interface qualification
 
-`mise run qualify:ui` captures the fictional review, export preview, settings,
-track editor, bulk editor and artwork crop in light/dark themes at 600 × 600 and 1120 × 820.
-Six additional captures cover single-song, empty and 10,000-occurrence list
-scenarios in both themes. The images are written under `target/native-snapshots`. This requires a graphical
-session (or an explicitly configured virtual display on Linux). Inspect the images;
-a successfully written PNG alone does not prove layout or accessibility acceptance.
-For one capture, use `mise run snapshot`; the binary also accepts
-`--screenshot /absolute/path.png`, `--panel preview|settings|editor|bulk|crop`,
-`--compact`, and `--dark`. `--song`, `--empty` and `--stress` provide isolated
-single-song, welcome, and 10,000-occurrence list scenarios. These modes use fictional data, keep real saved reviews,
-and disable downloads.
+The default native workspace is 1180 × 800, with a 600 × 600 minimum. Review,
+Export options and the artwork-rich file preview share one semantic design
+system with Resonant v2. Jacket Dark, Jacket Light and Catppuccin Mocha are
+built-in; custom TOML themes can be imported and retained in application settings.
+The older native `dark` preference migrates to the corresponding Dark or Light
+preset. New settings default to Dark. See [themes](themes.md) and the
+[UI redesign record](ui-redesign.md).
+
+`mise run qualify:ui` captures 57 views: eight panels at two window sizes in all
+three presets, plus single-song, welcome and 10,000-occurrence list scenarios in
+each preset. Outputs go under `target/native-snapshots`. A graphical session or
+an explicitly configured virtual display is required. Inspect the rendered
+images; a written PNG alone does not establish layout or accessibility acceptance.
+
+For one capture, use `mise run snapshot`. The binary accepts
+`--screenshot /absolute/path.png`,
+`--panel preview|settings|appearance|options|editor|bulk|crop`, `--compact`,
+`--light` and `--mocha`. `--dark` is also accepted for an explicit Dark preset.
+`--song`, `--empty` and `--stress` provide isolated scenario fixtures.
+`--theme-file /absolute/path.toml` applies a custom theme only in the isolated
+screenshot/example flow; it does not replace the ordinary saved appearance.
+These modes use fictional data, leave real saved reviews in place and disable
+downloads.
 
 The native interface supports JPEG/PNG file selection or dropping an image onto
 a review, source thumbnail previews, and a draggable square crop with a size
@@ -94,8 +106,10 @@ wait for a bounded HTTP request already in progress (up to 90 seconds).
 
 ## Acceptance record
 
-See the [November 3 native verification record](native-verification.md) for the
-completed Linux builds, tests and visual checks and their practical limits.
+See the [initial native port verification record](native-verification.md) for
+the original port results and the [UI redesign record](ui-redesign.md) for the
+subsequent presentation changes. The initial 166-test and 30-view record is
+historical evidence for that port, rather than a result for the redesign.
 
 Automated check results belong in the implementation handoff or PR and should
 identify the tested commit/environment. This checklist describes required desktop
@@ -104,7 +118,7 @@ qualification; unchecked behavior must not be represented as verified.
 | Area | Evidence required before native release |
 | --- | --- |
 | Build and startup | Clean checkout, locked dependencies, ordinary launch, missing-tool guidance, complete bundled runtime. |
-| Visual layout | Minimum and normal window sizes, long metadata, large playlists, light/dark theme, display scaling. |
+| Visual layout | Minimum and normal window sizes, long metadata, large playlists, all three presets, display scaling. |
 | Keyboard and assistive access | Tab order, visible focus, text editing, dialog cancellation, shortcuts and screen-reader review. |
 | Source intent | Song link, mixed song/playlist link, album and playlist, invalid URL, repeated entries and unavailable media. |
 | Metadata and artwork | Individual/bulk edits, shared album fields, original metadata preservation, artwork import and export. |

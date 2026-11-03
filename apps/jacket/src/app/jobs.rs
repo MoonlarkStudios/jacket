@@ -45,14 +45,14 @@ impl App {
                     self.track_scroll = 0.0;
                     self.preview = None;
                     self.pending_plan = None;
-                    self.notice = Some("Review the details, then preview your files.".into());
+                    self.notice = None;
                     save_inspection = true;
                 }
                 Event::Exported(result) => {
                     self.finish_resumed_review(true);
                     self.recovery = None;
                     self.result = Some(result);
-                    self.notice = Some("Your audio is ready.".into());
+                    self.notice = None;
                 }
                 Event::Failed(error) => {
                     self.finish_resumed_review(false);
@@ -137,13 +137,7 @@ impl App {
         if self.example || self.cover.is_some() {
             return None;
         }
-        self.review.as_ref().and_then(|review| {
-            review
-                .preferences
-                .shared_artwork
-                .as_deref()
-                .or(review.inspection.artwork_url.as_deref())
-        })
+        self.review.as_ref().and_then(crate::artwork::source_url)
     }
 
     pub(super) fn cover_preview(&self) -> Task<Message> {
@@ -190,5 +184,31 @@ impl App {
             }
             Err(error) => self.error = Some(error),
         }
+    }
+
+    pub(super) fn preview_artwork(&mut self) -> Task<Message> {
+        self.preview_cover = None;
+        let requested = self
+            .pending_plan
+            .as_ref()
+            .and_then(crate::artwork::preview_url);
+        let current = self.review.as_ref().and_then(crate::artwork::source_url);
+        if self.source_cover.is_some() && requested.is_some() && requested == current {
+            return Task::none();
+        }
+        if let (Some(desktop), Some(url)) = (
+            self.desktop.clone(),
+            self.pending_plan
+                .as_ref()
+                .and_then(crate::artwork::preview_url),
+        ) {
+            let url = url.to_owned();
+            let source = url.clone();
+            return super::persistence::background(
+                move || crate::artwork::preview(&desktop, &url),
+                move |result| Message::PreviewCover(source, result),
+            );
+        }
+        Task::none()
     }
 }

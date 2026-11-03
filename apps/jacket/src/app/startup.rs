@@ -11,6 +11,29 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 impl App {
+    /// Keep the isolated sample's selected cover and file preview consistent.
+    /// The temporary asset never enters the ordinary artwork or review stores.
+    pub(super) fn initialize_example_cover(&mut self) {
+        if !self.example || self.review.is_none() {
+            return;
+        }
+        match example::cover() {
+            Ok((asset, file)) => {
+                if let Some(review) = &mut self.review {
+                    review.preferences.shared_artwork_asset = Some(asset.id.clone());
+                    review.preferences.artwork_mode = audio_engine::ArtworkMode::Shared;
+                }
+                self.cover = Some((asset, file.path().to_owned()));
+                self.source_cover = None;
+                self.preview_cover = None;
+                self._example_cover_file = Some(file);
+            }
+            Err(error) => {
+                self.error = Some(format!("Sample artwork could not be prepared: {error}"))
+            }
+        }
+    }
+
     pub fn new() -> (Self, Task<Message>) {
         let args: Vec<String> = std::env::args().collect();
         let screenshot = args
@@ -19,10 +42,31 @@ impl App {
             .and_then(|index| args.get(index + 1))
             .map(PathBuf::from);
         let isolated = args.iter().any(|arg| arg == "--example") || screenshot.is_some();
-        let appearance = Appearance {
-            dark: args.iter().any(|a| a == "--dark"),
+        let mut appearance = Appearance {
+            theme: crate::theme::Selection::Preset {
+                preset: if args.iter().any(|a| a == "--light") {
+                    crate::theme::Preset::Light
+                } else if args.iter().any(|a| a == "--mocha") {
+                    crate::theme::Preset::CatppuccinMocha
+                } else {
+                    crate::theme::Preset::Dark
+                },
+            },
             ..Appearance::default()
         };
+        let mut theme_error = None;
+        if isolated {
+            if let Some(path) = args
+                .iter()
+                .position(|arg| arg == "--theme-file")
+                .and_then(|index| args.get(index + 1))
+            {
+                match crate::theme::Selection::import(std::path::Path::new(path)) {
+                    Ok(selection) => appearance.theme = selection,
+                    Err(error) => theme_error = Some(error),
+                }
+            }
+        }
         let mut app = Self {
             desktop: None,
             review: None,
@@ -35,8 +79,12 @@ impl App {
             progress: None,
             result: None,
             recovery: None,
-            error: None,
+            error: theme_error,
             notice: None,
+            theme: appearance
+                .theme
+                .resolve(1)
+                .expect("startup themes have already been validated"),
             appearance,
             example: isolated,
             loading: !isolated,
@@ -52,6 +100,7 @@ impl App {
             downloader_preferences: downloader_updates::Preferences::default(),
             cover: None,
             source_cover: None,
+            preview_cover: None,
             track_scroll: 0.0,
             crop_x: "0".into(),
             crop_y: "0".into(),
@@ -67,6 +116,7 @@ impl App {
             crop_dragging: false,
             appearance_saving: false,
             appearance_dirty: false,
+            appearance_valid: true,
             _example_cover_file: None,
         };
         if isolated {
@@ -88,6 +138,7 @@ impl App {
             }
             if !args.iter().any(|arg| arg == "--empty") {
                 app.review = Some(Review::new(inspection, AudioFormat::Compatible));
+                app.initialize_example_cover();
             }
             if let Some(index) = args.iter().position(|arg| arg == "--panel") {
                 match args.get(index + 1).map(String::as_str) {
@@ -95,14 +146,16 @@ impl App {
                         Ok((asset, file)) => {
                             app.cover = Some((asset, file.path().to_owned()));
                             app._example_cover_file = Some(file);
-                            app.crop_x = "40".into();
-                            app.crop_y = "40".into();
-                            app.crop_size = "176".into();
+                            app.crop_x = "80".into();
+                            app.crop_y = "80".into();
+                            app.crop_size = "480".into();
                             app.panel = Panel::Crop;
                         }
                         Err(error) => app.error = Some(error.to_string()),
                     },
                     Some("settings") => app.panel = Panel::Settings,
+                    Some("appearance") => app.panel = Panel::Appearance,
+                    Some("options") => app.panel = Panel::Options,
                     Some("preview") => {
                         let _ = app.prepare_preview();
                     }

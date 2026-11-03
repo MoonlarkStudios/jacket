@@ -74,6 +74,21 @@ tag support; exports report metadata and artwork that cannot be embedded. See th
 [manifest contract](docs/manifest.md) for original metadata, effective tags, codecs,
 warnings and SHA-256 hashes.
 
+## Native workspace and themes
+
+The workspace uses the same semantic surface hierarchy, Geist typography and
+compact controls as Resonant v2, with Jacket's copper identity. The review keeps
+album artwork and release details beside an ordered track table. The Export
+inspector groups the output, format, artwork and tag choices; the file preview
+shows the selected cover, effective tags and filenames before saving. At narrow
+window sizes, Export options open in a panel and Preview remains visible.
+
+Choose **Theme** in the header to select Jacket Dark, Jacket Light or Catppuccin
+Mocha, or load a custom TOML theme. Theme definitions use Resonant v2's version 1
+semantic format. Imported definitions are retained with the application settings;
+changing appearance preserves the review and export state. See [themes](docs/themes.md)
+and the [native UI redesign](docs/ui-redesign.md).
+
 ## Local data and access
 
 Jacket has no application server or telemetry. The audio tools contact the source
@@ -100,7 +115,7 @@ content. It is not affiliated with YouTube or Google.
 mise run check       # Native formatting, Clippy, unit tests, scripts and workflows
 mise run test:media  # Offline FFmpeg exports, archives and independent tag checks
 mise run build       # target/release/jacket
-mise run qualify:ui  # Capture 26 fictional views for visual review; needs a display
+mise run qualify:ui  # Capture 57 native views across themes and sizes; needs a display
 ```
 
 Build output honors `CARGO_TARGET_DIR` when set. Local app candidates with a complete bundled audio runtime:

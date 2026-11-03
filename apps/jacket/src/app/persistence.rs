@@ -45,11 +45,11 @@ pub(super) fn load() -> Result<Boot, String> {
         Ok(draft) => (draft, None),
         Err(error) => (None, Some(error)),
     };
-    let appearance = match read_appearance(&desktop) {
-        Ok(value) => value,
+    let (appearance, appearance_valid) = match read_appearance(&desktop) {
+        Ok(value) => (value, true),
         Err(error) => {
             warning = Some(warning.map_or(error.clone(), |warning| format!("{warning} {error}")));
-            Appearance::default()
+            (Appearance::default(), false)
         }
     };
     Ok(Boot {
@@ -58,6 +58,7 @@ pub(super) fn load() -> Result<Boot, String> {
         desktop,
         draft,
         appearance,
+        appearance_valid,
         warning,
     })
 }
@@ -73,14 +74,16 @@ pub(super) fn read_appearance(desktop: &Desktop) -> Result<Appearance, String> {
         Err(error) => return Err(error.to_string()),
     };
     let mut bytes = Vec::new();
-    file.take(4097)
+    file.take(524289)
         .read_to_end(&mut bytes)
         .map_err(|error| error.to_string())?;
-    if bytes.len() > 4096 {
+    if bytes.len() > 524288 {
         return Err("Jacket’s appearance preferences are too large.".into());
     }
-    serde_json::from_slice(&bytes)
-        .map_err(|_| "Jacket’s appearance preferences could not be read.".into())
+    let appearance: Appearance = serde_json::from_slice(&bytes)
+        .map_err(|_| "Jacket’s appearance preferences could not be read.".to_string())?;
+    appearance.theme.resolve(0)?;
+    Ok(appearance)
 }
 
 pub(super) fn write_appearance(desktop: &Desktop, prefs: &Appearance) -> Result<(), String> {
@@ -93,5 +96,20 @@ pub(super) fn write_appearance(desktop: &Desktop, prefs: &Appearance) -> Result<
     file.as_file().sync_all().map_err(|e| e.to_string())?;
     file.persist(root.join("native-preferences.json"))
         .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Preserve a failed appearance restore until the user explicitly selects new settings.
+pub(super) fn persist_before_close(
+    desktop: &Desktop,
+    draft: Option<ReviewDraft>,
+    appearance: Option<Appearance>,
+) -> Result<(), String> {
+    if let Some(draft) = draft {
+        persist_review(desktop, draft)?;
+    }
+    if let Some(appearance) = appearance {
+        write_appearance(desktop, &appearance)?;
+    }
     Ok(())
 }

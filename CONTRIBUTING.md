@@ -42,7 +42,7 @@ the app; the ordinary tests run without a display or live source account.
 | `mise run test:media` | Offline exports with FFmpeg and an independent Mutagen reader. |
 | `mise run fmt` | Format native Rust code. |
 | `mise run snapshot` | Capture an isolated fictional review and quit; requires a display. |
-| `mise run qualify:ui` | Capture 26 native views across panels, themes and window sizes for visual review. |
+| `mise run qualify:ui` | Capture 57 native views across panels, themes, window sizes and scenarios for visual review. |
 | `mise run licenses:native` | Collect exact Cargo sources, native notices and an integrity manifest. |
 | `mise run package:mac` | Build a local ad-hoc signed `.app` with staged tools. |
 | `mise run package:linux` | Build a portable Linux candidate with pinned tools and source companion. |
@@ -86,11 +86,26 @@ cancellation, corrupt persistence and stale completion. Do not use live accounts
 cookies or restricted media as fixtures. Avoid including credentials, private
 URLs, recordings or export destinations in logs and reports.
 
+## Native presentation and themes
+
+`apps/jacket/src/view/` separates the shell, workspace, export controls, preview,
+preferences and shared components. `theme.rs` resolves the versioned semantic
+palette; `theme_iced.rs` supplies iced's extended palette, and `style.rs` turns
+that resolved snapshot into widget rules. Use semantic roles for surfaces, text,
+status and controls rather than hardcoded light/dark color branches. Album
+artwork remains literal image content when the surrounding theme changes.
+
+Theme changes are application settings. Preserve review identity, metadata,
+selection, recovery and admitted jobs while switching themes. New preferences
+default to Jacket Dark; migration retains an explicit old `dark: false` as Jacket
+Light and `dark: true` as Jacket Dark. Custom TOML definitions are copied into the
+application preference after validation. See [theme authoring](docs/themes.md).
+
 ## Validation and pull requests
 
 Run `mise run check`. For audio/tagging/export changes, also run
 `mise run test:media`. Native interface changes need a visual review and keyboard
-check at minimum and normal window sizes. Check focus, resize, scrolling, dialog
+check at 600 × 600 and the 1180 × 800 default size in all three presets. Check focus, resize, scrolling, dialog
 cancellation, operation cancellation and closing while work is active. Record
 which platform and display path were exercised; headless checks alone do not
 establish desktop acceptance. Use the checklist in [native port](docs/native-port.md).

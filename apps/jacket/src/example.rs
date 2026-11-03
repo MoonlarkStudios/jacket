@@ -1,6 +1,6 @@
 use audio_engine::{CollectionMode, Inspection, Metadata, Track};
 
-/// A disposable, embedded brand asset for isolated crop-layout qualification.
+/// A disposable album cover for isolated artwork-layout qualification.
 pub fn cover() -> std::io::Result<(
     jacket_desktop::artwork_assets::Asset,
     tempfile::NamedTempFile,
@@ -8,13 +8,14 @@ pub fn cover() -> std::io::Result<(
     use std::io::Write;
     let mut file = tempfile::Builder::new().suffix(".png").tempfile()?;
     file.write_all(include_bytes!(
-        "../../../branding/jacket/png/jacket-icon-256.png"
+        "../../../assets/examples/room-to-breathe.png"
     ))?;
     let asset = jacket_desktop::artwork_assets::Asset {
-        id: "example-cover".into(),
+        id: audio_engine::export::hash_file(file.path())
+            .map_err(|error| std::io::Error::other(error.to_string()))?,
         preview_data_url: String::new(),
-        width: 256,
-        height: 256,
+        width: 640,
+        height: 640,
     };
     Ok((asset, file))
 }
@@ -57,8 +58,6 @@ pub fn album() -> Inspection {
                 }
             })
             .collect(),
-        warnings: vec![
-            "Fictional example. Downloads are disabled; your saved review is kept.".into(),
-        ],
+        warnings: vec!["Sample album. Downloads are disabled.".into()],
     }
 }
