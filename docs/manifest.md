@@ -1,5 +1,7 @@
 # Archive manifest, version 1
 
+This manifest applies to Music folder and ZIP output. Audio file output saves only tagged audio with embedded artwork where supported, with no manifest or sidecars. Its source URL remains embedded in the audio comment.
+
 Each archive has a sanitized top-level collection folder, containing audio files, `playlist.m3u`, `manifest.json`, and optional `cover.jpg` or `artwork/*.jpg`.
 
 The manifest contains `schemaVersion: 1`, the user-selected `title`, collection `sourceUrl`, `mode` (`album` or `collection`), an ordered `tracks` array, and nonfatal `warnings`.
