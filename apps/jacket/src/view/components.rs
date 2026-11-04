@@ -26,25 +26,11 @@ pub fn cover(app: &App, size: f32, context: CoverContext) -> Element<'_, Message
                 })
             })
     };
-    let content: Element<'_, Message> = if !show {
-        container(icons::view(Icon::Music, p.colors.text_muted, 24.0))
-            .center(Length::Fill)
-            .into()
-    } else if let Some((_, path)) = imported {
-        image(path)
-            .width(size)
-            .height(size)
-            .content_fit(iced::ContentFit::Contain)
-            .into()
-    } else if app.example {
-        image(artwork::example_cover())
-            .width(size)
-            .height(size)
-            .content_fit(iced::ContentFit::Contain)
-            .into()
+    let source = app.review.as_ref().and_then(artwork::source_url);
+    let raster = if let Some((asset, _)) = imported {
+        app.owned_raster(&asset.id)
     } else {
-        let source = app.review.as_ref().and_then(artwork::source_url);
-        let handle = match context {
+        match context {
             CoverContext::Source => app.source_cover.as_ref(),
             CoverContext::Export => app.preview_cover.as_ref().or_else(|| {
                 if plan
@@ -56,42 +42,51 @@ pub fn cover(app: &App, size: f32, context: CoverContext) -> Element<'_, Message
                     None
                 }
             }),
+        }
+    };
+    let content: Element<'_, Message> = if !show {
+        container(icons::view(Icon::Music, p.colors.text_muted, 24.0))
+            .center(Length::Fill)
+            .into()
+    } else if let Some(raster) = raster {
+        image(raster.handle(size as u32))
+            .width(size)
+            .height(size)
+            .content_fit(iced::ContentFit::Contain)
+            .filter_method(iced::widget::image::FilterMethod::Linear)
+            .into()
+    } else {
+        let error = match context {
+            CoverContext::Source => app.source_cover_error.as_ref(),
+            CoverContext::Export => app.preview_cover_error.as_ref().or(app
+                .source_cover_error
+                .as_ref()
+                .filter(|_| imported.is_some())),
         };
-        if let Some(handle) = handle {
-            image(handle.clone())
-                .width(size)
-                .height(size)
-                .content_fit(iced::ContentFit::Contain)
-                .into()
-        } else {
-            let error = match context {
-                CoverContext::Source => app.source_cover_error.as_ref(),
-                CoverContext::Export => app.preview_cover_error.as_ref(),
-            };
-            let has_url = match context {
+        let has_url = imported.is_some()
+            || match context {
                 CoverContext::Source => source.is_some(),
                 CoverContext::Export => plan.and_then(artwork::preview_url).is_some(),
             };
-            container(
-                column![
-                    icons::view(Icon::Music, p.colors.text_muted, 24.0),
-                    text(if error.is_some() {
-                        "Cover unavailable"
-                    } else if has_url {
-                        "Loading cover…"
-                    } else {
-                        "No cover"
-                    })
-                    .size(10)
-                    .color(p.colors.text_muted),
-                ]
-                .spacing(10)
-                .align_x(iced::Alignment::Center),
-            )
-            .center(Length::Fill)
-            .padding(8)
-            .into()
-        }
+        container(
+            column![
+                icons::view(Icon::Music, p.colors.text_muted, 24.0),
+                text(if error.is_some() {
+                    "Cover unavailable"
+                } else if has_url {
+                    "Loading cover…"
+                } else {
+                    "No cover"
+                })
+                .size(10)
+                .color(p.colors.text_muted),
+            ]
+            .spacing(10)
+            .align_x(iced::Alignment::Center),
+        )
+        .center(Length::Fill)
+        .padding(8)
+        .into()
     };
     container(content)
         .width(size)

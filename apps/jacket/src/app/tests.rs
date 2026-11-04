@@ -903,3 +903,111 @@ fn a_missing_owned_cover_blocks_export_until_artwork_is_changed() {
         "playlist track covers do not use the shared asset"
     );
 }
+
+#[test]
+fn display_density_changes_preserve_review_identity_and_do_not_save_or_fetch() {
+    let (_root, desktop) = desktop();
+    let mut app = app(desktop);
+    let before = serde_json::to_value(app.review.as_ref().expect("review").draft()).expect("draft");
+    let raster = crate::artwork::example_cover();
+    let id = "cached-cover".to_owned();
+    app.owned_rasters.insert(id.clone(), raster.clone());
+    let _ = app.update(Message::DisplayScale(2.0));
+    assert_eq!(app.display_scale, 2.0);
+    assert!(app.raster_loading.contains(&(id, 2.0_f32.to_bits())));
+    assert_eq!(
+        serde_json::to_value(app.review.as_ref().expect("review").draft()).expect("draft"),
+        before
+    );
+    assert_eq!(app.save_pending, 0);
+    assert!(app.job.is_none());
+    assert!(!app.dialog_open);
+    assert_eq!(
+        app.owned_rasters
+            .values()
+            .next()
+            .expect("previous pixels stay visible")
+            .source(),
+        raster.source()
+    );
+}
+
+#[test]
+fn stale_local_rasters_cannot_replace_cover_errors_or_accumulate_unboundedly() {
+    let (_root, desktop) = desktop();
+    let mut app = app(desktop);
+    app.source_cover_error = Some("current cover failed".into());
+    let _ = app.update(Message::OwnedCoverRaster(
+        "old-cover".into(),
+        1.0,
+        Ok(crate::artwork::example_cover()),
+    ));
+    assert!(app.owned_rasters.is_empty());
+    assert_eq!(
+        app.source_cover_error.as_deref(),
+        Some("current cover failed")
+    );
+    // An inactive cache entry can be re-filtered after moving displays, but it
+    // cannot dismiss or introduce an error for a different current source.
+    app.owned_rasters
+        .insert("cached".into(), crate::artwork::example_cover());
+    let _ = app.update(Message::OwnedCoverRaster(
+        "cached".into(),
+        1.0,
+        Err("stale decode failure".into()),
+    ));
+    assert_eq!(
+        app.source_cover_error.as_deref(),
+        Some("current cover failed")
+    );
+    let (mut asset, file) = example::cover().expect("bounded local cover");
+    let raster = crate::artwork::example_cover();
+    for index in 0..10 {
+        asset.id = format!("{index:064x}");
+        app.cover = Some((asset.clone(), file.path().to_owned()));
+        let _ = app.update(Message::OwnedCoverRaster(
+            asset.id.clone(),
+            1.0,
+            Ok(raster.clone()),
+        ));
+        assert!(app.owned_rasters.len() <= 4);
+        assert!(app.owned_rasters.contains_key(&asset.id));
+    }
+}
+
+#[test]
+fn restoring_a_suspended_remote_cover_refreshes_for_the_current_display_density() {
+    let (_root, desktop) = desktop();
+    let mut app = app(desktop);
+    app.review
+        .as_mut()
+        .expect("review")
+        .preferences
+        .shared_artwork = Some("https://i.ytimg.com/cover.jpg".into());
+    let raster = crate::artwork::example_cover();
+    app.source_cover = Some(raster.clone());
+    let before = app.review.as_ref().expect("review").identity();
+    let previous = app.suspend_review();
+    let _ = app.update(Message::DisplayScale(2.0));
+    app.restore_review(previous);
+    assert!(app.raster_refresh_pending);
+    assert_eq!(
+        app.source_cover.as_ref().expect("previous pixels").scale(),
+        1.0
+    );
+    let _ = app.update(Message::Tick);
+    assert!(!app.raster_refresh_pending);
+    let _ = app.update(Message::SourceCover(
+        "https://i.ytimg.com/cover.jpg".into(),
+        Ok(raster.for_scale(2.0)),
+    ));
+    assert_eq!(
+        app.source_cover
+            .as_ref()
+            .expect("current DPI pixels")
+            .scale(),
+        2.0
+    );
+    assert_eq!(app.review.as_ref().expect("same review").identity(), before);
+    assert_eq!(app.save_pending, 0);
+}

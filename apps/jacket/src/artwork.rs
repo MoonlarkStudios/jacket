@@ -1,9 +1,9 @@
 //! Cover selection and bounded decoding for review and export previews.
 use audio_engine::{ArtworkMode, ExportPlan};
-use iced::widget::image::Handle;
+mod raster;
 use jacket_core::Review;
 use jacket_desktop::Desktop;
-use std::io::Cursor;
+pub use raster::{normalized_scale, Raster};
 use std::sync::OnceLock;
 
 /// The review's source image, independent of whether artwork will be exported.
@@ -42,47 +42,29 @@ pub fn preview_url(plan: &ExportPlan) -> Option<&str> {
 
 /// A compiled, original cover for the isolated album example. Cache its handle
 /// so drawing the UI does not create a new image identity on each frame.
-pub fn example_cover() -> Handle {
-    static COVER: OnceLock<Handle> = OnceLock::new();
+pub fn example_cover() -> Raster {
+    static COVER: OnceLock<Raster> = OnceLock::new();
     COVER
         .get_or_init(|| {
-            Handle::from_bytes(
-                include_bytes!("../../../assets/examples/room-to-breathe.png").as_slice(),
+            Raster::decode(
+                include_bytes!("../../../assets/examples/room-to-breathe.png"),
+                1.0,
             )
+            .expect("compiled example cover")
         })
         .clone()
 }
 
-/// Decode and resize off the event loop, with an allocation limit at the decoder.
-pub fn preview(desktop: &Desktop, url: &str) -> Result<Handle, String> {
+/// Fetch, decode and filter outside the event loop. A display-scale change can
+/// reuse these retained source pixels without downloading or re-encoding them.
+pub fn preview(desktop: &Desktop, url: &str, scale: f32) -> Result<Raster, String> {
     let bytes = desktop.artwork_preview(url)?;
-    decode(&bytes)
-}
-
-fn decode(bytes: &[u8]) -> Result<Handle, String> {
-    let mut reader = image::ImageReader::new(Cursor::new(bytes))
-        .with_guessed_format()
-        .map_err(|_| "The cover image could not be read.")?;
-    let mut limits = image::Limits::default();
-    limits.max_alloc = Some(64 * 1024 * 1024);
-    limits.max_image_width = Some(16_384);
-    limits.max_image_height = Some(16_384);
-    reader.limits(limits);
-    let image = reader
-        .decode()
-        .map_err(|_| "The cover image could not be decoded.")?
-        .thumbnail(640, 640)
-        .into_rgba8();
-    Ok(Handle::from_rgba(
-        image.width(),
-        image.height(),
-        image.into_raw(),
-    ))
+    Raster::decode(&bytes, scale)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{decode, example_cover, preview_url, source_url};
+    use super::{example_cover, preview_url, source_url, Raster};
     use audio_engine::{ArtworkMode, AudioFormat, AuthOptions};
     use iced::widget::image::Handle;
     use jacket_core::Review;
@@ -131,13 +113,14 @@ mod tests {
 
     #[test]
     fn cover_decoding_rejects_bad_data_and_bounds_the_ui_image() {
-        assert!(decode(b"not an image").is_err());
+        assert!(Raster::decode(b"not an image", 1.0).is_err());
         for format in [image::ImageFormat::Png, image::ImageFormat::WebP] {
             let mut encoded = Cursor::new(Vec::new());
             image::DynamicImage::new_rgb8(1280, 640)
                 .write_to(&mut encoded, format)
                 .expect("synthetic source cover");
-            let handle = decode(encoded.get_ref()).expect("decodable cover");
+            let raster = Raster::decode(encoded.get_ref(), 1.0).expect("decodable cover");
+            let handle = raster.source().clone();
             match handle {
                 Handle::Rgba {
                     width,
@@ -145,8 +128,8 @@ mod tests {
                     pixels,
                     ..
                 } => {
-                    assert_eq!((width, height), (640, 320));
-                    assert_eq!(pixels.len(), 640 * 320 * 4);
+                    assert_eq!((width, height), (1024, 512));
+                    assert_eq!(pixels.len(), 1024 * 512 * 4);
                 }
                 _ => panic!("decoded covers must use bounded pixels"),
             }

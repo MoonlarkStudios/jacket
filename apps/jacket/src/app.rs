@@ -1,4 +1,5 @@
 //! Native application state, controllers, and persistence orchestration.
+mod artwork;
 mod controller;
 mod destination;
 mod jobs;

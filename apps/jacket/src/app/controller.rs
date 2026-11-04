@@ -90,6 +90,9 @@ impl App {
                 if matches!(event, iced::Event::Window(window::Event::Opened { .. })) {
                     return Some(Message::NativeReady);
                 }
+                if let iced::Event::Window(window::Event::Rescaled(scale)) = &event {
+                    return Some(Message::DisplayScale(*scale));
+                }
                 if let iced::Event::Window(window::Event::FileDropped(path)) = &event {
                     return Some(Message::Dropped(path.clone()));
                 }
@@ -228,7 +231,19 @@ impl App {
                     _ => Task::none(),
                 }
             }
-            Message::NativeReady => crate::platform::window_ready(),
+            Message::NativeReady => {
+                crate::platform::window_ready();
+                return Task::batch([
+                    self.load_owned_artwork(),
+                    window::oldest()
+                        .and_then(window::scale_factor)
+                        .map(Message::DisplayScale),
+                ]);
+            }
+            Message::DisplayScale(scale) => return self.display_scale_changed(scale),
+            Message::OwnedCoverRaster(id, scale, result) => {
+                return self.owned_artwork_ready(id, scale, result)
+            }
             Message::Quit => {
                 return window::oldest()
                     .map(|window| window.map_or(Message::Tick, Message::CloseRequested))
@@ -796,6 +811,13 @@ impl App {
                 {
                     match result {
                         Ok(handle) => {
+                            if handle.scale() != self.display_scale {
+                                let scale = self.display_scale;
+                                return persistence::background(
+                                    move || Ok(handle.for_scale(scale)),
+                                    move |result| Message::PreviewCover(source, result),
+                                );
+                            }
                             self.preview_cover = Some(handle);
                             self.preview_cover_error = None;
                         }
@@ -807,6 +829,13 @@ impl App {
                 if self.cover_url() == Some(source.as_str()) {
                     match result {
                         Ok(handle) => {
+                            if handle.scale() != self.display_scale {
+                                let scale = self.display_scale;
+                                return persistence::background(
+                                    move || Ok(handle.for_scale(scale)),
+                                    move |result| Message::SourceCover(source, result),
+                                );
+                            }
                             self.source_cover = Some(handle);
                             self.source_cover_error = None;
                         }
@@ -880,7 +909,7 @@ impl App {
                         self.source_cover_error = None;
                         self.preview_cover_error = None;
                         self.panel = Panel::Workspace;
-                        return self.autosave();
+                        return Task::batch([self.autosave(), self.load_owned_artwork()]);
                     }
                     Err(error) => self.error = Some(error),
                 }
@@ -903,6 +932,7 @@ impl App {
                     self.crop_size = asset.width.min(asset.height).to_string();
                     self.crop_source = Some((asset.clone(), path.clone()));
                     self.panel = Panel::Crop;
+                    return self.load_owned_artwork();
                 } else if let (Some(desktop), Some(review), Some(url)) = (
                     self.desktop.clone(),
                     self.review.as_ref(),
@@ -939,6 +969,7 @@ impl App {
                             self.crop_size = asset.width.min(asset.height).to_string();
                             self.crop_source = Some((asset, path));
                             self.panel = Panel::Crop;
+                            return self.load_owned_artwork();
                         }
                         Err(error) => {
                             self.error = Some(format!(

@@ -23,6 +23,10 @@ impl App {
                     review.preferences.shared_artwork_asset = Some(asset.id.clone());
                     review.preferences.artwork_mode = audio_engine::ArtworkMode::Shared;
                 }
+                self.owned_rasters.insert(
+                    asset.id.clone(),
+                    crate::artwork::example_cover().for_scale(self.display_scale),
+                );
                 self.cover = Some((asset, file.path().to_owned()));
                 self.source_cover = None;
                 self.preview_cover = None;
@@ -86,6 +90,10 @@ impl App {
                 .resolve(1)
                 .expect("startup themes have already been validated"),
             appearance,
+            display_scale: 1.0,
+            owned_rasters: std::collections::BTreeMap::new(),
+            raster_loading: std::collections::BTreeSet::new(),
+            raster_refresh_pending: false,
             example: isolated,
             loading: !isolated,
             dialog_open: false,

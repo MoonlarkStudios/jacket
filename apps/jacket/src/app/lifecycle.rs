@@ -95,6 +95,7 @@ impl App {
         self.url = previous.url;
         self.cover = previous.cover;
         self.source_cover = previous.source_cover;
+        self.raster_refresh_pending = true;
         self.source_cover_error = previous.source_cover_error;
         self.preview_cover_error = None;
         self.crop_source = None;
@@ -110,6 +111,7 @@ impl App {
     }
 
     pub(super) fn clear_review(&mut self) {
+        self.raster_refresh_pending = false;
         self.review = None;
         self.url.clear();
         self.cover = None;

@@ -6,8 +6,14 @@ pub const WIDTH: f32 = 360.0;
 pub const HEIGHT: f32 = 260.0;
 
 pub fn view(app: &App) -> Element<'_, Message> {
-    let Some((asset, path)) = app.crop_asset() else {
+    let Some((asset, _)) = app.crop_asset() else {
         return container("").into();
+    };
+    let Some(raster) = app.owned_raster(&asset.id) else {
+        return container("Preparing crop preview…")
+            .width(WIDTH)
+            .height(HEIGHT)
+            .into();
     };
     let size = app
         .crop_size
@@ -31,7 +37,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
         height = asset.height
     );
     mouse_area(stack![
-        image(path)
+        image(raster.crop_handle())
+            .filter_method(iced::widget::image::FilterMethod::Linear)
             .width(WIDTH)
             .height(HEIGHT)
             .content_fit(iced::ContentFit::Contain),

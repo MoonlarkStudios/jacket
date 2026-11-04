@@ -66,7 +66,10 @@ omits the cover from that export presentation. Provider images load through a
 bounded background request and decoding path. Imported artwork uses the app-owned
 asset. Stale preview results cannot replace artwork for a different review or
 selection. Theme switches recolor the surrounding controls and preserve image
-pixels, source metadata and audio.
+pixels, source metadata and audio. Cover and crop images use cached Lanczos3
+variants prepared for the actual display density on blocking workers; a view
+never decodes or resizes an image. See [artwork quality](artwork-quality.md) for
+the decoder comparison, filtering bounds and visual evidence.
 
 Standalone song inspection can resolve an exact album-linked recording from the
 public YouTube Music queue, with the original source image as a fallback. Source

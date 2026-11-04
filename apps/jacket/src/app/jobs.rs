@@ -106,6 +106,10 @@ impl App {
         {
             return self.close();
         }
+        if self.raster_refresh_pending {
+            self.raster_refresh_pending = false;
+            return self.display_scale_changed(self.display_scale);
+        }
         if self.screenshot.is_some() && self.started.elapsed() > Duration::from_secs(2) {
             return window::oldest()
                 .and_then(window::screenshot)
@@ -146,11 +150,15 @@ impl App {
 
     pub(super) fn cover_preview(&mut self) -> Task<Message> {
         self.source_cover_error = None;
+        if self.cover.is_some() {
+            return self.load_owned_artwork();
+        }
         if let (Some(desktop), Some(url)) = (self.desktop.clone(), self.cover_url()) {
             let url = url.to_owned();
             let source = url.clone();
+            let scale = self.display_scale;
             return persistence::background(
-                move || crate::artwork::preview(&desktop, &url),
+                move || crate::artwork::preview(&desktop, &url, scale),
                 move |result| Message::SourceCover(source, result),
             );
         }
@@ -210,11 +218,12 @@ impl App {
         ) {
             let url = url.to_owned();
             let source = url.clone();
+            let scale = self.display_scale;
             return super::persistence::background(
-                move || crate::artwork::preview(&desktop, &url),
+                move || crate::artwork::preview(&desktop, &url, scale),
                 move |result| Message::PreviewCover(source, result),
             );
         }
-        Task::none()
+        self.load_owned_artwork()
     }
 }
