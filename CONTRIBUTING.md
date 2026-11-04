@@ -39,6 +39,7 @@ the app; the ordinary tests run without a display or live source account.
 | `mise run build` | Build the optimized `jacket` executable. |
 | `mise run check` | Workflow/script checks, rustfmt, Clippy and all native unit tests. |
 | `mise run check:workspace` | Compile-check all native targets. |
+| `mise run lint:ci` | Validate GitHub Actions workflows and their embedded shell scripts. |
 | `mise run test:media` | Offline exports with FFmpeg and an independent Mutagen reader. |
 | `mise run fmt` | Format native Rust code. |
 | `mise run snapshot` | Capture an isolated fictional review and quit; requires a display. |
@@ -46,12 +47,28 @@ the app; the ordinary tests run without a display or live source account.
 | `mise run licenses:native` | Collect exact Cargo sources, native notices and an integrity manifest. |
 | `mise run package:mac` | Build a local ad-hoc signed `.app` with staged tools. |
 | `mise run package:linux` | Build a portable Linux candidate with pinned tools and source companion. |
+| `mise run legacy:test:bundling` | Test retained runtime staging and legacy installer verification helpers. |
 
 The first dependency fetch and runtime staging need network access. Native unit
 tests do not contact YouTube, access real browser databases or need an account.
 Media integration tests synthesize their own recordings. The full native check
 never installs the retained frontend dependencies. Comparison-only browser tasks
 are explicitly named `legacy:*`; they are outside the native quality gate.
+
+CI runs the native quality gate and offline media integrations on Linux and
+macOS. Rust caches are separated by runner, architecture and toolchain, and are
+refreshed when native dependency manifests, lockfiles or build configuration
+change.
+Only complete successful quality/media jobs save Rust caches. Cached Cargo
+sources and selected debug build outputs exclude incremental directories and
+packaging bundles. The security job caches the pinned auditor executable
+separately, fetches current advisories on every run, and still scans secrets when
+a dependency audit fails.
+
+The retained runtime-staging and installer verification helpers have an explicit
+`legacy:test:bundling` regression task. Legacy DEB/RPM installer artifacts and
+checksums remain historical verification inputs; they do not qualify native iced
+candidates or restore the automatic Tauri release path.
 
 ## Module boundaries and Rust conventions
 

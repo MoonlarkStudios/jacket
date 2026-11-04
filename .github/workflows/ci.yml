@@ -48,14 +48,21 @@ jobs:
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
         with:
           version: 2026.9.12
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore native Rust dependencies and build outputs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: rust-cache
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/debug
-          key: native-rust-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: native-rust-${{ runner.os }}-
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+            target/debug/.fingerprint
+            target/debug/build
+            target/debug/deps
+          # Reuse dependency builds across source commits. Toolchain, target,
+          # manifest and build-configuration changes warm distinct entries.
+          key: native-rust-v2-${{ runner.os }}-${{ runner.arch }}-${{ matrix.os }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.cargo/config*', 'mise.toml', '.github/workflows/ci.yml') }}
+          restore-keys: native-rust-v2-${{ runner.os }}-${{ runner.arch }}-${{ matrix.os }}-${{ hashFiles('rust-toolchain.toml') }}-
       - name: Fetch locked Rust dependencies
         run: mise run fetch
       - name: Formatting, workflows, script checks, Clippy and native tests
@@ -65,6 +72,19 @@ jobs:
         run: mise run setup:media
       - name: Offline media export and independent tag verification
         run: mise run test:media
+      - name: Save complete native Rust cache
+        # Do not preserve an incomplete immutable entry after any gate fails.
+        if: ${{ success() && steps.rust-cache.outputs.cache-hit != 'true' && steps.rust-cache.outputs.cache-primary-key != '' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+            target/debug/.fingerprint
+            target/debug/build
+            target/debug/deps
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
 
   security:
     name: Rust dependencies and secret checks
@@ -77,11 +97,35 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.ref || github.sha }}
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+        id: tools
         with:
           version: 2026.9.12
-      - name: Install Rust dependency auditor
-        run: mise exec -- cargo install cargo-audit --locked --version 0.22.2
+      - name: Restore Rust dependency auditor
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: audit-cache
+        with:
+          path: ${{ runner.tool_cache }}/jacket-cargo-audit
+          key: cargo-audit-${{ runner.os }}-${{ runner.arch }}-0.22.2-${{ hashFiles('rust-toolchain.toml') }}
+      - name: Prepare pinned Rust dependency auditor
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+        id: audit-tool
+        env:
+          CACHE_HIT: ${{ steps.audit-cache.outputs.cache-hit }}
+        run: |
+          if [ "$CACHE_HIT" != 'true' ]; then
+            mise exec -- cargo install cargo-audit --locked --version 0.22.2 --root "$RUNNER_TOOL_CACHE/jacket-cargo-audit"
+          fi
+          echo "$RUNNER_TOOL_CACHE/jacket-cargo-audit/bin" >> "$GITHUB_PATH"
+      - name: Cache Rust dependency auditor before running audits
+        if: ${{ !cancelled() && steps.audit-tool.outcome == 'success' && steps.audit-cache.outputs.cache-hit != 'true' && steps.audit-cache.outputs.cache-primary-key != '' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.tool_cache }}/jacket-cargo-audit
+          key: ${{ steps.audit-cache.outputs.cache-primary-key }}
       - name: Audit the native Rust dependency graph
+        if: ${{ !cancelled() && steps.audit-tool.outcome == 'success' }}
         run: mise exec -- cargo audit
       - name: Scan Git history for secrets
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
         run: mise exec gitleaks@8.24.3 -- gitleaks git --redact --no-banner

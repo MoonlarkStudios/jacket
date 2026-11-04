@@ -78,6 +78,10 @@ run = "cargo fmt --all -- --check"
 description = "Validate GitHub Actions workflows"
 run = "actionlint .github/workflows/*.yml"
 
+[tasks."lint:ci"]
+description = "Validate GitHub Actions workflows and their embedded shell scripts"
+depends = ["check:ci"]
+
 [tasks."check:scripts"]
 description = "Verify native packaging, dependency boundaries and tool checks"
 run = "python scripts/native_tests.py"
@@ -143,6 +147,10 @@ run = "npm exec -- vite --host 127.0.0.1"
 description = "Run retained TypeScript behavior tests"
 depends = ["legacy:setup"]
 run = "node --test tests/*.test.mjs"
+
+[tasks."legacy:test:bundling"]
+description = "Test retained runtime staging and legacy installer verification helpers"
+run = ["python scripts/test-tool-bundling.py", "python scripts/test-linux-bundling.py", "python scripts/test-linux-installers.py"]
 
 [tasks.snapshot]
 description = "Capture the fictional native review and quit (requires a display)"
