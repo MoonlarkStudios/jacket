@@ -1,3 +1,5 @@
+> **Legacy implementation reference.** This document describes the retained React/Tauri app. For the Rust and iced branch, use the [current README](../README.md) and [native port guide](native-port.md). Old installer and acceptance results do not qualify the native app.
+
 # Linux preview
 
 Jacket's Linux preview targets **x86_64**. CI builds on **Ubuntu 24.04** and tests the DEB on Ubuntu 24.04 and Debian 13, and the RPM on Fedora 44. These are preview candidates until the checks have passed for the exact commit. They are not a claim of compatibility with every Debian or RPM distribution, older systems, ARM, or sandboxed app stores.
@@ -21,6 +23,41 @@ sudo dnf install ./Jacket-0.1.0-0.beta.1.x86_64.rpm
 Use the actual filename from your download. Launch **Jacket** from your application menu. The package manager installs system dependencies. No Node, FFmpeg, yt-dlp, pip, Homebrew, or developer tools need to be installed by the user. New versions are installed with the same package-manager command. SemVer prereleases such as `0.1.0-beta.1` use Debian metadata `0.1.0~beta.1` and RPM version/release `0.1.0-0.beta.1`, so the final `0.1.0` sorts later. Whole-app automatic updates and signed package repositories are not configured.
 
 The preview's supported workflow is **public YouTube links**. Browser-account downloads are experimental and require separate live acceptance; encrypted Chromium profiles may need additional Python/keyring components. The owned-session prototype remains disabled on Linux.
+
+## Run from source
+
+`mise run desktop` needs both local audio tools and Tauri's native development
+libraries. Installing the WebKit runtime alone is insufficient: Rust also needs
+the development package's linker files and `pkg-config` metadata.
+
+On Fedora, install the core build dependencies and downloader:
+
+```sh
+sudo dnf install gcc gcc-c++ make pkgconf-pkg-config webkit2gtk4.1-devel yt-dlp
+```
+
+FFmpeg and FFprobe must also be on `PATH`; use your distribution's FFmpeg
+packages. See [Tauri's prerequisites](https://v2.tauri.app/start/prerequisites/#linux)
+for other distributions and optional platform features. Jacket's Linux
+`setup:media` checks for installed audio tools; it does not install system
+packages. `mise install` supplies the pinned language runtimes, not WebKit or
+the audio tools.
+
+Then run:
+
+```sh
+mise install
+mise run setup
+mise run doctor
+mise run desktop
+```
+
+`doctor` reports missing audio tools and native development libraries before
+launching the build. For `cannot find -lwebkit2gtk-4.1`, `-ljavascriptcoregtk-4.1`,
+or `-lsoup-3.0`, install the development packages instead of creating temporary
+library links. Packaged previews include their audio runtime and only require
+the package manager's runtime dependencies; these build prerequisites apply to
+running from a source checkout.
 
 ## What is shipped
 

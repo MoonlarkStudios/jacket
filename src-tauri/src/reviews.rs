@@ -232,7 +232,7 @@ fn validate(draft: &ReviewDraft) -> Result<(), String> {
         return Err("Invalid saved track selection.".into());
     }
     let prefs = &draft.preferences;
-    if !matches!(prefs.output_kind.as_str(), "zip" | "folder") {
+    if !matches!(prefs.output_kind.as_str(), "zip" | "folder" | "file") {
         return Err("Invalid saved output destination.".into());
     }
     if prefs
@@ -438,6 +438,42 @@ mod tests {
         assert!(store.load(root.path()).unwrap().is_none());
         assert!(store.save(root.path(), draft("second", 1)).unwrap());
         assert!(!store.save(root.path(), draft("first", 99)).unwrap());
+    }
+
+    #[test]
+    fn file_reviews_preserve_incomplete_selection_without_changing_the_output_choice() {
+        for selected in [vec![], vec![0], vec![0, 1]] {
+            let root = tempfile::tempdir().unwrap();
+            let mut review = draft("file-review", 1);
+            review.preferences.output_kind = "file".into();
+            // Repeated source IDs are separate occurrences, even in an album.
+            review
+                .inspection
+                .tracks
+                .push(review.inspection.tracks[0].clone());
+            review.selected = selected.clone();
+            review.inspection.tracks[0].metadata.track_number = Some(7);
+            Store::default().save(root.path(), review).unwrap();
+
+            let restored = Store::default().load(root.path()).unwrap().unwrap();
+            assert_eq!(restored.preferences.output_kind, "file");
+            assert_eq!(restored.preferences.mode, CollectionMode::Album);
+            assert_eq!(restored.selected, selected);
+            assert_eq!(restored.inspection.tracks.len(), 2);
+            assert_eq!(restored.inspection.tracks[0].metadata.track_number, Some(7));
+        }
+    }
+
+    #[test]
+    fn legacy_review_preferences_keep_zip_output() {
+        let mut serialized = serde_json::to_value(draft("legacy", 1)).unwrap();
+        serialized["preferences"]
+            .as_object_mut()
+            .unwrap()
+            .remove("outputKind");
+        let review: ReviewDraft = serde_json::from_value(serialized).unwrap();
+        assert_eq!(review.preferences.output_kind, "zip");
+        validate(&review).unwrap();
     }
 
     #[test]

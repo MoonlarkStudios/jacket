@@ -45,3 +45,12 @@ export const example: Inspection = {
     metadata: metadata(title, index + 1),
   })),
 };
+
+export const songExample: Inspection = {
+  title: 'Through the Window',
+  sourceUrl: 'https://www.youtube.com/watch?v=example-song',
+  suggestedMode: 'collection',
+  artworkUrl: '/example-cover.svg',
+  warnings: ['This is example content. Downloads are disabled.'],
+  tracks: [structuredClone(example.tracks[0])],
+};

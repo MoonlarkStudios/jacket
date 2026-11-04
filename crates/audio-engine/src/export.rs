@@ -8,7 +8,7 @@ use crate::{
 use sha2::{Digest, Sha256};
 use std::{
     fs,
-    io::{Read, Write},
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     process::Command,
     thread,
@@ -120,16 +120,27 @@ struct TrackNamer {
 impl TrackNamer {
     fn filename(&mut self, plan: &ExportPlan, index: usize, extension: &str) -> String {
         let track = &plan.tracks[index];
-        let prefix = if plan.mode == CollectionMode::Album {
-            track.metadata.track_number.unwrap_or((index + 1) as u32)
+        let stem = if plan.output_kind == OutputKind::File {
+            sanitize_component(&plan.title)
+        } else if plan.mode == CollectionMode::Collection && plan.tracks.len() == 1 {
+            let artist = track.metadata.artist.trim();
+            sanitize_component(&if artist.is_empty() {
+                track.metadata.title.clone()
+            } else {
+                format!("{artist} - {}", track.metadata.title)
+            })
         } else {
-            (index + 1) as u32
+            let prefix = if plan.mode == CollectionMode::Album {
+                track.metadata.track_number.unwrap_or((index + 1) as u32)
+            } else {
+                (index + 1) as u32
+            };
+            format!(
+                "{:02} - {}",
+                prefix,
+                sanitize_component(&track.metadata.title)
+            )
         };
-        let stem = format!(
-            "{:02} - {}",
-            prefix,
-            sanitize_component(&track.metadata.title)
-        );
         let mut unique_stem = stem.clone();
         let mut duplicate = 2;
         // Reserve stems before the codec is known so preview and export keep
@@ -143,6 +154,9 @@ impl TrackNamer {
 }
 
 fn planned_artwork_path(plan: &ExportPlan, index: usize) -> Option<String> {
+    if plan.output_kind == OutputKind::File {
+        return None;
+    }
     match plan.artwork_mode {
         ArtworkMode::None => None,
         ArtworkMode::Shared => (plan.shared_artwork_asset.is_some()
@@ -155,9 +169,25 @@ fn planned_artwork_path(plan: &ExportPlan, index: usize) -> Option<String> {
     }
 }
 
+fn artwork_requested(plan: &ExportPlan, index: usize) -> bool {
+    match plan.artwork_mode {
+        ArtworkMode::None => false,
+        ArtworkMode::Shared => {
+            plan.shared_artwork_asset.is_some() || plan.shared_artwork_url.is_some()
+        }
+        ArtworkMode::PerTrack => plan.tracks[index].artwork_url.is_some(),
+    }
+}
+
 fn validate_plan(plan: &ExportPlan) -> Result<()> {
     if plan.tracks.is_empty() {
         return Err(EngineError::Invalid("Select at least one track.".into()));
+    }
+    if plan.output_kind == OutputKind::File && plan.tracks.len() != 1 {
+        return Err(EngineError::Invalid(
+            "Audio file output requires exactly one selected track. Choose a folder or ZIP for several tracks."
+                .into(),
+        ));
     }
     validate_source_url(&plan.source_url)?;
     for track in &plan.tracks {
@@ -196,7 +226,9 @@ pub fn preview_export(plan: &ExportPlan) -> Result<ExportPreview> {
             extension_provisional: provisional,
         });
     }
-    files.extend(["manifest.json".into(), "playlist.m3u".into()]);
+    if plan.output_kind != OutputKind::File {
+        files.extend(["manifest.json".into(), "playlist.m3u".into()]);
+    }
     let mut warnings = Vec::new();
     if provisional {
         warnings.push(match plan.format {
@@ -204,7 +236,12 @@ pub fn preview_export(plan: &ExportPlan) -> Result<ExportPreview> {
             _ => "Audio extensions and supported embedded tags depend on the source codec. Final names are confirmed after download; WAV omits album artist and disc number.".into(),
         });
     }
-    if tracks.iter().any(|track| track.artwork_path.is_some()) {
+    if plan.output_kind == OutputKind::File && artwork_requested(plan, 0) {
+        warnings.push(match plan.format {
+            AudioFormat::Preserve => "Artwork is embedded when available and supported. WAV cannot embed artwork, and audio file output does not save a separate image. Choose MP3/M4A or a music folder to keep the cover.".into(),
+            _ => "Artwork is embedded when available. Audio file output saves no separate image, playlist, or manifest.".into(),
+        });
+    } else if tracks.iter().any(|track| track.artwork_path.is_some()) {
         warnings.push("Artwork is included when available. Embedding depends on the output container; WAV keeps the image as a separate file.".into());
     }
     Ok(ExportPreview {
@@ -389,7 +426,7 @@ fn artwork(tools: &Toolchain, source: &str, dir: &Path, cancel: &Cancellation) -
     cancel.check()?;
     fs::create_dir_all(dir)?;
     let output = dir.join(format!("{}.jpg", hash_bytes(source.as_bytes())));
-    if output.is_file() {
+    if complete_jpeg(&output) {
         return Ok(output);
     }
     let client = reqwest::blocking::Client::builder()
@@ -412,25 +449,69 @@ fn artwork(tools: &Toolchain, source: &str, dir: &Path, cancel: &Cancellation) -
             "Artwork exceeds the 10 MiB image limit.".into(),
         ));
     }
-    let raw = dir.join("image-input");
+    normalize_artwork(tools, &bytes, dir, &output, cancel)?;
+    Ok(output)
+}
+
+// A previous process may have stopped while writing an image. Do not reuse a
+// truncated cache entry just because its final filename exists.
+fn complete_jpeg(path: &Path) -> bool {
+    if !fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.len() >= 4) {
+        return false;
+    }
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+    let mut marker = [0; 2];
+    file.read_exact(&mut marker).is_ok()
+        && marker == [0xff, 0xd8]
+        && file.seek(SeekFrom::End(-2)).is_ok()
+        && file.read_exact(&mut marker).is_ok()
+        && marker == [0xff, 0xd9]
+}
+
+fn normalize_artwork(
+    tools: &Toolchain,
+    bytes: &[u8],
+    dir: &Path,
+    output: &Path,
+    cancel: &Cancellation,
+) -> Result<()> {
+    let scratch = tempfile::tempdir_in(dir)?;
+    let raw = scratch.path().join("image-input");
     fs::write(&raw, bytes)?;
+    let staged = tempfile::Builder::new()
+        .suffix(".jpg")
+        .tempfile_in(scratch.path())?;
     run(
         Command::new(&tools.ffmpeg)
-            .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+            .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-threads", "1", "-i"])
             .arg(&raw)
             .args([
                 "-frames:v",
                 "1",
                 "-vf",
-                "scale=2000:2000:force_original_aspect_ratio=decrease",
+                "scale=w='min(2000,iw)':h='min(2000,ih)':force_original_aspect_ratio=decrease:force_divisible_by=1",
                 "-q:v",
                 "2",
+                "-threads",
+                "1",
+                "-filter_threads",
+                "1",
             ])
-            .arg(&output),
+            .arg(staged.path()),
         cancel,
         Duration::from_secs(30),
     )?;
-    Ok(output)
+    cancel.check()?;
+    if !complete_jpeg(staged.path()) {
+        return Err(EngineError::Invalid(
+            "The cover image could not be prepared.".into(),
+        ));
+    }
+    staged.as_file().sync_all()?;
+    staged.persist(output).map_err(|error| error.error)?;
+    Ok(())
 }
 
 pub struct AudioPreparation<'a> {
@@ -713,6 +794,53 @@ pub fn write_archive(
     }
 }
 
+/// Publish one fully prepared audio file. `output_stem` deliberately has no
+/// codec extension yet: a dotted name such as "Dr. Song" must stay intact.
+pub fn write_audio_file(
+    source: &Path,
+    output_stem: &Path,
+    cancel: &Cancellation,
+) -> Result<PathBuf> {
+    cancel.check()?;
+    let extension = source.extension().ok_or_else(|| {
+        EngineError::Invalid("The prepared audio file has no format extension.".into())
+    })?;
+    let mut filename = output_stem
+        .file_name()
+        .ok_or_else(|| EngineError::Invalid("Choose a filename for the audio file.".into()))?
+        .to_os_string();
+    filename.push(".");
+    filename.push(extension);
+    let output = output_stem.with_file_name(filename);
+    let parent = output
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    let mut input = fs::File::open(source)?;
+    let mut buffer = [0; 65536];
+    loop {
+        cancel.check()?;
+        let count = input.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        temporary.write_all(&buffer[..count])?;
+    }
+    temporary.as_file_mut().sync_all()?;
+    loop {
+        cancel.check()?;
+        let destination = available_archive_path(&output);
+        match temporary.persist_noclobber(&destination) {
+            Ok(_) => return Ok(destination),
+            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+                temporary = error.file;
+            }
+            Err(error) => return Err(error.error.into()),
+        }
+    }
+}
+
 pub fn export_archive(
     tools: &Toolchain,
     plan: &ExportPlan,
@@ -747,6 +875,7 @@ pub fn export_collection(
     let output = match plan.output_kind {
         OutputKind::Zip => write_archive(&plan.title, &prepared.files, output, cancel)?,
         OutputKind::Folder => write_folder(&prepared.files, output, cancel)?,
+        OutputKind::File => write_audio_file(&prepared.files[0].1, output, cancel)?,
     };
     Ok(ExportResult {
         playlist_path: (plan.output_kind == OutputKind::Folder)
@@ -851,38 +980,56 @@ fn prepare_bundle(
             cancel,
         )?;
         let artwork_path = if let Some(cover) = &cover {
-            let relative = planned_artwork_path(plan, index)
-                .expect("Selected artwork must have a planned collection path");
-            if !files.iter().any(|(name, _)| name == &relative) {
-                files.push((relative.clone(), cover.clone()));
-            }
             if !supports_embedded_artwork(ext) {
-                warnings.push(format!("Artwork for {} is included as a separate image; embedding in {ext} is not implemented.", track.metadata.title));
+                warnings.push(if plan.output_kind == OutputKind::File {
+                    format!("Artwork for {} cannot be embedded in {ext}, and audio file output does not save a separate image. Choose MP3/M4A or a music folder to keep the cover.", track.metadata.title)
+                } else {
+                    format!("Artwork for {} is included as a separate image; embedding in {ext} is not implemented.", track.metadata.title)
+                });
             }
-            Some(relative)
+            planned_artwork_path(plan, index).inspect(|relative| {
+                if !files.iter().any(|(name, _)| name == relative) {
+                    files.push((relative.clone(), cover.clone()));
+                }
+            })
         } else {
             None
         };
-        warnings.extend(metadata_warnings(&track.metadata, ext));
-        playlist.push_str(&format!(
-            "#EXTINF:{},{}\n{}\n",
-            track.duration.unwrap_or(-1.0).round(),
-            track.metadata.title.replace(['\n', '\r'], " "),
-            filename
-        ));
-        tracks.push(ManifestTrack {
-            source_id: track.id.clone(),
-            source_url: track.source_url.clone(),
-            source_metadata: track.source_metadata.clone(),
-            metadata: track.metadata.clone(),
-            embedded_metadata: Some(embedded_metadata(&track.metadata, ext)),
-            embedded_artwork: Some(cover.is_some() && supports_embedded_artwork(ext)),
-            relative_path: filename.clone(),
-            artwork_path,
-            source_codec,
-            output_codec,
-            sha256: hash_file(&prepared)?,
-        });
+        if plan.output_kind == OutputKind::File && ext == "wav" {
+            let mut omitted = Vec::new();
+            if !track.metadata.album_artist.is_empty() {
+                omitted.push("album artist");
+            }
+            if track.metadata.disc_number.is_some() {
+                omitted.push("disc number");
+            }
+            if !omitted.is_empty() {
+                warnings.push(format!("WAV cannot embed {} for “{}” with the current RIFF tagging profile. Audio file output does not include a manifest. Choose MP3/M4A to retain these tags in the audio, or a music folder to retain them in a manifest.", omitted.join(" and "), track.metadata.title));
+            }
+        } else {
+            warnings.extend(metadata_warnings(&track.metadata, ext));
+        }
+        if plan.output_kind != OutputKind::File {
+            playlist.push_str(&format!(
+                "#EXTINF:{},{}\n{}\n",
+                track.duration.unwrap_or(-1.0).round(),
+                track.metadata.title.replace(['\n', '\r'], " "),
+                filename
+            ));
+            tracks.push(ManifestTrack {
+                source_id: track.id.clone(),
+                source_url: track.source_url.clone(),
+                source_metadata: track.source_metadata.clone(),
+                metadata: track.metadata.clone(),
+                embedded_metadata: Some(embedded_metadata(&track.metadata, ext)),
+                embedded_artwork: Some(cover.is_some() && supports_embedded_artwork(ext)),
+                relative_path: filename.clone(),
+                artwork_path,
+                source_codec,
+                output_codec,
+                sha256: hash_file(&prepared)?,
+            });
+        }
         files.push((filename, prepared));
         emit(ProgressEvent {
             stage: "preparing".into(),
@@ -891,24 +1038,27 @@ fn prepare_bundle(
             total,
         });
     }
-    let manifest_path = bundle.join("manifest.json");
-    fs::write(
-        &manifest_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schemaVersion": 1, "title": plan.title, "sourceUrl": plan.source_url, "mode": plan.mode, "tracks": tracks, "warnings": warnings
-        }))?,
-    )?;
-    let playlist_path = bundle.join("playlist.m3u");
-    fs::write(&playlist_path, playlist)?;
-    files.extend([
-        ("manifest.json".into(), manifest_path),
-        ("playlist.m3u".into(), playlist_path),
-    ]);
+    if plan.output_kind != OutputKind::File {
+        let manifest_path = bundle.join("manifest.json");
+        fs::write(
+            &manifest_path,
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "schemaVersion": 1, "title": plan.title, "sourceUrl": plan.source_url, "mode": plan.mode, "tracks": tracks, "warnings": warnings
+            }))?,
+        )?;
+        let playlist_path = bundle.join("playlist.m3u");
+        fs::write(&playlist_path, playlist)?;
+        files.extend([
+            ("manifest.json".into(), manifest_path),
+            ("playlist.m3u".into(), playlist_path),
+        ]);
+    }
     emit(ProgressEvent {
         stage: "packaging".into(),
         message: match plan.output_kind {
             OutputKind::Zip => "Building your audio archive".into(),
             OutputKind::Folder => "Saving your audio folder".into(),
+            OutputKind::File => "Saving your audio file".into(),
         },
         completed: total,
         total,
@@ -971,6 +1121,195 @@ mod tests {
         );
         assert!(preview.files.contains(&"playlist.m3u".into()));
         assert_eq!(plan.tracks[0].source_metadata.title, "Original");
+    }
+
+    #[test]
+    fn audio_file_preview_has_one_custom_named_file_and_no_sidecars() {
+        let mut plan = fixture_plan();
+        plan.tracks.truncate(1);
+        plan.output_kind = OutputKind::File;
+        plan.title = "Dr. Song / 東京".into();
+        let preview = preview_export(&plan).unwrap();
+        assert_eq!(preview.output_kind, OutputKind::File);
+        assert_eq!(preview.root_name, "Dr. Song _ 東京");
+        assert_eq!(preview.files, vec!["Dr. Song _ 東京.mp3"]);
+        assert_eq!(preview.tracks[0].relative_path, preview.files[0]);
+        assert!(preview.tracks[0].artwork_path.is_none());
+        assert!(!preview.tracks[0].extension_provisional);
+        assert_eq!(preview.tracks[0].metadata.track_number, Some(7));
+        assert!(preview
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("embedded when available")));
+        for (format, extension) in [
+            (AudioFormat::Compatible, "mp3-or-m4a"),
+            (AudioFormat::Preserve, "audio"),
+        ] {
+            plan.format = format;
+            let preview = preview_export(&plan).unwrap();
+            assert_eq!(preview.files, vec![format!("Dr. Song _ 東京.{extension}")]);
+            assert!(preview.tracks[0].extension_provisional);
+            assert!(preview.tracks[0].artwork_path.is_none());
+        }
+        let preserved = preview_export(&plan).unwrap();
+        assert!(preserved.warnings.iter().any(|warning| {
+            warning.contains("WAV cannot embed artwork")
+                && warning.contains("does not save a separate image")
+        }));
+    }
+
+    #[test]
+    fn audio_file_output_rejects_empty_or_multiple_tracks_before_preparation() {
+        let mut plan = fixture_plan();
+        plan.output_kind = OutputKind::File;
+        let tools = Toolchain {
+            yt_dlp: "must-not-run".into(),
+            ffmpeg: "must-not-run".into(),
+            ffprobe: "must-not-run".into(),
+            node: None,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        for count in [2, 0] {
+            plan.tracks.truncate(count);
+            assert!(preview_export(&plan).is_err());
+            let error = export_collection(
+                &tools,
+                &plan,
+                &dir.path().join("Song"),
+                dir.path(),
+                &Cancellation::default(),
+                |_| {},
+            )
+            .unwrap_err();
+            assert!(matches!(error, EngineError::Invalid(_)));
+            assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+        }
+    }
+
+    #[test]
+    fn audio_file_publication_preserves_dotted_stems_existing_files_and_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("prepared.m4a");
+        fs::write(&source, b"tagged audio").unwrap();
+        let destination = dir.path().join("Dr. Song");
+        let existing = dir.path().join("Dr. Song.m4a");
+        fs::write(&existing, b"keep original").unwrap();
+        let saved = write_audio_file(&source, &destination, &Cancellation::default()).unwrap();
+        assert_eq!(saved, dir.path().join("Dr. Song (2).m4a"));
+        assert_eq!(fs::read(&saved).unwrap(), b"tagged audio");
+        assert_eq!(fs::read(&existing).unwrap(), b"keep original");
+        assert_eq!(fs::read(&source).unwrap(), b"tagged audio");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 3);
+        let cancelled = Cancellation::default();
+        cancelled.cancel();
+        assert!(matches!(
+            write_audio_file(&source, &destination, &cancelled),
+            Err(EngineError::Cancelled),
+        ));
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 3);
+    }
+
+    #[test]
+    fn simultaneous_audio_files_publish_distinct_complete_outputs() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("prepared.mp3");
+        fs::write(&source, b"complete tagged audio").unwrap();
+        let destination = dir.path().join("Song");
+        let barrier = std::sync::Barrier::new(4);
+        let saved = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..4)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        write_audio_file(&source, &destination, &Cancellation::default()).unwrap()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(
+            saved.iter().collect::<std::collections::HashSet<_>>().len(),
+            4
+        );
+        for path in saved {
+            assert_eq!(fs::read(path).unwrap(), b"complete tagged audio");
+        }
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 5);
+    }
+
+    #[test]
+    fn failed_audio_copy_cleans_temporary_output() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(write_audio_file(
+            &dir.path().join("missing.mp3"),
+            &dir.path().join("Song"),
+            &Cancellation::default(),
+        )
+        .is_err());
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn audio_file_publication_never_replaces_a_dangling_link() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("prepared.opus");
+        fs::write(&source, b"complete audio").unwrap();
+        let existing = dir.path().join("Song.opus");
+        symlink("missing-target", &existing).unwrap();
+        let saved =
+            write_audio_file(&source, &dir.path().join("Song"), &Cancellation::default()).unwrap();
+        assert_eq!(saved, dir.path().join("Song (2).opus"));
+        assert!(existing
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    #[test]
+    fn standalone_song_names_use_artist_and_title_without_inventing_track_numbers() {
+        let mut plan = fixture_plan();
+        plan.mode = CollectionMode::Collection;
+        plan.tracks.truncate(1);
+        plan.tracks[0].metadata.artist = "Juniper / Guest".into();
+        let preview = preview_export(&plan).unwrap();
+        assert_eq!(
+            preview.tracks[0].relative_path,
+            "Juniper _ Guest - Björk _ Live.mp3"
+        );
+        assert_eq!(preview.tracks[0].metadata.track_number, Some(7));
+        assert_eq!(plan.tracks[0].source_metadata.title, "Original");
+        assert_eq!(
+            TrackNamer::default().filename(&plan, 0, "mp3"),
+            preview.tracks[0].relative_path
+        );
+        plan.tracks[0].metadata.artist = "  ".into();
+        plan.tracks[0].metadata.track_number = None;
+        let preview = preview_export(&plan).unwrap();
+        assert_eq!(preview.tracks[0].relative_path, "Björk _ Live.mp3");
+        assert_eq!(preview.tracks[0].metadata.track_number, None);
+        plan.tracks[0].metadata.artist = "東京".repeat(80);
+        assert!(preview_export(&plan).unwrap().tracks[0].relative_path.len() < 255);
+    }
+
+    #[test]
+    fn single_album_selections_and_multitrack_collections_keep_their_ordering() {
+        let mut plan = fixture_plan();
+        plan.tracks.truncate(1);
+        assert_eq!(
+            preview_export(&plan).unwrap().tracks[0].relative_path,
+            "07 - Björk _ Live.mp3"
+        );
+        plan.mode = CollectionMode::Collection;
+        plan.tracks.push(plan.tracks[0].clone());
+        let preview = preview_export(&plan).unwrap();
+        assert_eq!(preview.tracks[0].relative_path, "01 - Björk _ Live.mp3");
+        assert_eq!(preview.tracks[1].relative_path, "02 - Björk _ Live.mp3");
     }
 
     #[test]
@@ -1131,6 +1470,176 @@ mod tests {
         let saved = write_folder(&[], &output, &Cancellation::default()).unwrap();
         assert_eq!(saved, dir.path().join("Album (2)"));
         assert!(output.symlink_metadata().unwrap().file_type().is_symlink());
+    }
+
+    #[test]
+    fn artwork_normalization_keeps_small_sources_and_caps_large_dimensions() {
+        let (Some(ffmpeg), Some(ffprobe)) = (
+            crate::process::find_tool("ffmpeg"),
+            crate::process::find_tool("ffprobe"),
+        ) else {
+            return;
+        };
+        let tools = Toolchain {
+            yt_dlp: "unused".into(),
+            ffmpeg,
+            ffprobe,
+            node: None,
+        };
+        let dir = tempfile::tempdir().expect("image conversion fixture");
+        for ((width, height), (expected_width, expected_height)) in [
+            ((544, 544), (544, 544)),
+            ((641, 401), (641, 401)),
+            ((3200, 1600), (2000, 1000)),
+            ((1600, 3200), (1000, 2000)),
+        ] {
+            let source = dir.path().join("source.png");
+            run(
+                Command::new(&tools.ffmpeg)
+                    .args([
+                        "-hide_banner",
+                        "-loglevel",
+                        "error",
+                        "-y",
+                        "-f",
+                        "lavfi",
+                        "-i",
+                        &format!("testsrc=size={width}x{height}"),
+                        "-frames:v",
+                        "1",
+                        "-threads",
+                        "1",
+                    ])
+                    .arg(&source),
+                &Cancellation::default(),
+                Duration::from_secs(10),
+            )
+            .expect("generated cover");
+            let output = dir.path().join("normalized.jpg");
+            normalize_artwork(
+                &tools,
+                &fs::read(source).unwrap(),
+                dir.path(),
+                &output,
+                &Cancellation::default(),
+            )
+            .expect("normalized JPEG");
+            let dimensions = run(
+                Command::new(&tools.ffprobe)
+                    .args([
+                        "-v",
+                        "error",
+                        "-select_streams",
+                        "v:0",
+                        "-show_entries",
+                        "stream=width,height",
+                        "-of",
+                        "csv=p=0",
+                    ])
+                    .arg(output),
+                &Cancellation::default(),
+                Duration::from_secs(10),
+            )
+            .expect("read normalized dimensions");
+            assert_eq!(
+                String::from_utf8_lossy(&dimensions).trim(),
+                format!("{expected_width},{expected_height}")
+            );
+        }
+    }
+
+    #[test]
+    fn artwork_cache_requires_both_jpeg_markers() {
+        let file = tempfile::NamedTempFile::new().expect("cache fixture");
+        for bytes in [b"".as_slice(), b"\xff\xd8partial", b"not jpeg\xff\xd9"] {
+            fs::write(file.path(), bytes).expect("incomplete image");
+            assert!(!complete_jpeg(file.path()));
+        }
+        fs::write(file.path(), b"\xff\xd8image\xff\xd9").expect("complete image markers");
+        assert!(complete_jpeg(file.path()));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn failed_and_cancelled_cover_conversion_never_publish_partial_cache() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().expect("conversion fixture");
+        let images = dir.path().join("images");
+        fs::create_dir(&images).expect("cache directory");
+        let output = images.join("cover.jpg");
+        let ffmpeg = dir.path().join("ffmpeg");
+        let tools = Toolchain {
+            yt_dlp: dir.path().join("unused-downloader"),
+            ffmpeg: ffmpeg.clone(),
+            ffprobe: dir.path().join("unused-probe"),
+            node: None,
+        };
+        fs::write(
+            &ffmpeg,
+            "#!/bin/sh\nfor output do :; done\nprintf '\\377\\330partial' > \"$output\"\nexit 1\n",
+        )
+        .expect("failing converter");
+        fs::set_permissions(&ffmpeg, fs::Permissions::from_mode(0o755))
+            .expect("executable fixture");
+        assert!(normalize_artwork(
+            &tools,
+            b"source",
+            &images,
+            &output,
+            &Cancellation::default()
+        )
+        .is_err());
+        assert!(!output.exists());
+        assert_eq!(fs::read_dir(&images).expect("cache").count(), 0);
+
+        let ready = dir.path().join("ready");
+        fs::write(&ffmpeg, format!("#!/bin/sh\nfor output do :; done\nprintf '\\377\\330partial' > \"$output\"\ntouch '{}'\nsleep 30\n", ready.display())).expect("cancellable converter");
+        let cancel = Cancellation::default();
+        let worker_cancel = cancel.clone();
+        let worker_images = images.clone();
+        let worker_output = output.clone();
+        let worker_tools = tools.clone();
+        let worker = thread::spawn(move || {
+            normalize_artwork(
+                &worker_tools,
+                b"source",
+                &worker_images,
+                &worker_output,
+                &worker_cancel,
+            )
+        });
+        let started = Instant::now();
+        while !ready.exists() && started.elapsed() < Duration::from_secs(2) {
+            thread::sleep(Duration::from_millis(5));
+        }
+        cancel.cancel();
+        assert!(matches!(
+            worker.join().expect("conversion worker"),
+            Err(EngineError::Cancelled)
+        ));
+        assert!(
+            ready.exists(),
+            "the converter must have started writing before cancellation"
+        );
+        assert!(!output.exists());
+        assert_eq!(fs::read_dir(&images).expect("cache").count(), 0);
+
+        // A fresh retry replaces a cache fragment left by an older version.
+        fs::write(&output, b"old partial image").expect("old incomplete cache");
+        fs::write(&ffmpeg, "#!/bin/sh\nfor output do :; done\nprintf '\\377\\330complete\\377\\331' > \"$output\"\n").expect("successful converter");
+        normalize_artwork(
+            &tools,
+            b"source",
+            &images,
+            &output,
+            &Cancellation::default(),
+        )
+        .expect("fresh conversion");
+        assert_eq!(
+            fs::read(&output).expect("completed cache"),
+            b"\xff\xd8complete\xff\xd9"
+        );
+        assert_eq!(fs::read_dir(&images).expect("cache").count(), 1);
     }
 
     #[test]

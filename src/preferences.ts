@@ -3,6 +3,7 @@ import type {
   CollectionMode,
   ExportPlan,
   Inspection,
+  OutputKind,
   Track,
 } from './domain';
 
@@ -16,7 +17,7 @@ export interface ExportPreferences {
   artworkMode: 'perTrack' | 'shared' | 'none';
   sharedArtwork: string | null;
   sharedArtworkAsset: string | null;
-  outputKind: 'zip' | 'folder';
+  outputKind: OutputKind;
 }
 
 export function readPreference(key: string): string | null {
@@ -59,6 +60,16 @@ export function pastedSourceUrl(input: string): string | null {
       return null;
     const video = url.searchParams.get('v');
     const playlist = url.searchParams.get('list');
+    // Repeated targets can be interpreted differently by downstream tools.
+    // An invalid supplied video must never fall through to its playlist.
+    if (
+      url.searchParams.getAll('v').length > 1 ||
+      url.searchParams.getAll('list').length > 1 ||
+      (url.pathname === '/watch' &&
+        url.searchParams.has('v') &&
+        (!video || !/^[\w-]{11}$/.test(video)))
+    )
+      return null;
     const complete =
       url.hostname === 'youtu.be'
         ? /^\/[\w-]{11}$/.test(url.pathname)
@@ -107,7 +118,11 @@ export function inspectionPreferences(
   );
   return {
     title:
-      value.suggestedMode === 'album' && albumTitle ? albumTitle : value.title,
+      value.suggestedMode === 'album' && albumTitle
+        ? albumTitle
+        : value.suggestedMode === 'collection' && value.tracks.length === 1
+          ? songExportTitle(value.tracks[0])
+          : value.title,
     mode: value.suggestedMode,
     albumTitle:
       albumTitle || (value.suggestedMode === 'album' ? value.title : ''),
@@ -127,8 +142,28 @@ export function inspectionPreferences(
       value.tracks.find((track) => track.artworkUrl)?.artworkUrl ||
       null,
     sharedArtworkAsset: null,
-    outputKind: 'zip',
+    outputKind:
+      value.suggestedMode === 'collection' && value.tracks.length === 1
+        ? 'file'
+        : 'folder',
   };
+}
+
+export function songExportTitle(track: Track): string {
+  const { artist, title } = track.metadata;
+  return [artist.trim(), title.trim()].filter(Boolean).join(' - ');
+}
+
+// Follow corrected song tags until the user chooses a custom export name.
+export function updateSongPreferences(
+  previous: ExportPreferences,
+  before: Track,
+  after: Track,
+): ExportPreferences {
+  return previous.mode === 'collection' &&
+    previous.title === songExportTitle(before)
+    ? { ...previous, title: songExportTitle(after) }
+    : previous;
 }
 
 export function updateAlbumPreferences(

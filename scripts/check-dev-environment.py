@@ -8,6 +8,19 @@ import sys
 import tomllib
 
 
+def linux_build_errors():
+    guidance = 'Install the Linux native development packages; see docs/linux-preview.md#run-from-source.'
+    pkg_config = shutil.which('pkg-config')
+    if pkg_config is None:
+        return [f'pkg-config is missing. {guidance}']
+    errors = []
+    for component, module in (('GTK3', 'gtk+-3.0'), ('WebKitGTK 4.1', 'webkit2gtk-4.1')):
+        result = subprocess.run([pkg_config, '--exists', module], capture_output=True, text=True)
+        if result.returncode:
+            errors.append(f'{component} development files are missing or not discoverable by pkg-config ({module}). {guidance}')
+    return errors
+
+
 def main():
     root = Path(__file__).resolve().parents[1]
     config = tomllib.loads((root / 'mise.toml').read_text())
@@ -22,7 +35,10 @@ def main():
     for name, args in commands.items():
         executable = shutil.which(name)
         if executable is None:
-            errors.append(f'{name} is missing; run mise install and mise run setup.')
+            if name in ('yt-dlp', 'ffmpeg', 'ffprobe'):
+                errors.append(f'{name} is missing; install FFmpeg (including ffprobe) and yt-dlp with your platform package manager, then rerun mise run doctor.')
+            else:
+                errors.append(f'{name} is missing; run mise install and mise run setup.')
             continue
         result = subprocess.run([executable, *args], capture_output=True, text=True)
         lines = (result.stdout or result.stderr).splitlines()
@@ -38,6 +54,8 @@ def main():
         result = subprocess.run(['cargo', component.replace('rustfmt', 'fmt'), '--version'], capture_output=True, text=True) if shutil.which('cargo') else None
         if result is None or result.returncode:
             errors.append(f'{component} is missing; run mise install.')
+    if platform.system() == 'Linux':
+        errors.extend(linux_build_errors())
     if platform.system() == 'Darwin':
         result = subprocess.run(['/usr/bin/xcode-select', '-p'], capture_output=True, text=True)
         if result.returncode:

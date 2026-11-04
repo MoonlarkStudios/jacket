@@ -1,0 +1,21 @@
+[package]
+name = "jacket-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+description = "Native review state and metadata editing for Jacket"
+
+[dependencies]
+audio-engine = { path = "../audio-engine" }
+serde.workspace = true
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -220,6 +220,40 @@ mod tests {
     }
 
     #[test]
+    fn file_completion_records_the_published_codec_path_before_restart_cleanup() {
+        let dir = tempfile::tempdir().unwrap();
+        let review_root = dir.path().join("review");
+        let jobs = dir.path().join("jobs");
+        let job = jobs.join("job-finished");
+        let store = reviews::Store::default();
+        fs::write(&review_root, b"temporarily unavailable directory").unwrap();
+        let mut record = record(Some(identity()));
+        record.plan.output_kind = OutputKind::File;
+        record.output_path = dir.path().join("Artist - Song.v2").to_str().unwrap().into();
+        let mut result = result(&dir.path().join("Artist - Song.v2 (2).m4a"));
+        result.output_kind = OutputKind::File;
+
+        finish(&store, &review_root, &job, &mut record, &mut result);
+
+        assert_eq!(result.warnings.len(), 1);
+        assert!(recovery::latest(&jobs).is_none());
+        let completed = recovery::completed(&jobs).unwrap();
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].plan.output_kind, OutputKind::File);
+        assert_eq!(completed[0].output_path, result.output_path);
+        assert_eq!(fs::read(&result.output_path).unwrap(), b"completed music");
+
+        fs::remove_file(&review_root).unwrap();
+        let mut review = draft("exported", 7);
+        review.preferences.output_kind = "file".into();
+        store.save(&review_root, review).unwrap();
+        reconcile(&store, &review_root, &jobs).unwrap();
+        assert!(store.load(&review_root).unwrap().is_none());
+        assert!(!job.exists());
+        assert_eq!(fs::read(&result.output_path).unwrap(), b"completed music");
+    }
+
+    #[test]
     fn legacy_completion_cleans_cache_without_guessing_review_ownership() {
         let dir = tempfile::tempdir().unwrap();
         let review_root = dir.path().join("review");

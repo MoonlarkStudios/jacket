@@ -1,0 +1,8 @@
+# Compatible with Jacket and Resonant v2. Omitted tokens inherit the base.
+version = 1
+base = "dark"
+
+[colors]
+accent = "#A7D9FF"
+accent_text = "#101C28"
+selection = "#A7D9FF"

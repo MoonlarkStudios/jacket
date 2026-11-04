@@ -1,22 +1,28 @@
+> **Legacy implementation reference.** This document describes the retained React/Tauri app. For the Rust and iced branch, use the [current README](../README.md) and [native port guide](native-port.md). Old installer and acceptance results do not qualify the native app.
+
 # Using Jacket
 
 [Back to the README](../README.md)
 
 ## Find tracks
 
-Open the desktop app and paste an HTTPS YouTube or YouTube Music link. Jacket supports video links, playlists, and YouTube Music albums. Pasting a complete supported link starts inspection; when typing, press Enter or choose **Find tracks**.
+Open the desktop app and paste an HTTPS YouTube or YouTube Music link. Jacket supports individual songs and videos, playlists, and YouTube Music albums. Pasting a complete link starts inspection unless it offers a song/playlist choice. When typing, press Enter or choose **Find tracks**.
+
+A link containing both a video and a playlist offers **This song** and **Entire playlist** by the link field. **This song** is selected initially; choose the scope you want, then press Enter or choose **Find tracks**. A playlist-only link inspects its ordered entries.
 
 Tracks appear as inspection progresses. Wait for inspection to finish before editing or downloading. Unavailable or incomplete entries are reported. If you cancel or inspection fails, the partial preview stays visible; choose **Inspect again** to retry.
 
 ![Jacket’s link-entry screen](screenshots/start.jpg)
 
-The browser preview uses **Try example** to demonstrate the interface. It cannot inspect real sources or export audio.
+The browser preview offers **Try a song** and **Explore an album** to demonstrate the interface. Both use fictional music. It cannot inspect real sources or export audio.
 
-## Review an album or playlist
+## Review a song or collection
+
+A single recording gets a song-focused review. Check its title, artist, album, and release year, then choose **Edit song details** to correct them. Album and year may be empty. Jacket preserves available source metadata, including track and disc numbers; downloading one song does not remove its album context.
 
 Choose the tracks you want. Search appears for sources with more than eight tracks, and matches title, artist, and album. Playlist order and repeated entries are retained.
 
-**Edit album details** opens a draft for shared album title, album artist, release year, organization, and ZIP filename. Choose **Save changes** to apply it. Cancel, Escape, and closing the dialog discard the draft. The ZIP name follows the album title until you give it a custom name.
+For a collection, **Edit album details** (or **Edit details** for a playlist) opens a draft for organization and export name, with shared album title, album artist, and release year available in Album organization. Choose **Save changes** to apply it. Cancel, Escape, and closing the dialog discard the draft. The export name follows the album title until you give it a custom name; it names the music folder or ZIP without changing track tags.
 
 - **Album** organization applies supplied shared album, album artist, and year values. Each track retains its own artist and track/disc numbers. Missing track numbers are filled from source order within each disc; deselecting tracks leaves gaps.
 - **Playlist** organization keeps individual music metadata. File-order prefixes do not invent track-number tags.
@@ -41,25 +47,31 @@ Click the cover to review source-image candidates or choose no artwork. Source i
 | Keep source codec | Copies supported AAC, ALAC, MP3, Opus, Vorbis, FLAC, and PCM audio into a suitable container. Unsupported codecs require another preset. |
 | MP3 | Copies MP3 sources; converts other audio to MP3. |
 
-MP3, M4A, FLAC, Opus, and Ogg Vorbis support embedded artwork. WAV uses a separate image, and its limited tags omit album artist and disc number. Warnings and the manifest identify what could not be embedded. Changing containers or metadata does not improve the source audio quality.
+MP3, M4A, FLAC, Opus, and Ogg Vorbis support embedded artwork. WAV cannot embed artwork, and its limited tags omit album artist and disc number. Folder and ZIP output retain a separate image and manifest; Audio file output reports these omissions without creating extra files. Choose M4A / MP3 to include the cover and those tags in one file. Changing containers or metadata does not improve the source audio quality.
 
-## Preview and save your collection
+## Preview and save your music
 
 **Preview files** shows the planned files, effective requested tags, and artwork. For M4A / MP3 and Keep source codec, extensions remain provisional until the source codec is known. Some containers support fewer embedded tags; export notes report the actual result.
 
-In **Download options → Save as**, choose **ZIP archive** or **Music folder**. ZIP export opens a native save dialog. Folder export asks for a parent music folder and creates a named collection inside it. Cancelling a destination dialog starts no download. Existing files and folders are preserved; collisions receive a numbered suffix.
+New song reviews use **Audio file**: one tagged recording with artwork embedded when available, without an extra directory, image, playlist, or manifest. Choose a destination folder; Jacket saves the audio directly inside it and adds its actual codec extension after download. Change **Export name** to rename it without changing its tags; enter the name without a format extension.
+
+Albums and playlists default to **Music folder**. **Download options → Save as** also offers **ZIP archive** and **Audio file** when exactly one track is selected, including a track selected from an album. Its album metadata and numbering remain intact. File output requires one selected track; selecting more tracks keeps your output preference and asks you to select one track or choose a folder/ZIP. Saved reviews and unfinished exports retain their chosen output kind.
+
+ZIP export opens a native save dialog. Folder export asks for a parent music folder and creates a named folder inside it. Cancelling a destination dialog starts no download. Existing files and folders are preserved; collisions receive a numbered suffix.
 
 Progress shows prepared tracks and the current operation. Publishing the collection is a separate stage. Folder export provides **Open folder** and **Open playlist** immediately. For a ZIP, reveal the archive in your file manager and extract it before opening `playlist.m3u` with a player that supports the exported audio formats. Keep the playlist beside its tracks.
 
 After a successful export, Jacket clears the saved review and its recovery state. The success screen, output links, and **Save another copy** remain available in the current session. A finished collection does not reopen when Jacket restarts, and Jacket does not keep a download history or manage exported albums. Choosing Save another copy or another output format alone keeps the finished review in memory. Committing new track, selection, album, or artwork changes makes it unfinished work again and enables autosave. Format and destination preferences remain remembered. Temporary source downloads are removed after success; unreferenced imported covers are reclaimed on the next startup.
 
-The archive includes tagged audio, available images, a relative-path playlist, and `manifest.json`. The [manifest reference](manifest.md) explains source metadata, effective exported tags, warnings, and hashes.
+Music folder and ZIP output include tagged audio, available images, a relative-path playlist, and `manifest.json`. Audio file output embeds the effective tags and source URL but has no manifest of original source metadata; choose a folder or ZIP when you want that record. The [manifest reference](manifest.md) explains source metadata, effective exported tags, warnings, and hashes.
+
+To use a song in Resonant, open the output folder and import its audio file there. Resonant v2 works with one recording per document. Jacket does not currently launch Resonant or create `.resonant` documents.
 
 ## Interrupted downloads
 
-Cancel stops the operation without publishing an incomplete ZIP or final collection folder. Completed source downloads remain cached for retry. Transient network errors receive a bounded automatic retry; account restrictions and unavailable media stop with guidance.
+Cancel stops the operation without publishing an incomplete audio file, ZIP, or collection folder. Completed source downloads remain cached for retry. Transient network errors receive a bounded automatic retry; account restrictions and unavailable media stop with guidance.
 
-After restarting, Jacket offers the most recently active unfinished export as **Resume download**. It restores selected tracks, edits, format, artwork, output kind, and destination. Older recovery records default to ZIP output. Retry or resume reuses completed cached source downloads, though audio preparation may run again. Changing the archive name opens a new save dialog. Use **Choose another destination** if the original folder is unavailable or out of space.
+After restarting, Jacket offers the most recently active unfinished export as **Resume download**. It restores selected tracks, edits, format, artwork, output kind, and destination. Older recovery records default to ZIP output. Retry or resume reuses completed cached source downloads, though audio preparation may run again. Changing the export name asks for a new destination. File retries retain the chosen name stem and add the extension of the prepared audio when publishing. Use **Choose another destination** if the original folder is unavailable or out of space.
 
 **New download** returns to the link screen. **Undo new download** restores your previous complete review until a new source loads successfully. Dismissing a recovery offer retains its media cache.
 

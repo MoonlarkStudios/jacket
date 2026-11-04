@@ -1,0 +1,35 @@
+[package]
+name = "jacket-iced"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Jacket native desktop: from link to neatly packed"
+
+[[bin]]
+name = "jacket"
+path = "src/main.rs"
+
+[dependencies]
+audio-engine = { path = "../../crates/audio-engine" }
+jacket-core = { path = "../../crates/jacket-core" }
+jacket-desktop = { path = "../../crates/jacket-desktop" }
+iced = { version = "=0.14.0", features = ["tokio", "svg", "image-without-codecs"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+rfd = "0.15.4"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+serde.workspace = true
+serde_json.workspace = true
+toml = "0.8"
+tempfile.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.5"
+objc2-app-kit = { version = "0.2.2", features = ["NSApplication", "NSResponder", "NSMenu", "NSMenuItem"] }
+objc2-foundation = { version = "0.2.2", features = ["NSThread"] }
+
+[lints]
+workspace = true

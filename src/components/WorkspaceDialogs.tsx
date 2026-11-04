@@ -122,13 +122,32 @@ export function WorkspaceDialogs({
             value={p.outputKind}
             allowDeselect={false}
             onChange={(value) =>
-              patch({ outputKind: value === 'folder' ? 'folder' : 'zip' })
+              patch({
+                outputKind:
+                  value === 'file'
+                    ? 'file'
+                    : value === 'folder'
+                      ? 'folder'
+                      : 'zip',
+              })
             }
             data={[
-              { value: 'zip', label: 'ZIP archive' },
+              {
+                value: 'file',
+                label: 'Audio file · one song',
+                disabled: w.chosen.length !== 1,
+              },
               { value: 'folder', label: 'Music folder · ready to play' },
+              { value: 'zip', label: 'ZIP archive' },
             ]}
           />
+          {p.outputKind === 'file' && (
+            <Text size="sm" c="dimmed">
+              One audio file with its tags and embedded artwork where supported.
+              Choose a save location; Jacket adds the correct file extension
+              after download.
+            </Text>
+          )}
           <div>
             <Select
               label="Audio format"
@@ -198,6 +217,8 @@ function DetailsEditor({
 }) {
   const [draft, setDraft] = useState(() => ({ ...w.preferences }));
   const sourceTitle = w.inspection?.title || 'Audio collection';
+  const isSong =
+    w.preferences.mode === 'collection' && w.inspection?.tracks.length === 1;
   const albumPatch = (
     value: Partial<Pick<typeof draft, 'albumTitle' | 'albumArtist' | 'year'>>,
   ) =>
@@ -209,7 +230,13 @@ function DetailsEditor({
       returnFocus={false}
       opened
       onClose={close}
-      title={draft.mode === 'album' ? 'Album details' : 'Playlist options'}
+      title={
+        isSong
+          ? 'Export name'
+          : draft.mode === 'album'
+            ? 'Album details'
+            : 'Collection details'
+      }
       centered
     >
       <form
@@ -230,43 +257,45 @@ function DetailsEditor({
         }}
       >
         <Stack gap="lg">
-          <div>
-            <Text size="sm" fw={500} mb={8} id="organize-label">
-              Organize as
-            </Text>
-            <SegmentedControl
-              fullWidth
-              aria-labelledby="organize-label"
-              value={draft.mode}
-              disabled={w.busy}
-              onChange={(value) => {
-                const mode = value as typeof draft.mode;
-                setDraft((previous) => ({
-                  ...previous,
-                  mode,
-                  albumTitle:
-                    mode === 'album'
-                      ? previous.albumTitle || sourceTitle
-                      : previous.albumTitle,
-                  artworkMode:
-                    previous.artworkMode === 'none'
-                      ? 'none'
-                      : mode === 'album'
-                        ? 'shared'
-                        : 'perTrack',
-                }));
-              }}
-              data={[
-                { value: 'collection', label: 'Playlist' },
-                { value: 'album', label: 'Album' },
-              ]}
-            />
-            <Text size="sm" c="dimmed" mt={10}>
-              {draft.mode === 'album'
-                ? 'Apply shared album details. Each track keeps its own artist and numbering.'
-                : 'Keep each track’s own metadata, with files in playlist order.'}
-            </Text>
-          </div>
+          {!isSong && (
+            <div>
+              <Text size="sm" fw={500} mb={8} id="organize-label">
+                Organize as
+              </Text>
+              <SegmentedControl
+                fullWidth
+                aria-labelledby="organize-label"
+                value={draft.mode}
+                disabled={w.busy}
+                onChange={(value) => {
+                  const mode = value as typeof draft.mode;
+                  setDraft((previous) => ({
+                    ...previous,
+                    mode,
+                    albumTitle:
+                      mode === 'album'
+                        ? previous.albumTitle || sourceTitle
+                        : previous.albumTitle,
+                    artworkMode:
+                      previous.artworkMode === 'none'
+                        ? 'none'
+                        : mode === 'album'
+                          ? 'shared'
+                          : 'perTrack',
+                  }));
+                }}
+                data={[
+                  { value: 'collection', label: 'Playlist' },
+                  { value: 'album', label: 'Album' },
+                ]}
+              />
+              <Text size="sm" c="dimmed" mt={10}>
+                {draft.mode === 'album'
+                  ? 'Apply shared album details. Each track keeps its own artist and numbering.'
+                  : 'Keep each track’s own metadata, with files in playlist order.'}
+              </Text>
+            </div>
+          )}
           {draft.mode === 'album' && (
             <>
               <TextInput
@@ -303,8 +332,12 @@ function DetailsEditor({
             </>
           )}
           <TextInput
-            label="Collection name"
-            description="Used for the ZIP filename or exported folder."
+            label="Export name"
+            description={
+              draft.outputKind === 'file'
+                ? 'Audio filename without the extension. Jacket adds the correct extension after download. Your music tags stay the same.'
+                : 'Used for the music folder or ZIP filename. Your music tags stay the same.'
+            }
             value={draft.title}
             disabled={w.busy}
             onChange={(event) => {
@@ -382,7 +415,9 @@ function ArtworkOptions({
           ]}
         />
         <Text size="sm" c="dimmed" mt={8}>
-          Images are embedded where supported and included with your collection.
+          {p.outputKind === 'file'
+            ? 'Artwork is embedded in the audio file where supported. WAV cannot embed artwork; choose M4A / MP3 to include a cover.'
+            : 'Images are embedded where supported and included with your collection.'}
         </Text>
       </div>
       {p.artworkMode === 'shared' && candidates.length > 0 && (
@@ -473,8 +508,10 @@ export function TrackEditor({
   close,
   save,
   openAlbumDetails,
+  singleSong = false,
 }: {
   editing: { index: number; track: Track };
+  singleSong?: boolean;
   album: { title: string; artist: string; year: number | null } | null;
   hasNext: boolean;
   close: () => void;
@@ -493,7 +530,9 @@ export function TrackEditor({
       returnFocus={false}
       opened
       onClose={close}
-      title={`Edit track ${editing.index + 1}`}
+      title={
+        singleSong ? 'Edit song details' : `Edit track ${editing.index + 1}`
+      }
       centered
     >
       <form

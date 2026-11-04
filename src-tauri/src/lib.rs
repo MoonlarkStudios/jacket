@@ -1,5 +1,5 @@
 use audio_engine::{
-    AuthOptions, Cancellation, ExportPlan, ExportResult, Inspection, InspectionUpdate,
+    AuthOptions, Cancellation, ExportPlan, ExportResult, Inspection, InspectionUpdate, OutputKind,
     ProgressEvent, Toolchain,
 };
 use serde::Serialize;
@@ -341,6 +341,27 @@ fn folder_destination(directory: String, title: String) -> Result<String, String
 }
 
 #[tauri::command]
+fn file_destination(directory: String, title: String) -> Result<String, String> {
+    let directory = PathBuf::from(directory);
+    if !directory.is_absolute() || !directory.is_dir() {
+        return Err("Choose an available folder for your audio file.".into());
+    }
+    if title.trim().is_empty() {
+        return Err("Choose a name for your audio file.".into());
+    }
+    let directory = directory
+        .canonicalize()
+        .map_err(|_| "Choose an available folder for your audio file.".to_string())?;
+    // This is a full name stem, including any dots supplied in the title.
+    // Only the engine knows the final container extension after acquisition.
+    let destination = directory.join(audio_engine::export::sanitize_component(&title));
+    destination
+        .to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| "The selected folder needs a Unicode path.".into())
+}
+
+#[tauri::command]
 fn open_export_playlist(output_path: String, jobs: State<Jobs>) -> Result<(), String> {
     let root = PathBuf::from(output_path);
     let exported = jobs.exported.lock().map_err(|error| error.to_string())?;
@@ -495,7 +516,7 @@ fn reveal_archive(output_path: String, jobs: State<Jobs>) -> Result<(), String> 
     let path = PathBuf::from(output_path);
     let exported = jobs.exported.lock().map_err(|error| error.to_string())?;
     if !exported.contains(&path) || (!path.is_file() && !path.is_dir()) {
-        return Err("This archive is no longer available at the saved location.".into());
+        return Err("This export is no longer available at the saved location.".into());
     }
     drop(exported);
     #[cfg(target_os = "macos")]
@@ -522,7 +543,7 @@ fn reveal_archive(output_path: String, jobs: State<Jobs>) -> Result<(), String> 
         .status();
     let status = status.map_err(|error| error.to_string())?;
     if !status.success() {
-        return Err("Could not open the archive folder.".into());
+        return Err("Could not open the export folder.".into());
     }
     Ok(())
 }
@@ -701,6 +722,32 @@ fn cancel_export(job_id: String, jobs: State<Jobs>) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_export_destination(plan: &ExportPlan, output: &std::path::Path) -> Result<(), String> {
+    if !output.is_absolute()
+        || (plan.output_kind == OutputKind::Zip
+            && output.extension().and_then(|extension| extension.to_str()) != Some("zip"))
+    {
+        return Err("Choose an available destination using the save dialog.".into());
+    }
+    if plan.output_kind == OutputKind::File {
+        if plan.tracks.len() != 1 {
+            return Err("Choose exactly one track to save an audio file.".into());
+        }
+        if output.file_name().is_none() || !output.parent().is_some_and(std::path::Path::is_dir) {
+            return Err("Choose an available folder for your audio file.".into());
+        }
+    }
+    Ok(())
+}
+
+fn export_ready_message(kind: OutputKind) -> &'static str {
+    match kind {
+        OutputKind::Zip => "Your archive is ready",
+        OutputKind::Folder => "Your music folder is ready",
+        OutputKind::File => "Your audio file is ready",
+    }
+}
+
 #[tauri::command]
 fn start_export(
     app: tauri::AppHandle,
@@ -713,15 +760,10 @@ fn start_export(
     if let Some(identity) = &review_identity {
         identity.validate()?;
     }
+    let output = PathBuf::from(output_path);
+    validate_export_destination(&plan, &output)?;
     let mut plan = plan;
     plan.auth = browser_sessions::resolve(&browser_locations(&app)?, &plan.auth)?;
-    let output = PathBuf::from(output_path);
-    if !output.is_absolute()
-        || (plan.output_kind == audio_engine::OutputKind::Zip
-            && output.extension().and_then(|s| s.to_str()) != Some("zip"))
-    {
-        return Err("Choose an available destination using the save dialog.".into());
-    }
     if matches!(plan.artwork_mode, audio_engine::ArtworkMode::Shared) {
         if let Some(id) = &plan.shared_artwork_asset {
             plan.shared_artwork_path = Some(artwork_assets::resolve(
@@ -850,11 +892,7 @@ fn start_export(
                 progress: ProgressEvent {
                     stage: stage.into(),
                     message: if stage == "complete" {
-                        if plan.output_kind == audio_engine::OutputKind::Folder {
-                            "Your music folder is ready".into()
-                        } else {
-                            "Your archive is ready".into()
-                        }
+                        export_ready_message(plan.output_kind).into()
                     } else {
                         "Export stopped".into()
                     },
@@ -928,6 +966,7 @@ pub fn run() {
             artwork_asset,
             preview_export,
             folder_destination,
+            file_destination,
             open_export_playlist,
             check_downloader_update,
             update_downloader,
@@ -956,4 +995,129 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod destination_tests {
+    use super::*;
+    use audio_engine::{ArtworkMode, AudioFormat, CollectionMode, Metadata, Track};
+
+    fn plan(kind: OutputKind, count: usize) -> ExportPlan {
+        ExportPlan {
+            title: "Artist - Song.v2".into(),
+            source_url: "https://www.youtube.com/playlist?list=album".into(),
+            mode: CollectionMode::Album,
+            format: AudioFormat::Compatible,
+            artwork_mode: ArtworkMode::None,
+            shared_artwork_url: None,
+            shared_artwork_asset: None,
+            shared_artwork_path: None,
+            output_kind: kind,
+            auth: AuthOptions::default(),
+            tracks: vec![
+                Track {
+                    id: "song".into(),
+                    source_url: "https://www.youtube.com/watch?v=song".into(),
+                    uploader: String::new(),
+                    duration: None,
+                    artwork_url: None,
+                    source_metadata: Metadata::default(),
+                    metadata: Metadata {
+                        title: "Song.v2".into(),
+                        artist: "Artist".into(),
+                        track_number: Some(7),
+                        ..Metadata::default()
+                    },
+                };
+                count
+            ],
+        }
+    }
+
+    #[test]
+    fn file_destination_keeps_dots_without_guessing_an_extension_or_reserving_a_name() {
+        let root = tempfile::tempdir().unwrap();
+        let expected = root.path().canonicalize().unwrap().join("Artist _ Song.v2");
+        std::fs::write(&expected, b"existing file").unwrap();
+        let destination = file_destination(
+            root.path().to_str().unwrap().into(),
+            " Artist / Song.v2 ".into(),
+        )
+        .unwrap();
+        assert_eq!(PathBuf::from(&destination), expected);
+        assert_eq!(std::fs::read(&expected).unwrap(), b"existing file");
+        assert!(validate_export_destination(&plan(OutputKind::File, 1), &expected).is_ok());
+    }
+
+    #[test]
+    fn file_destination_requires_an_existing_absolute_directory_and_a_name() {
+        let root = tempfile::tempdir().unwrap();
+        let existing_file = root.path().join("file");
+        std::fs::write(&existing_file, b"existing").unwrap();
+        for directory in [
+            String::new(),
+            ".".into(),
+            root.path().join("missing").to_str().unwrap().into(),
+            existing_file.to_str().unwrap().into(),
+        ] {
+            assert!(file_destination(directory, "Song".into()).is_err());
+        }
+        assert!(file_destination(root.path().to_str().unwrap().into(), " \t ".into()).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_destination_resolves_the_selected_parent_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("music");
+        std::fs::create_dir(&directory).unwrap();
+        let alias = root.path().join("alias");
+        std::os::unix::fs::symlink(&directory, &alias).unwrap();
+        let destination =
+            file_destination(alias.to_str().unwrap().into(), "Song.v2".into()).unwrap();
+        assert_eq!(
+            PathBuf::from(destination),
+            directory.canonicalize().unwrap().join("Song.v2")
+        );
+    }
+
+    #[test]
+    fn file_exports_require_one_track_without_losing_album_context() {
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("Artist - Song.v2");
+        for count in [0, 2] {
+            assert!(
+                validate_export_destination(&plan(OutputKind::File, count), &destination).is_err()
+            );
+        }
+        let single = plan(OutputKind::File, 1);
+        assert!(validate_export_destination(&single, &destination).is_ok());
+        assert_eq!(single.mode, CollectionMode::Album);
+        assert_eq!(single.tracks[0].metadata.track_number, Some(7));
+        assert!(validate_export_destination(&single, std::path::Path::new("relative")).is_err());
+        assert!(validate_export_destination(&single, &root.path().join("missing/Song")).is_err());
+        assert!(
+            validate_export_destination(&single, root.path().ancestors().last().unwrap()).is_err()
+        );
+    }
+
+    #[test]
+    fn archive_validation_and_completion_messages_remain_specific_to_the_output() {
+        let root = tempfile::tempdir().unwrap();
+        let zip = plan(OutputKind::Zip, 2);
+        assert!(validate_export_destination(&zip, &root.path().join("Album.zip")).is_ok());
+        assert!(validate_export_destination(&zip, &root.path().join("Album.mp3")).is_err());
+        assert_eq!(
+            export_ready_message(OutputKind::Zip),
+            "Your archive is ready"
+        );
+        assert_eq!(
+            export_ready_message(OutputKind::Folder),
+            "Your music folder is ready"
+        );
+        assert_eq!(
+            export_ready_message(OutputKind::File),
+            "Your audio file is ready"
+        );
+    }
 }

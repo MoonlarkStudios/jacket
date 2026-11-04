@@ -24,6 +24,15 @@ export function ExportPreviewDialog({
 }) {
   const [preview, setPreview] = useState<ExportPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const extraFiles =
+    preview?.files.filter(
+      (name) => !preview.tracks.some((track) => track.relativePath === name),
+    ) ?? [];
+  const embeddedCover =
+    plan.artworkMode === 'shared'
+      ? !!(plan.sharedArtworkUrl || plan.sharedArtworkAsset)
+      : plan.artworkMode === 'perTrack' &&
+        plan.tracks.some((track) => !!track.artworkUrl);
   // Only output-affecting data trigger planning, never browser credentials.
   const serialized = JSON.stringify({ ...plan, auth: { browser: null } });
   useEffect(() => {
@@ -47,7 +56,7 @@ export function ExportPreviewDialog({
       opened
       onClose={close}
       returnFocus={false}
-      title="Preview your collection"
+      title="Preview your files"
       centered
       size="lg"
       scrollAreaComponent={ScrollArea.Autosize}
@@ -81,13 +90,17 @@ export function ExportPreviewDialog({
               )}
               <div style={{ minWidth: 0 }}>
                 <Text fw={600} className="file-preview-name">
-                  {preview.rootName}/
+                  {preview.rootName}
+                  {preview.outputKind === 'file' ? '' : '/'}
                 </Text>
                 <Text size="sm" c="dimmed">
-                  {preview.tracks.length} tracks ·{' '}
-                  {preview.outputKind === 'zip'
-                    ? 'Inside your ZIP archive'
-                    : 'Music folder'}
+                  {preview.tracks.length}{' '}
+                  {preview.tracks.length === 1 ? 'track' : 'tracks'} ·{' '}
+                  {preview.outputKind === 'file'
+                    ? 'Audio file · no extra folder or files'
+                    : preview.outputKind === 'zip'
+                      ? 'Inside your ZIP archive'
+                      : 'Music folder'}
                 </Text>
               </div>
             </Group>
@@ -116,7 +129,13 @@ export function ExportPreviewDialog({
                       {track.metadata.discNumber
                         ? ` · Disc ${track.metadata.discNumber}`
                         : ''}
-                      {track.artworkPath ? ' · Cover included' : ' · No cover'}
+                      {preview.outputKind === 'file'
+                        ? embeddedCover
+                          ? ' · Cover embedded where supported'
+                          : ' · No cover'
+                        : track.artworkPath
+                          ? ' · Cover included'
+                          : ' · No cover'}
                     </Text>
                     {track.extensionProvisional && (
                       <Text size="xs" c="dimmed">
@@ -125,21 +144,16 @@ export function ExportPreviewDialog({
                     )}
                   </div>
                 ))}
-                <Text size="xs" fw={600}>
-                  Also included
-                </Text>
-                {preview.files
-                  .filter(
-                    (name) =>
-                      !preview.tracks.some(
-                        (track) => track.relativePath === name,
-                      ),
-                  )
-                  .map((name) => (
-                    <Text size="sm" className="file-preview-name" key={name}>
-                      {name}
-                    </Text>
-                  ))}
+                {extraFiles.length > 0 && (
+                  <Text size="xs" fw={600}>
+                    Also included
+                  </Text>
+                )}
+                {extraFiles.map((name) => (
+                  <Text size="sm" className="file-preview-name" key={name}>
+                    {name}
+                  </Text>
+                ))}
               </Stack>
             </ScrollArea.Autosize>
             {preview.warnings.map((warning) => (

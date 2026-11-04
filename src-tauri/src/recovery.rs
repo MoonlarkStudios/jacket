@@ -132,6 +132,8 @@ fn load(directory: &Path) -> Option<Recovery> {
         || !valid_job_id(&record.job_id)
         || directory.file_name()?.to_str()? != record.job_id
         || record.plan.tracks.is_empty()
+        || (record.plan.output_kind == audio_engine::OutputKind::File
+            && record.plan.tracks.len() != 1)
         || record
             .review_identity
             .as_ref()
@@ -344,6 +346,60 @@ mod tests {
         dismiss(root.path(), "job-1").unwrap();
         assert!(latest(root.path()).is_none());
         assert!(root.path().join("job-1/recovery.json").is_file());
+    }
+
+    #[test]
+    fn file_recovery_retains_the_destination_stem_format_and_album_metadata() {
+        let root = tempfile::tempdir().unwrap();
+        let mut record = fixture("file-job");
+        record.plan.output_kind = OutputKind::File;
+        record.plan.format = AudioFormat::Preserve;
+        record.output_path = "/tmp/Artist - Song.v2".into();
+        record.progress.stage = "preparing".into();
+        record.save(&root.path().join("file-job")).unwrap();
+
+        let restored = latest(root.path()).unwrap();
+        assert_eq!(restored.output_path, "/tmp/Artist - Song.v2");
+        assert_eq!(restored.plan.output_kind, OutputKind::File);
+        assert!(matches!(restored.plan.format, AudioFormat::Preserve));
+        assert_eq!(restored.plan.mode, CollectionMode::Album);
+        assert_eq!(restored.plan.tracks[0].metadata.track_number, Some(3));
+        assert_eq!(restored.plan.tracks[0].metadata.release_year, Some(1976));
+    }
+
+    #[test]
+    fn file_recovery_rejects_plans_without_exactly_one_track() {
+        for count in [0, 2] {
+            let root = tempfile::tempdir().unwrap();
+            let mut record = fixture("invalid-file");
+            record.plan.output_kind = OutputKind::File;
+            record.plan.tracks = vec![record.plan.tracks[0].clone(); count];
+            record.save(&root.path().join("invalid-file")).unwrap();
+            assert!(latest(root.path()).is_none());
+            assert!(root.path().join("invalid-file/recovery.json").exists());
+        }
+    }
+
+    #[test]
+    fn legacy_recovery_without_output_kind_remains_a_zip() {
+        let root = tempfile::tempdir().unwrap();
+        let record = fixture("legacy-zip");
+        let mut serialized = serde_json::to_value(record).unwrap();
+        serialized["plan"]
+            .as_object_mut()
+            .unwrap()
+            .remove("outputKind");
+        let directory = root.path().join("legacy-zip");
+        fs::create_dir(&directory).unwrap();
+        fs::write(
+            directory.join(RECORD),
+            serde_json::to_vec(&serialized).unwrap(),
+        )
+        .unwrap();
+
+        let restored = latest(root.path()).unwrap();
+        assert_eq!(restored.plan.output_kind, OutputKind::Zip);
+        assert_eq!(restored.output_path, "/tmp/Album.zip");
     }
 
     #[test]

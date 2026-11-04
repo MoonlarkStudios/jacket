@@ -1,4 +1,4 @@
-name: CI
+name: Native CI
 
 on:
   push:
@@ -11,69 +11,46 @@ on:
         description: Exact commit to build and test
         type: string
         default: ""
-      release_tag:
-        description: Require every application version to match this release tag
-        type: string
-        default: ""
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ inputs.ref || github.ref }}
+  group: native-ci-${{ github.workflow }}-${{ inputs.ref || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-jobs:
-  version:
-    name: Application version and release integrity
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ inputs.ref || github.sha }}
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
-        with:
-          version: 2026.9.12
-          install_args: node python
-      - name: Validate workflows and embedded shell scripts
-        # Reusable release recovery may check out a commit before lint:ci existed.
-        run: mise exec actionlint@1.7.12 shellcheck@0.11.0 -- actionlint
-      - name: Check synchronized versions and release regressions
-        env:
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          python3 scripts/check-release.py
-          if [ -n "$RELEASE_TAG" ]; then python3 scripts/check-release.py --tag "$RELEASE_TAG"; fi
-          python3 scripts/test-release.py
-          python3 scripts/test-published-release.py
-          node --test tests/*release*.test.mjs
+env:
+  CARGO_BUILD_JOBS: 2
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_NET_RETRY: 5
 
+jobs:
   quality:
-    name: macOS quality and media tests
-    runs-on: macos-26
-    timeout-minutes: 30
-    env:
-      CARGO_INCREMENTAL: 0
-      CARGO_PROFILE_DEV_DEBUG: 0
-      CARGO_PROFILE_TEST_DEBUG: 0
+    name: Native checks (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: ${{ inputs.ref || github.sha }}
+      - name: Install Linux windowing and media prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev ffmpeg
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
         with:
           version: 2026.9.12
-      - name: Cache frontend downloads
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.npm
-          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'package-lock.json') }}
-          restore-keys: npm-${{ runner.os }}-${{ runner.arch }}-
-      - name: Cache macOS Rust dependencies and build outputs
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore native Rust dependencies and build outputs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: rust-cache
         with:
           path: |
             ~/.cargo/registry/cache
@@ -82,21 +59,37 @@ jobs:
             target/debug/.fingerprint
             target/debug/build
             target/debug/deps
-          # Cache complete dependency builds, not another large snapshot for
-          # every source commit. Task/workflow changes must warm a new entry.
-          key: rust-v2-${{ runner.os }}-${{ runner.arch }}-macos-26-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml', 'vendor/**', '.cargo/config*', 'mise.toml', '.github/workflows/ci.yml') }}
-          restore-keys: rust-v2-${{ runner.os }}-${{ runner.arch }}-macos-26-${{ hashFiles('rust-toolchain.toml') }}-
-      - name: Run formatting, lint, build, and unit tests
+          # Reuse dependency builds across source commits. Toolchain, target,
+          # manifest and build-configuration changes warm distinct entries.
+          key: native-rust-v2-${{ runner.os }}-${{ runner.arch }}-${{ matrix.os }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.cargo/config*', 'mise.toml', '.github/workflows/ci.yml') }}
+          restore-keys: native-rust-v2-${{ runner.os }}-${{ runner.arch }}-${{ matrix.os }}-${{ hashFiles('rust-toolchain.toml') }}-
+      - name: Fetch locked Rust dependencies
+        run: mise run fetch
+      - name: Formatting, workflows, script checks, Clippy and native tests
         run: mise run check
-      - name: Install media tools
+      - name: Install macOS media tools
+        if: runner.os == 'macOS'
         run: mise run setup:media
-      - name: Verify real audio, metadata, and archives offline
+      - name: Offline media export and independent tag verification
         run: mise run test:media
+      - name: Save complete native Rust cache
+        # Do not preserve an incomplete immutable entry after any gate fails.
+        if: ${{ success() && steps.rust-cache.outputs.cache-hit != 'true' && steps.rust-cache.outputs.cache-primary-key != '' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+            target/debug/.fingerprint
+            target/debug/build
+            target/debug/deps
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
 
   security:
-    name: Dependency and secret checks
+    name: Rust dependencies and secret checks
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -107,8 +100,6 @@ jobs:
         id: tools
         with:
           version: 2026.9.12
-      - name: Audit JavaScript dependencies
-        run: mise exec -- npm audit --package-lock-only
       - name: Restore Rust dependency auditor
         if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -132,189 +123,9 @@ jobs:
         with:
           path: ${{ runner.tool_cache }}/jacket-cargo-audit
           key: ${{ steps.audit-cache.outputs.cache-primary-key }}
-      # Review audit findings with the release checklist in docs/releasing.md;
-      # do not suppress vulnerability advisories or equate headless checks with desktop acceptance.
-      - name: Audit Rust dependencies
+      - name: Audit the native Rust dependency graph
         if: ${{ !cancelled() && steps.audit-tool.outcome == 'success' }}
         run: mise exec -- cargo audit
       - name: Scan Git history for secrets
         if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
         run: mise exec gitleaks@8.24.3 -- gitleaks git --redact --no-banner
-
-  linux:
-    name: Linux x86_64 quality and packages
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    env:
-      CARGO_BUILD_JOBS: 2
-      CARGO_INCREMENTAL: 0
-      CARGO_HTTP_MULTIPLEXING: "false"
-      CARGO_NET_RETRY: 5
-      CARGO_PROFILE_DEV_DEBUG: 0
-      CARGO_PROFILE_TEST_DEBUG: 0
-      AUDIO_DL_TEST_RESOURCES: ${{ github.workspace }}/src-tauri/resources/linux
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ inputs.ref || github.sha }}
-      - name: Install native build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential curl wget file libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev pkg-config nasm autoconf automake libtool rpm desktop-file-utils
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
-        with:
-          version: 2026.9.12
-      - name: Cache frontend downloads
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.npm
-          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'package-lock.json') }}
-          restore-keys: npm-${{ runner.os }}-${{ runner.arch }}-
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: runtime-cache
-        with:
-          path: |
-            target/linux-runtime-downloads
-            src-tauri/resources/linux/audio-tools
-            target/linux-preview/jacket-linux-runtime-sources.tar.gz
-            target/linux-preview/jacket-linux-runtime-sources.tar.gz.sha256
-          key: linux-runtime-v2-${{ hashFiles('scripts/linux-runtime.lock.json', 'scripts/stage-linux-tools.py', 'docs/linux-preview.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md') }}
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: rust-cache
-        with:
-          path: |
-            ~/.cargo/registry/cache
-            ~/.cargo/registry/index
-            ~/.cargo/git/db
-            target/debug/.fingerprint
-            target/debug/build
-            target/debug/deps
-            target/release/.fingerprint
-            target/release/build
-            target/release/deps
-          key: rust-v2-${{ runner.os }}-${{ runner.arch }}-ubuntu-24.04-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml', 'vendor/**', '.cargo/config*', 'mise.toml', '.github/workflows/ci.yml') }}
-          restore-keys: rust-v2-${{ runner.os }}-${{ runner.arch }}-ubuntu-24.04-${{ hashFiles('rust-toolchain.toml') }}-
-      - name: Fetch locked Rust dependencies before compiling
-        run: mise exec -- cargo fetch --locked
-      - name: Build and verify the pinned audio runtime and source companion
-        id: stage-runtime
-        run: |
-          mise run tools:stage:linux
-          echo "$GITHUB_WORKSPACE/src-tauri/resources/linux/audio-tools/bin" >> "$GITHUB_PATH"
-      - name: Run Linux formatting, lint, build and unit tests
-        run: mise run check
-      - name: Verify real audio using the staged Linux runtime
-        run: mise run test:media
-      - name: Exercise the GLib safety backport with optimizations
-        run: mise exec -- cargo test --locked --release -p audio-dl-desktop --test glib_variant
-      - name: Build DEB and RPM preview installers
-        run: mise run package:linux
-      - name: Collect packages, exact sources and checksums
-        run: mise exec -- python scripts/collect-linux-preview.py
-      - name: Prepare verified installers for distribution tests
-        id: installers
-        run: |
-          if [ -f scripts/prepare-linux-installers.py ]; then
-            mise exec -- python scripts/prepare-linux-installers.py
-            echo 'path=target/linux-installers' >> "$GITHUB_OUTPUT"
-          else
-            # Older draft commits retain their original full, verified artifact.
-            echo 'path=target/linux-preview' >> "$GITHUB_OUTPUT"
-          fi
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: linux-installers-x86_64
-          path: ${{ steps.installers.outputs.path }}
-          if-no-files-found: error
-          retention-days: 7
-          compression-level: 0
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: linux-preview-x86_64
-          path: target/linux-preview/
-          if-no-files-found: error
-          retention-days: 14
-          compression-level: 0
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: failure()
-        with:
-          name: linux-runtime-diagnostics
-          path: |
-            src-tauri/resources/linux/audio-tools/
-            target/linux-preview/jacket-linux-runtime-sources.tar.gz
-          if-no-files-found: warn
-          retention-days: 7
-          compression-level: 0
-      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: ${{ !cancelled() && steps.stage-runtime.outcome == 'success' && steps.runtime-cache.outputs.cache-hit != 'true' && steps.runtime-cache.outputs.cache-primary-key != '' }}
-        with:
-          path: |
-            target/linux-runtime-downloads
-            src-tauri/resources/linux/audio-tools
-            target/linux-preview/jacket-linux-runtime-sources.tar.gz
-            target/linux-preview/jacket-linux-runtime-sources.tar.gz.sha256
-          key: ${{ steps.runtime-cache.outputs.cache-primary-key }}
-      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        # An immutable cache must include every successful compile phase,
-        # including the optimized regression and native package build.
-        if: ${{ success() && steps.rust-cache.outputs.cache-hit != 'true' && steps.rust-cache.outputs.cache-primary-key != '' }}
-        with:
-          path: |
-            ~/.cargo/registry/cache
-            ~/.cargo/registry/index
-            ~/.cargo/git/db
-            target/debug/.fingerprint
-            target/debug/build
-            target/debug/deps
-            target/release/.fingerprint
-            target/release/build
-            target/release/deps
-          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
-
-  linux-install:
-    name: Install Linux preview (${{ matrix.label }})
-    needs: linux
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - label: ubuntu-24.04
-            image: ubuntu:24.04
-          - label: debian-13
-            image: debian:13
-          - label: fedora-44
-            image: fedora:44
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ inputs.ref || github.sha }}
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: linux-installers-x86_64
-          path: preview-packages
-      - name: Verify artifact checksums
-        working-directory: preview-packages
-        run: sha256sum -c SHA256SUMS
-      - name: Install, launch, reinstall and remove the real package
-        env:
-          PREVIEW_IMAGE: ${{ matrix.image }}
-          PREVIEW_LABEL: ${{ matrix.label }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/linux-evidence"
-          docker run --rm --platform linux/amd64 \
-            -v "$GITHUB_WORKSPACE:/workspace:ro" \
-            -v "$GITHUB_WORKSPACE/preview-packages:/packages:ro" \
-            -v "$RUNNER_TEMP/linux-evidence:/evidence" \
-            -e PREVIEW_LABEL \
-            "$PREVIEW_IMAGE" bash /workspace/scripts/test-linux-package.sh
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: linux-evidence-${{ matrix.label }}
-          path: ${{ runner.temp }}/linux-evidence/
-          if-no-files-found: warn
-          retention-days: 14

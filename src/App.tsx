@@ -18,6 +18,7 @@ import {
   IconEdit,
   IconFolder,
   IconLoader2,
+  IconMusic,
   IconPlus,
   IconRotateClockwise,
   IconSearch,
@@ -32,6 +33,7 @@ import {
   SourceErrorMessage,
 } from './components/DownloadFeedback';
 import { ExportPreviewDialog } from './components/ExportPreviewDialog';
+import { SongDetails } from './components/SongDetails';
 import { SourceField } from './components/SourceField';
 import {
   type Dialog,
@@ -45,7 +47,7 @@ import {
   revealArchive,
 } from './desktop';
 import { formatDuration, type Track } from './domain';
-import { example } from './example';
+import { example, songExample } from './example';
 import { archiveDirectory, archiveFilename } from './preferences';
 import { useDesktopShell } from './useDesktopShell';
 import { useWorkspace, type Workspace } from './useWorkspace';
@@ -90,12 +92,17 @@ export default function App() {
   const inspection = w.inspection;
   const reviewReady = w.inspectionStatus === 'complete';
   const p = w.preferences;
+  const isSong =
+    reviewReady && p.mode === 'collection' && inspection?.tracks.length === 1;
+  const contentName =
+    p.mode === 'album' ? 'album' : isSong ? 'song' : 'playlist';
   const progress = w.progress;
   const success = progress?.stage === 'complete' ? progress.result : null;
   const exportNotes = [...new Set(success?.warnings ?? [])];
   const retry = ['failed', 'cancelled', 'interrupted'].includes(
     progress?.stage || '',
   );
+  const validOutput = p.outputKind !== 'file' || w.chosen.length === 1;
   const canExport =
     desktopAvailable &&
     !w.exampleMode &&
@@ -103,6 +110,7 @@ export default function App() {
     w.eventsReady &&
     w.draftReady &&
     !!w.chosen.length &&
+    validOutput &&
     !!p.title.trim() &&
     reviewReady &&
     !w.busy;
@@ -125,8 +133,9 @@ export default function App() {
         .filter(Boolean),
     ),
   ];
-  const displayArtist =
-    p.mode === 'album' && p.albumArtist.trim()
+  const displayArtist = isSong
+    ? inspection.tracks[0].metadata.artist.trim() || null
+    : p.mode === 'album' && p.albumArtist.trim()
       ? p.albumArtist
       : artistNames.length === 1
         ? artistNames[0]
@@ -299,20 +308,6 @@ export default function App() {
               Browser preview
             </Text>
           )}
-          {!inspection &&
-            (!desktopAvailable ||
-              import.meta.env.DEV ||
-              import.meta.env.VITE_UI_PREVIEW === '1') && (
-              <Button
-                variant="subtle"
-                color="gray"
-                size="xs"
-                onClick={() => w.loadInspection(example, true)}
-                disabled={w.busy}
-              >
-                Try example
-              </Button>
-            )}
           {w.exampleMode && (
             <span className="example-tag">Example · downloads disabled</span>
           )}
@@ -349,9 +344,13 @@ export default function App() {
           <section className="start-panel">
             <div className="start-introduction">
               <Text className="start-eyebrow">FROM LINK TO NEATLY PACKED</Text>
-              <Title order={1}>Download an album or playlist.</Title>
+              <Title order={1}>
+                A song or a whole album.
+                <br />
+                Ready for your library.
+              </Title>
               <Text c="dimmed">
-                Tagged audio and artwork, ready for your library.
+                Start with a link. Keep the details. Take your music along.
               </Text>
             </div>
             <SourceField
@@ -366,7 +365,7 @@ export default function App() {
               <Text size="xs" c="dimmed">
                 {w.browser
                   ? 'Using your browser session'
-                  : 'Public playlists need no setup'}
+                  : 'Public links need no setup'}
               </Text>
               <button
                 type="button"
@@ -376,6 +375,44 @@ export default function App() {
                 {w.browser ? 'Session settings' : 'Need private access?'}
               </button>
             </div>
+            {(!desktopAvailable ||
+              import.meta.env.DEV ||
+              import.meta.env.VITE_UI_PREVIEW === '1') && (
+              <section
+                className="example-choices"
+                aria-label="Explore with example music"
+              >
+                <Text size="xs" c="dimmed">
+                  Take a look around
+                </Text>
+                <div className="example-buttons">
+                  <button
+                    type="button"
+                    disabled={w.busy}
+                    onClick={() => w.loadInspection(songExample, true)}
+                  >
+                    <IconMusic size={20} stroke={1.5} aria-hidden="true" />
+                    <span>
+                      <strong>Try a song</strong>
+                      <small>One recording, all its details</small>
+                    </span>
+                    <IconArrowRight size={16} aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={w.busy}
+                    onClick={() => w.loadInspection(example, true)}
+                  >
+                    <IconVinyl size={20} stroke={1.5} aria-hidden="true" />
+                    <span>
+                      <strong>Explore an album</strong>
+                      <small>A collection, carefully ordered</small>
+                    </span>
+                    <IconArrowRight size={16} aria-hidden="true" />
+                  </button>
+                </div>
+              </section>
+            )}
             <ReviewUndo workspace={w} undo={undoNewDownload} />
             {w.loading && (
               <div className="inspection-status" role="status">
@@ -512,10 +549,10 @@ export default function App() {
                     h="100%"
                     fit="cover"
                     onError={() => setFailedCover(cover)}
-                    alt={
-                      p.mode === 'album' ? 'Album artwork' : 'Playlist artwork'
-                    }
+                    alt={`${contentName === 'song' ? 'Song' : p.mode === 'album' ? 'Album' : 'Playlist'} artwork`}
                   />
+                ) : isSong ? (
+                  <IconMusic size={48} stroke={1} />
                 ) : (
                   <IconVinyl size={48} stroke={1} />
                 )}
@@ -527,12 +564,14 @@ export default function App() {
               </button>
               <div className="collection-copy">
                 <Text className="collection-type">
-                  {p.mode === 'album' ? 'ALBUM' : 'PLAYLIST'}
+                  {contentName.toUpperCase()}
                 </Text>
                 <Title order={1} ref={heading} tabIndex={-1}>
-                  {p.mode === 'album'
-                    ? p.albumTitle || inspection.title
-                    : p.title || inspection.title}
+                  {isSong
+                    ? inspection.tracks[0].metadata.title
+                    : p.mode === 'album'
+                      ? p.albumTitle || inspection.title
+                      : p.title || inspection.title}
                 </Title>
                 <Text size="sm" c="dimmed">
                   {displayArtist && (
@@ -554,26 +593,32 @@ export default function App() {
                   ) : (
                     <>
                       <span className="meta-separator">·</span>
-                      {listeningTime(
-                        inspection.tracks.reduce(
-                          (sum, track) => sum + (track.duration ?? 0),
-                          0,
-                        ),
-                      )}
+                      {isSong
+                        ? formatDuration(inspection.tracks[0].duration)
+                        : listeningTime(
+                            inspection.tracks.reduce(
+                              (sum, track) => sum + (track.duration ?? 0),
+                              0,
+                            ),
+                          )}
                     </>
                   )}
                 </Text>
               </div>
-              <Button
-                variant="default"
-                size="xs"
-                leftSection={<IconEdit size={14} />}
-                disabled={w.busy || !reviewReady || !!success}
-                onClick={(event) => openDialog('details', event.currentTarget)}
-                className="details-button"
-              >
-                {p.mode === 'album' ? 'Edit album details' : 'Edit details'}
-              </Button>
+              {!isSong && (
+                <Button
+                  variant="default"
+                  size="xs"
+                  leftSection={<IconEdit size={14} />}
+                  disabled={w.busy || !reviewReady || !!success}
+                  onClick={(event) =>
+                    openDialog('details', event.currentTarget)
+                  }
+                  className="details-button"
+                >
+                  {p.mode === 'album' ? 'Edit album details' : 'Edit details'}
+                </Button>
+              )}
             </section>
             {reviewReady && unavailableNotes.length > 0 && (
               <Alert
@@ -622,156 +667,171 @@ export default function App() {
                 session={(trigger) => openDialog('settings', trigger)}
               />
             )}
-            <section className="track-section" aria-label="Playlist tracks">
-              <div className="track-toolbar">
-                <Group gap={14}>
-                  <Checkbox
-                    aria-label={`Select all ${inspection.tracks.length} tracks`}
-                    checked={w.selected.size === inspection.tracks.length}
-                    indeterminate={
-                      w.selected.size > 0 &&
-                      w.selected.size < inspection.tracks.length
-                    }
-                    disabled={w.busy || !reviewReady || !!success}
-                    onChange={() =>
-                      w.setSelected(
-                        w.selected.size === inspection.tracks.length
-                          ? new Set()
-                          : new Set(inspection.tracks.map((_, index) => index)),
-                      )
-                    }
-                  />
-                  <Text size="xs" fw={500} c="dimmed">
-                    {!reviewReady
-                      ? `${inspection.tracks.length} ${inspection.tracks.length === 1 ? 'track' : 'tracks'} found so far`
-                      : w.selected.size === inspection.tracks.length
-                        ? 'All tracks selected'
-                        : `${w.selected.size} of ${inspection.tracks.length} selected`}
-                  </Text>
-                  {reviewReady && !success && (
-                    <Button
-                      size="compact-xs"
-                      variant="subtle"
-                      color="gray"
-                      disabled={w.busy || w.selected.size === 0}
-                      onClick={(event) =>
-                        openDialog('bulk', event.currentTarget)
-                      }
-                    >
-                      Edit selected tracks
-                    </Button>
-                  )}
-                  {reviewReady && w.bulkUndo && !success && (
-                    <button
-                      type="button"
-                      className="text-action"
-                      disabled={w.busy}
-                      onClick={w.undoBulk}
-                    >
-                      Undo edits
-                    </button>
-                  )}
-                </Group>
-                {inspection.tracks.length > 8 && (
-                  <TextInput
-                    placeholder="Find a track"
-                    aria-label="Find a track"
-                    leftSection={<IconSearch size={15} />}
-                    value={query}
-                    onChange={(event) => setQuery(event.currentTarget.value)}
-                    rightSection={
-                      query ? (
-                        <ActionIcon
-                          variant="subtle"
-                          color="gray"
-                          size="sm"
-                          aria-label="Clear search"
-                          onClick={() => setQuery('')}
-                        >
-                          <IconX size={12} />
-                        </ActionIcon>
-                      ) : null
-                    }
-                    variant="unstyled"
-                    size="xs"
-                    className="track-search"
-                  />
-                )}
-              </div>
-              <ol className="track-list">
-                {visibleTracks.map(({ track, index }) => (
-                  <li
-                    key={`${track.id}-${index}`}
-                    className={`track-row ${w.selected.has(index) ? '' : 'is-unselected'}`}
-                  >
+            {isSong ? (
+              <SongDetails
+                track={inspection.tracks[0]}
+                included={w.selected.has(0)}
+                disabled={w.busy || !!success}
+                edit={(trigger) => {
+                  editorTrigger.current = trigger;
+                  setEditing({ index: 0, track: inspection.tracks[0] });
+                }}
+                include={() => w.toggle(0)}
+              />
+            ) : (
+              <section className="track-section" aria-label="Collection tracks">
+                <div className="track-toolbar">
+                  <Group gap={14}>
                     <Checkbox
-                      aria-label={`Select ${track.metadata.title}`}
-                      checked={w.selected.has(index)}
-                      disabled={w.busy || !reviewReady || !!success}
-                      onChange={() => w.toggle(index)}
-                    />
-                    <span
-                      className="track-number"
-                      title={
-                        p.mode === 'album'
-                          ? 'Album track number'
-                          : 'Playlist position'
+                      aria-label={`Select all ${inspection.tracks.length} tracks`}
+                      checked={w.selected.size === inspection.tracks.length}
+                      indeterminate={
+                        w.selected.size > 0 &&
+                        w.selected.size < inspection.tracks.length
                       }
-                    >
-                      {p.mode === 'album'
-                        ? track.metadata.trackNumber === null
-                          ? '—'
-                          : `${track.metadata.discNumber && track.metadata.discNumber > 1 ? `${track.metadata.discNumber}.` : ''}${String(track.metadata.trackNumber).padStart(2, '0')}`
-                        : String(index + 1).padStart(2, '0')}
-                    </span>
-                    <div className="track-copy">
-                      <Text size="sm" fw={500} lineClamp={1}>
-                        {track.metadata.title}
-                      </Text>
-                      <Text size="xs" c="dimmed" lineClamp={1}>
-                        {track.metadata.artist || 'Add track artist'}
-                        {track.metadata.album && p.mode === 'collection'
-                          ? ` · ${track.metadata.album}`
-                          : ''}
-                      </Text>
-                    </div>
-                    <Text size="xs" c="dimmed" className="track-duration">
-                      {formatDuration(track.duration)}
+                      disabled={w.busy || !reviewReady || !!success}
+                      onChange={() =>
+                        w.setSelected(
+                          w.selected.size === inspection.tracks.length
+                            ? new Set()
+                            : new Set(
+                                inspection.tracks.map((_, index) => index),
+                              ),
+                        )
+                      }
+                    />
+                    <Text size="xs" fw={500} c="dimmed">
+                      {!reviewReady
+                        ? `${inspection.tracks.length} ${inspection.tracks.length === 1 ? 'track' : 'tracks'} found so far`
+                        : w.selected.size === inspection.tracks.length
+                          ? 'All tracks selected'
+                          : `${w.selected.size} of ${inspection.tracks.length} selected`}
                     </Text>
-                    <Tooltip label="Edit metadata">
-                      <ActionIcon
-                        className="track-edit"
+                    {reviewReady && !success && (
+                      <Button
+                        size="compact-xs"
                         variant="subtle"
                         color="gray"
-                        size="md"
-                        aria-label={`Edit ${track.metadata.title}`}
-                        disabled={w.busy || !reviewReady || !!success}
-                        onClick={(event) => {
-                          editorTrigger.current = event.currentTarget;
-                          setEditing({ index, track });
-                        }}
+                        disabled={w.busy || w.selected.size === 0}
+                        onClick={(event) =>
+                          openDialog('bulk', event.currentTarget)
+                        }
                       >
-                        <IconEdit size={16} stroke={1.6} />
-                      </ActionIcon>
-                    </Tooltip>
-                  </li>
-                ))}
-                {!visibleTracks.length && (
-                  <li className="no-results">
-                    <Text size="sm" c="dimmed">
-                      No tracks match “{query}”.
-                    </Text>
-                    <Button
-                      variant="subtle"
+                        Edit selected tracks
+                      </Button>
+                    )}
+                    {reviewReady && w.bulkUndo && !success && (
+                      <button
+                        type="button"
+                        className="text-action"
+                        disabled={w.busy}
+                        onClick={w.undoBulk}
+                      >
+                        Undo edits
+                      </button>
+                    )}
+                  </Group>
+                  {inspection.tracks.length > 8 && (
+                    <TextInput
+                      placeholder="Find a track"
+                      aria-label="Find a track"
+                      leftSection={<IconSearch size={15} />}
+                      value={query}
+                      onChange={(event) => setQuery(event.currentTarget.value)}
+                      rightSection={
+                        query ? (
+                          <ActionIcon
+                            variant="subtle"
+                            color="gray"
+                            size="sm"
+                            aria-label="Clear search"
+                            onClick={() => setQuery('')}
+                          >
+                            <IconX size={12} />
+                          </ActionIcon>
+                        ) : null
+                      }
+                      variant="unstyled"
                       size="xs"
-                      onClick={() => setQuery('')}
+                      className="track-search"
+                    />
+                  )}
+                </div>
+                <ol className="track-list">
+                  {visibleTracks.map(({ track, index }) => (
+                    <li
+                      key={`${track.id}-${index}`}
+                      className={`track-row ${w.selected.has(index) ? '' : 'is-unselected'}`}
                     >
-                      Clear search
-                    </Button>
-                  </li>
-                )}
-              </ol>
-            </section>
+                      <Checkbox
+                        aria-label={`Select ${track.metadata.title}`}
+                        checked={w.selected.has(index)}
+                        disabled={w.busy || !reviewReady || !!success}
+                        onChange={() => w.toggle(index)}
+                      />
+                      <span
+                        className="track-number"
+                        title={
+                          p.mode === 'album'
+                            ? 'Album track number'
+                            : 'Playlist position'
+                        }
+                      >
+                        {p.mode === 'album'
+                          ? track.metadata.trackNumber === null
+                            ? '—'
+                            : `${track.metadata.discNumber && track.metadata.discNumber > 1 ? `${track.metadata.discNumber}.` : ''}${String(track.metadata.trackNumber).padStart(2, '0')}`
+                          : String(index + 1).padStart(2, '0')}
+                      </span>
+                      <div className="track-copy">
+                        <Text size="sm" fw={500} lineClamp={1}>
+                          {track.metadata.title}
+                        </Text>
+                        <Text size="xs" c="dimmed" lineClamp={1}>
+                          {track.metadata.artist || 'Add track artist'}
+                          {track.metadata.album && p.mode === 'collection'
+                            ? ` · ${track.metadata.album}`
+                            : ''}
+                        </Text>
+                      </div>
+                      <Text size="xs" c="dimmed" className="track-duration">
+                        {formatDuration(track.duration)}
+                      </Text>
+                      <Tooltip label="Edit metadata">
+                        <ActionIcon
+                          className="track-edit"
+                          variant="subtle"
+                          color="gray"
+                          size="md"
+                          aria-label={`Edit ${track.metadata.title}`}
+                          disabled={w.busy || !reviewReady || !!success}
+                          onClick={(event) => {
+                            editorTrigger.current = event.currentTarget;
+                            setEditing({ index, track });
+                          }}
+                        >
+                          <IconEdit size={16} stroke={1.6} />
+                        </ActionIcon>
+                      </Tooltip>
+                    </li>
+                  ))}
+                  {!visibleTracks.length && (
+                    <li className="no-results">
+                      <Text size="sm" c="dimmed">
+                        No tracks match “{query}”.
+                      </Text>
+                      <Button
+                        variant="subtle"
+                        size="xs"
+                        onClick={() => setQuery('')}
+                      >
+                        Clear search
+                      </Button>
+                    </li>
+                  )}
+                </ol>
+              </section>
+            )}
             <footer className="export-footer">
               {w.inspectionStatus !== 'complete' ? (
                 <InspectionFeedback workspace={w} />
@@ -783,9 +843,11 @@ export default function App() {
                     </span>
                     <div className="success-copy">
                       <Text fw={600} size="sm">
-                        {success.outputKind === 'folder'
-                          ? 'Your music folder is ready'
-                          : 'Your archive is ready'}
+                        {success.outputKind === 'file'
+                          ? 'Your song is ready'
+                          : success.outputKind === 'folder'
+                            ? 'Your music folder is ready'
+                            : 'Your archive is ready'}
                       </Text>
                       <Text size="xs" c="dimmed" className="output-path">
                         {success.outputPath}
@@ -841,8 +903,7 @@ export default function App() {
                       onClick={newPlaylist}
                       rightSection={<IconArrowRight size={14} />}
                     >
-                      Download another{' '}
-                      {p.mode === 'album' ? 'album' : 'playlist'}
+                      Download another {contentName}
                     </Button>
                     <button
                       type="button"
@@ -871,7 +932,7 @@ export default function App() {
                     <div className="export-summary">
                       <Text size="sm" fw={600}>
                         {w.selected.size
-                          ? `${w.selected.size} ${w.selected.size === 1 ? 'track' : 'tracks'}${totalDuration ? ` · ${listeningTime(totalDuration)}` : ''}`
+                          ? `${w.selected.size} ${w.selected.size === 1 ? 'track' : 'tracks'}${totalDuration ? ` · ${isSong ? formatDuration(totalDuration) : listeningTime(totalDuration)}` : ''}`
                           : 'Select tracks to download'}
                       </Text>
                       <button
@@ -885,9 +946,11 @@ export default function App() {
                       >
                         <span>
                           {w.savePath?.split(/[\\/]/).pop() ||
-                            (p.outputKind === 'folder'
-                              ? `${p.title}/`
-                              : archiveFilename(p.title))}
+                            (p.outputKind === 'file'
+                              ? p.title
+                              : p.outputKind === 'folder'
+                                ? `${p.title}/`
+                                : archiveFilename(p.title))}
                         </span>
                         <IconEdit size={14} aria-hidden="true" />
                       </button>
@@ -907,13 +970,17 @@ export default function App() {
                         <span className="export-options-summary">
                           {formatNames[p.format]} ·{' '}
                           {artworkNames[p.artworkMode]} ·{' '}
-                          {p.outputKind === 'folder' ? 'Folder' : 'ZIP'}
+                          {p.outputKind === 'file'
+                            ? 'Audio file'
+                            : p.outputKind === 'folder'
+                              ? 'Folder'
+                              : 'ZIP'}
                         </span>
                       </button>
                       <button
                         type="button"
                         className="text-action preview-files"
-                        disabled={w.busy || !w.chosen.length}
+                        disabled={w.busy || !w.chosen.length || !validOutput}
                         onClick={(event) =>
                           openDialog('preview', event.currentTarget)
                         }
@@ -950,18 +1017,20 @@ export default function App() {
                         <Tooltip
                           label={
                             w.exampleMode || !desktopAvailable
-                              ? 'Open an album or playlist in the desktop app to download'
+                              ? 'Open a song, album, or playlist in the desktop app to download'
                               : !w.toolsReady
                                 ? 'Check the audio tools in Settings'
                                 : !w.eventsReady
                                   ? 'Connecting to the audio tools…'
                                   : !w.draftReady
                                     ? 'Restoring unfinished work…'
-                                    : w.selected.size === 0
-                                      ? 'Select at least one track'
-                                      : !p.title.trim()
-                                        ? `Add a collection name in ${p.mode === 'album' ? 'Edit album details' : 'Edit details'}`
-                                        : `${mac ? '⌘' : 'Ctrl'} + Enter`
+                                    : !validOutput
+                                      ? 'Select one track for an audio file, or choose Music folder or ZIP in Download options'
+                                      : w.selected.size === 0
+                                        ? 'Select at least one track'
+                                        : !p.title.trim()
+                                          ? `Add a collection name in ${p.mode === 'album' ? 'Edit album details' : 'Edit details'}`
+                                          : `${mac ? '⌘' : 'Ctrl'} + Enter`
                           }
                           events={{ hover: true, focus: true, touch: false }}
                         >
@@ -982,22 +1051,31 @@ export default function App() {
                                 ? 'Resume download'
                                 : retry
                                   ? 'Retry download'
-                                  : p.outputKind === 'folder'
-                                    ? `Save ${p.mode === 'album' ? 'album' : 'playlist'}…`
-                                    : p.mode === 'album'
-                                      ? 'Download album…'
-                                      : 'Download playlist…'}
+                                  : p.outputKind === 'file'
+                                    ? 'Save song…'
+                                    : p.outputKind === 'folder'
+                                      ? `Save ${contentName}…`
+                                      : `Download ${contentName}…`}
                             </Button>
                           </span>
                         </Tooltip>
                       )}
                     </div>
                   </div>
+                  {!w.exporting && !validOutput && (
+                    <Text size="xs" c="dimmed" role="status" mt={8}>
+                      Audio file saves one selected track. Select one track, or
+                      choose Music folder or ZIP in Download options.
+                    </Text>
+                  )}
                   {!w.exporting && missingArtists > 0 && (
                     <Text className="tag-reminder" size="xs" c="dimmed">
                       {missingArtists} selected{' '}
                       {missingArtists === 1 ? 'track has' : 'tracks have'} no
-                      artist tag. Use the pencil beside a track to add one.
+                      artist tag.{' '}
+                      {isSong
+                        ? 'Choose Edit song details to add one.'
+                        : 'Use the pencil beside a track to add one.'}
                     </Text>
                   )}
                   {!w.exporting && sourceNotes.length > 0 && (
@@ -1064,6 +1142,7 @@ export default function App() {
               ? { title: p.albumTitle, artist: p.albumArtist, year: p.year }
               : null
           }
+          singleSong={isSong}
           hasNext={editing.index < (inspection?.tracks.length ?? 0) - 1}
           close={closeEditor}
           openAlbumDetails={(track) => {

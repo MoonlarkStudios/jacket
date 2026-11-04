@@ -1,3 +1,5 @@
+> **Legacy implementation reference.** This document describes the retained React/Tauri app. For the Rust and iced branch, use the [current README](../README.md) and [native port guide](native-port.md). Old installer and acceptance results do not qualify the native app.
+
 # Release checklist
 
 Use this checklist for the exact commit and artifacts being published. Record commands, platform/browser versions, results, and artifact hashes in the release PR or CI artifacts. Historical test counts and developer-machine results do not establish acceptance of a new build.

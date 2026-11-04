@@ -1,25 +1,43 @@
 [settings]
-# Keep Rust's version and components in rust-toolchain.toml for editor support.
+# Keep the compiler/components in rust-toolchain.toml for editor support.
 idiomatic_version_file_enable_tools = ["rust"]
-# Preserve the Homebrew distributions used by the macOS runtime bundler, even
-# if a developer's global mise config selects standalone media tools.
 disable_tools = ["ffmpeg", "yt-dlp"]
 
 [tools]
+# Node is yt-dlp's JavaScript runtime. Native app development does not use npm.
 node = "24.21.0"
 python = "3.13.16"
 uv = "0.9.28"
+actionlint = "1.7.12"
+shellcheck = "0.11.0"
+
+[env]
+MACOSX_DEPLOYMENT_TARGET = "26.0"
 
 [tasks.setup]
-description = "Install project dependencies and check the development environment"
-depends = ["setup:node", "setup:tags", "setup:media"]
-run = "python scripts/check-dev-environment.py"
+description = "Fetch locked native dependencies and check audio tools"
+depends = ["fetch", "setup:media"]
+run = "python scripts/native_doctor.py"
 
-[tasks."setup:node"]
-description = "Install frontend dependencies from package-lock.json"
-sources = ["package.json", "package-lock.json"]
-outputs = ["node_modules/.package-lock.json"]
-run = "npm ci"
+[tasks.fetch]
+description = "Fetch native dependencies without changing Cargo.lock"
+run = "cargo fetch --locked"
+
+[tasks."setup:media"]
+description = "Install missing macOS audio tools, or check Linux tools"
+run = '''
+if [ "$(uname -s)" = Darwin ]; then
+  command -v brew >/dev/null || { echo 'Install Homebrew before running setup:media.' >&2; exit 1; }
+  for formula in ffmpeg yt-dlp; do
+    brew list --versions "$formula" >/dev/null 2>&1 || brew install "$formula"
+  done
+else
+  command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null && command -v yt-dlp >/dev/null || {
+    echo 'Install ffmpeg (including ffprobe) and yt-dlp with your platform package manager.' >&2
+    exit 1
+  }
+fi
+'''
 
 [tasks."setup:tags"]
 description = "Prepare the independent Python media tag reader"
@@ -28,173 +46,124 @@ run = [
   "uv pip sync --python .venv-tags/bin/python crates/audio-engine/tests/requirements.txt",
 ]
 
-[tasks."setup:media"]
-description = "Install macOS media dependencies through Homebrew when missing"
-run = '''
-if [ "$(uname -s)" = Darwin ]; then
-  command -v brew >/dev/null || { echo 'Install Homebrew, then run mise run setup again.' >&2; exit 1; }
-  for formula in ffmpeg yt-dlp; do
-    brew list --versions "$formula" >/dev/null 2>&1 || brew install "$formula"
-  done
-else
-  command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null && command -v yt-dlp >/dev/null || {
-    echo 'Install ffmpeg (including ffprobe) and yt-dlp with your platform package manager, then rerun mise run setup.' >&2
-    exit 1
-  }
-fi
-'''
-
 [tasks.doctor]
-description = "Check selected runtimes, media tools, and native build prerequisites"
-run = "python scripts/check-dev-environment.py"
+description = "Check native development prerequisites and audio tools"
+run = "python scripts/native_doctor.py"
 
 [tasks.dev]
-description = "Start the browser UI preview"
-depends = ["setup:node"]
-run = "npm exec -- vite --host 127.0.0.1"
+description = "Launch Jacket's native iced app"
+run = "cargo run --locked -p jacket-iced --bin jacket"
 
 [tasks.desktop]
-description = "Start the native Tauri application"
-depends = ["setup:node", "doctor"]
-run = "npm exec -- tauri dev"
+description = "Launch Jacket's native iced app"
+run = "cargo run --locked -p jacket-iced --bin jacket"
 
-[tasks.typecheck]
-description = "Check frontend TypeScript"
-depends = ["setup:node"]
-run = "npm exec -- tsc --noEmit"
+[tasks.example]
+description = "Explore the native interface with fictional tracks"
+run = "cargo run --locked -p jacket-iced --bin jacket -- --example"
 
 [tasks.build]
-description = "Typecheck and build the frontend"
-depends = ["typecheck"]
-run = "npm exec -- vite build"
+description = "Build the optimized native executable"
+run = "cargo build --locked --release -p jacket-iced --bin jacket"
 
-[tasks.preview]
-description = "Preview the built frontend"
-depends = ["build"]
-run = "npm exec -- vite preview --host 127.0.0.1"
+[tasks."check:workspace"]
+description = "Compile-check every native workspace crate"
+run = "cargo check --locked --workspace --all-targets"
 
-[tasks.test]
-description = "Run frontend, Rust, resource-staging, and synthetic session unit tests"
-depends = ["test:frontend", "test:rust", "test:bundling", "test:auth", "test:release"]
+[tasks."check:fmt"]
+description = "Check Rust formatting without changing sources"
+run = "cargo fmt --all -- --check"
 
-[tasks."test:frontend"]
-description = "Run frontend and authentication prototype unit tests"
-depends = ["setup:node"]
-run = "node --test tests/*.test.mjs"
-
-[tasks."test:rust"]
-description = "Run Rust workspace tests"
-run = "cargo test --locked --workspace"
-
-[tasks."test:bundling"]
-description = "Run native resource-staging regression tests"
-run = ["python scripts/test-tool-bundling.py", "python scripts/test-linux-bundling.py", "python scripts/test-linux-installers.py"]
-
-[tasks."test:auth"]
-description = "Test synthetic session capture without accessing browser data"
-run = "python -m unittest discover -s tests -p 'test_*.py'"
-
-[tasks."test:media"]
-description = "Run all media integration tests with FFmpeg and Mutagen"
-depends = ["setup:tags", "doctor"]
-env = { AUDIO_DL_TAG_READER_PYTHON = "{{ config_root }}/.venv-tags/bin/python" }
-run = "cargo test --locked -p audio-engine --test media_pipeline -- --include-ignored"
-
-[tasks.lint]
-description = "Lint TypeScript/React/CSS and the Rust workspace"
-depends = ["lint:ts", "lint:rust"]
+[tasks."check:ci"]
+description = "Validate GitHub Actions workflows"
+run = "actionlint .github/workflows/*.yml"
 
 [tasks."lint:ci"]
 description = "Validate GitHub Actions workflows and their embedded shell scripts"
-tools = { actionlint = "1.7.12", shellcheck = "0.11.0" }
-run = "actionlint"
+depends = ["check:ci"]
 
-[tasks."lint:ts"]
-description = "Run Biome's recommended rules and import-order checks"
-depends = ["setup:node"]
-run = "npm exec -- biome check . --formatter-enabled=false --error-on-warnings"
+[tasks."check:scripts"]
+description = "Verify native packaging, dependency boundaries and tool checks"
+run = "python scripts/native_tests.py"
 
-[tasks."lint:rust"]
-description = "Run Clippy on all workspace targets and reject warnings"
+[tasks.lint]
+description = "Lint all native workspace targets with warnings denied"
 run = "cargo clippy --locked --workspace --all-targets -- -D warnings"
 
-[tasks."lint:fix"]
-description = "Apply safe Biome fixes, organize imports, and format frontend files"
-depends = ["setup:node"]
-run = "npm exec -- biome check . --write --error-on-warnings"
+[tasks.test]
+description = "Run native application, recovery, review and engine tests"
+run = "cargo test --locked --workspace"
 
-[tasks.format]
-description = "Format frontend files and the Rust workspace"
-depends = ["format:ts", "format:rust"]
+[tasks."test:rust"]
+description = "Run native Rust workspace tests"
+run = "cargo test --locked --workspace"
 
-[tasks."format:ts"]
-description = "Format JavaScript, TypeScript, CSS, HTML and JSON with Biome"
-depends = ["setup:node"]
-run = "npm exec -- biome format . --write"
-
-[tasks."format:rust"]
-description = "Format every Rust crate with the pinned rustfmt"
-run = "cargo fmt --all"
-
-[tasks."format:check"]
-description = "Check formatting without modifying files"
-depends = ["format:ts:check", "format:rust:check"]
-
-[tasks."format:ts:check"]
-description = "Check Biome formatting without modifying files"
-depends = ["setup:node"]
-run = "npm exec -- biome ci . --linter-enabled=false --assist-enabled=false --error-on-warnings"
-
-[tasks."format:rust:check"]
-description = "Check Rust formatting without modifying files"
-run = "cargo fmt --all -- --check"
+[tasks."test:media"]
+description = "Exercise real FFmpeg, tags and exports without network access"
+depends = ["setup:tags"]
+env = { AUDIO_DL_TAG_READER_PYTHON = "{{ config_root }}/.venv-tags/bin/python" }
+run = "cargo test --locked -p audio-engine --test media_pipeline -- --include-ignored"
 
 [tasks.check]
-description = "Check formatting, lint both languages, build, and run unit tests"
-depends = ["format:check", "lint", "build", "test"]
+description = "Run workflow/script checks, formatting, Clippy and native tests"
+run = ["mise run check:ci", "mise run check:scripts", "mise run check:licenses", "mise run check:fmt", "mise run lint", "mise run test"]
 
-[tasks.tauri]
-description = "Run the Tauri CLI (arguments are forwarded)"
-depends = ["setup:node"]
-run = "npm exec -- tauri"
+[tasks.fmt]
+description = "Format the native Rust workspace"
+run = "cargo fmt --all"
+
+[tasks.format]
+description = "Format the native Rust workspace"
+run = "cargo fmt --all"
 
 [tasks."tools:stage"]
-description = "Stage the installed macOS audio runtime for packaging"
-depends = ["doctor"]
-run = "python scripts/stage-macos-tools.py"
-
-[tasks."branding:sync"]
-description = "Sync Jacket web artwork and generate native icon containers"
-depends = ["setup:node"]
-run = "python scripts/sync-branding.py"
-
-[tasks."tools:validate"]
-description = "Validate the staged macOS audio runtime"
-run = "python scripts/stage-macos-tools.py --validate src-tauri/resources/audio-tools"
-
-[tasks."package:mac"]
-description = "Build the macOS app with its bundled runtime"
-depends = ["setup:node", "doctor"]
-run = "npm exec -- tauri build --config src-tauri/tauri.bundle.macos.json --bundles app"
+description = "Stage and verify the complete macOS audio runtime"
+run = "python scripts/stage-macos-tools.py --destination target/native-runtime/audio-tools"
 
 [tasks."tools:stage:linux"]
-description = "Build and verify the pinned x86_64 Linux audio runtime and source companion"
+description = "Build the pinned Linux runtime and corresponding source archive"
 run = "python scripts/stage-linux-tools.py"
 
+[tasks."package:mac"]
+description = "Build an ad-hoc signed macOS native app candidate"
+depends = ["build", "tools:stage", "licenses:native"]
+run = "python scripts/native_package.py --platform macos --runtime target/native-runtime/audio-tools"
+
 [tasks."package:linux"]
-description = "Build x86_64 Linux preview DEB and RPM packages"
-depends = ["setup:node"]
-run = "python scripts/package-linux.py"
+description = "Build a Linux native portable candidate with bundled audio tools"
+depends = ["build", "tools:stage:linux", "licenses:native"]
+run = "python scripts/native_package.py --platform linux --runtime src-tauri/resources/linux/audio-tools"
 
-[tasks."licenses:linux"]
-description = "Collect Linux dependency notices and exact application dependency sources"
-depends = ["setup:node"]
-run = "python scripts/collect-linux-licenses.py"
+[tasks."legacy:setup"]
+description = "Install dependencies for the retained React comparison interface"
+run = "npm ci"
 
-[tasks."auth:prototype"]
-description = "Run the developer authentication probe (arguments are forwarded)"
-run = "node scripts/auth-prototype.mjs"
+[tasks."legacy:preview"]
+description = "Explore the retained browser comparison interface"
+depends = ["legacy:setup"]
+run = "npm exec -- vite --host 127.0.0.1"
 
-[tasks."test:release"]
-description = "Verify application versions and release integrity regressions"
-run = ["python scripts/check-release.py", "python scripts/test-release.py", "python scripts/test-published-release.py", "node --test tests/*release*.test.mjs"]
+[tasks."legacy:test"]
+description = "Run retained TypeScript behavior tests"
+depends = ["legacy:setup"]
+run = "node --test tests/*.test.mjs"
+
+[tasks."legacy:test:bundling"]
+description = "Test retained runtime staging and legacy installer verification helpers"
+run = ["python scripts/test-tool-bundling.py", "python scripts/test-linux-bundling.py", "python scripts/test-linux-installers.py"]
+
+[tasks.snapshot]
+description = "Capture the fictional native review and quit (requires a display)"
+run = "cargo run --locked -p jacket-iced --bin jacket -- --screenshot '{{ config_root }}/target/native-preview.png'"
+
+[tasks."qualify:ui"]
+description = "Capture 96 album, song, playlist, theme, size and edge-case views"
+run = ["cargo build --locked -p jacket-iced --bin jacket", "python scripts/native_snapshots.py"]
+
+[tasks."licenses:native"]
+description = "Collect exact native Cargo dependency sources and license notices"
+run = "python scripts/native_licenses.py"
+
+[tasks."check:licenses"]
+description = "Verify every resolved native dependency has an unchanged notice"
+run = "python scripts/native_licenses.py --check"

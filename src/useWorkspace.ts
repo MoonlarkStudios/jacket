@@ -5,6 +5,7 @@ import {
   cancelExport,
   cancelInspection,
   chooseArchive,
+  chooseAudioFile,
   chooseFolder,
   dependencyStatus,
   desktopAvailable,
@@ -35,6 +36,7 @@ import {
   readPreference,
   recoveryPreferences,
   updateAlbumPreferences,
+  updateSongPreferences,
   withAlbumTrackNumbers,
   writePreference,
 } from './preferences';
@@ -58,8 +60,16 @@ const defaults: ExportPreferences = {
   artworkMode: 'perTrack',
   sharedArtwork: null,
   sharedArtworkAsset: null,
-  outputKind: 'zip',
+  outputKind: 'folder',
 };
+
+function chooseDestination(preferences: ExportPreferences) {
+  if (preferences.outputKind === 'file')
+    return chooseAudioFile(preferences.title);
+  if (preferences.outputKind === 'folder')
+    return chooseFolder(preferences.title);
+  return chooseArchive(preferences.title);
+}
 
 interface ReviewSnapshot {
   url: string;
@@ -338,7 +348,7 @@ export function useWorkspace() {
       return;
     }
     setSavePath(null);
-    if (preferences.outputKind === 'folder') return;
+    if (preferences.outputKind !== 'zip') return;
     archiveDestination(preferences.title)
       .then((path) => {
         if (!disposed) setSavePath(path);
@@ -599,6 +609,7 @@ export function useWorkspace() {
       !inspection ||
       inspectionStatus !== 'complete' ||
       chosen.length === 0 ||
+      (preferences.outputKind === 'file' && chosen.length !== 1) ||
       !preferences.title.trim() ||
       busy ||
       resettingRef.current ||
@@ -624,9 +635,7 @@ export function useWorkspace() {
         retryOutput.current &&
         retryTitle.current === `${preferences.title}\0${preferences.outputKind}`
           ? retryOutput.current
-          : await (preferences.outputKind === 'folder'
-              ? chooseFolder(preferences.title)
-              : chooseArchive(preferences.title));
+          : await chooseDestination(preferences);
       if (!path) return;
       if (currentSnapshot.current !== snapshot)
         throw new Error(
@@ -730,6 +739,7 @@ export function useWorkspace() {
       exampleMode ||
       !inspection ||
       inspectionStatus !== 'complete' ||
+      (preferences.outputKind === 'file' && chosen.length !== 1) ||
       !preferences.title.trim()
     )
       return;
@@ -737,9 +747,7 @@ export function useWorkspace() {
     setChoosing(true);
     setError(null);
     try {
-      const path = await (preferences.outputKind === 'folder'
-        ? chooseFolder(preferences.title)
-        : chooseArchive(preferences.title));
+      const path = await chooseDestination(preferences);
       if (!path) return;
       setSavePath(path);
       retryOutput.current = path;
@@ -777,6 +785,10 @@ export function useWorkspace() {
   function updateTrack(index: number, track: Track) {
     userStarted.current = true;
     setBulkUndo(null);
+    if (inspection?.tracks.length === 1 && index === 0)
+      setPreferences((previous) =>
+        updateSongPreferences(previous, inspection.tracks[0], track),
+      );
     if (
       inspection?.tracks[index]?.metadata.trackNumber !==
       track.metadata.trackNumber

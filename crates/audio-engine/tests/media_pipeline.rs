@@ -658,6 +658,282 @@ fn archive_reuses_sources_preserves_repeats_and_records_original_metadata() {
 
 #[test]
 #[ignore = "Requires FFmpeg and Python with Mutagen"]
+fn standalone_song_folder_matches_preview_and_keeps_original_music_tags() {
+    let tools = tools();
+    let dir = tempfile::tempdir().unwrap();
+    let url = "https://music.youtube.com/watch?v=fixture&list=OLAK5uy_fixture";
+    let source_dir = dir
+        .path()
+        .join("sources")
+        .join(hex::encode(Sha256::digest(url.as_bytes())));
+    fs::create_dir_all(&source_dir).unwrap();
+    let source = source_dir.join("source.mp3");
+    make_audio(&tools, &source, "libmp3lame");
+    fs::write(
+        source_dir.join("receipt.json"),
+        serde_json::to_vec(&source).unwrap(),
+    )
+    .unwrap();
+    let original = tags();
+    let mut reviewed = original.clone();
+    reviewed.track_number = None;
+    reviewed.disc_number = None;
+    let plan = ExportPlan {
+        title: reviewed.title.clone(),
+        source_url: url.into(),
+        mode: CollectionMode::Collection,
+        format: AudioFormat::Mp3,
+        artwork_mode: ArtworkMode::None,
+        shared_artwork_url: None,
+        shared_artwork_asset: None,
+        shared_artwork_path: None,
+        output_kind: OutputKind::Folder,
+        auth: AuthOptions::default(),
+        tracks: vec![Track {
+            id: "fixture".into(),
+            source_url: url.into(),
+            uploader: String::new(),
+            duration: Some(0.25),
+            artwork_url: None,
+            source_metadata: original,
+            metadata: reviewed,
+        }],
+    };
+    let preview = preview_export(&plan).unwrap();
+    let destination = dir.path().join("Song");
+    let result = export_collection(
+        &tools,
+        &plan,
+        &destination,
+        dir.path(),
+        &Cancellation::default(),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(result.track_count, 1);
+    let filename = "Artist & Guest - Björk _ Live.mp3";
+    assert_eq!(preview.tracks[0].relative_path, filename);
+    assert!(destination.join(filename).is_file());
+    let physical = physical_tags(&destination.join(filename));
+    assert_eq!(physical["tags"]["TALB"][0], "An album");
+    assert!(physical["tags"].get("TRCK").is_none());
+    assert!(physical["tags"].get("TPOS").is_none());
+    assert_eq!(physical["tags"]["COMM"][0]["text"][0], url);
+    assert_eq!(
+        audio_payloads(&tools, &source),
+        audio_payloads(&tools, &destination.join(filename))
+    );
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(destination.join("manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest["sourceUrl"], url);
+    assert_eq!(manifest["tracks"][0]["sourceMetadata"]["trackNumber"], 7);
+    assert!(manifest["tracks"][0]["metadata"]["trackNumber"].is_null());
+    assert_eq!(manifest["tracks"][0]["relativePath"], filename);
+    assert!(fs::read_to_string(destination.join("playlist.m3u"))
+        .unwrap()
+        .contains(filename));
+}
+
+#[test]
+#[ignore = "Requires FFmpeg and Python with Mutagen"]
+fn single_audio_files_embed_tags_and_cover_without_sidecars_or_source_changes() {
+    let tools = tools();
+    let dir = tempfile::tempdir().unwrap();
+    for (extension, encoder, format) in [
+        ("mp3", "libmp3lame", AudioFormat::Mp3),
+        ("m4a", "aac", AudioFormat::Compatible),
+    ] {
+        let workdir = dir.path().join(extension);
+        let (mut plan, source, cover) = audio_file_fixture(&tools, &workdir, extension, encoder);
+        plan.format = format;
+        let source_hash = hash_file(&source).unwrap();
+        let receipt = source.parent().unwrap().join("receipt.json");
+        let receipt_bytes = fs::read(&receipt).unwrap();
+        let destination = workdir.join("output");
+        fs::create_dir(&destination).unwrap();
+        let output_stem = destination.join("Dr. Song");
+        let preview = preview_export(&plan).unwrap();
+        assert_eq!(preview.files.len(), 1);
+        assert!(preview.tracks[0].artwork_path.is_none());
+        assert_eq!(preview.tracks[0].extension_provisional, extension == "m4a");
+        let result = export_collection(
+            &tools,
+            &plan,
+            &output_stem,
+            &workdir,
+            &Cancellation::default(),
+            |_| {},
+        )
+        .unwrap();
+        let actual = destination.join(format!("Dr. Song.{extension}"));
+        assert_eq!(result.output_kind, OutputKind::File);
+        assert_eq!(result.output_path, actual.to_string_lossy());
+        assert_eq!(result.track_count, 1);
+        assert!(result.playlist_path.is_none());
+        assert!(result.warnings.is_empty());
+        assert_eq!(fs::read_dir(&destination).unwrap().count(), 1);
+        let physical = physical_tags(&actual);
+        for (key, expected) in if extension == "mp3" {
+            [
+                ("TIT2", "Björk / Live"),
+                ("TPE1", "Artist & Guest"),
+                ("TALB", "An album"),
+            ]
+        } else {
+            [
+                ("©nam", "Björk / Live"),
+                ("©ART", "Artist & Guest"),
+                ("©alb", "An album"),
+            ]
+        } {
+            assert_eq!(physical["tags"][key][0], expected);
+        }
+        assert_eq!(physical["pictures"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            physical["pictures"][0]["sha256"],
+            hash_file(&cover).unwrap()
+        );
+        assert_eq!(
+            audio_payloads(&tools, &source),
+            audio_payloads(&tools, &actual)
+        );
+        let original_output = fs::read(&actual).unwrap();
+        let cancelled = Cancellation::default();
+        let result =
+            export_collection(&tools, &plan, &output_stem, &workdir, &cancelled, |event| {
+                if event.stage == "packaging" {
+                    cancelled.cancel();
+                }
+            });
+        assert!(matches!(result, Err(EngineError::Cancelled)));
+        assert_eq!(fs::read_dir(&destination).unwrap().count(), 1);
+        assert_eq!(fs::read(&actual).unwrap(), original_output);
+        assert_eq!(hash_file(&source).unwrap(), source_hash);
+        assert_eq!(fs::read(&receipt).unwrap(), receipt_bytes);
+
+        // Missing artwork stays nonfatal, and a retry must not overwrite the
+        // complete file or reuse an earlier cover from preparation.
+        plan.shared_artwork_path = Some(workdir.join("missing-cover.jpg"));
+        let retry = export_collection(
+            &tools,
+            &plan,
+            &output_stem,
+            &workdir,
+            &Cancellation::default(),
+            |_| {},
+        )
+        .unwrap();
+        let numbered = destination.join(format!("Dr. Song (2).{extension}"));
+        assert_eq!(retry.output_path, numbered.to_string_lossy());
+        assert!(retry
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("Artwork unavailable")));
+        assert_eq!(fs::read_dir(&destination).unwrap().count(), 2);
+        assert_eq!(fs::read(&actual).unwrap(), original_output);
+        assert!(physical_tags(&numbered)["pictures"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert_eq!(hash_file(&source).unwrap(), source_hash);
+        assert_eq!(fs::read(&receipt).unwrap(), receipt_bytes);
+    }
+}
+
+#[test]
+#[ignore = "Requires FFmpeg and Python with Mutagen"]
+fn preserved_wav_file_warns_about_unembedded_artwork_and_tags_without_sidecars() {
+    let tools = tools();
+    let dir = tempfile::tempdir().unwrap();
+    let (mut plan, source, _) = audio_file_fixture(&tools, dir.path(), "wav", "pcm_s16le");
+    plan.format = AudioFormat::Preserve;
+    let destination = dir.path().join("output");
+    fs::create_dir(&destination).unwrap();
+    let result = export_collection(
+        &tools,
+        &plan,
+        &destination.join("Dr. Song"),
+        dir.path(),
+        &Cancellation::default(),
+        |_| {},
+    )
+    .unwrap();
+    let actual = destination.join("Dr. Song.wav");
+    assert_eq!(result.output_path, actual.to_string_lossy());
+    assert_eq!(fs::read_dir(&destination).unwrap().count(), 1);
+    assert!(result.playlist_path.is_none());
+    assert!(result.warnings.iter().any(|warning| {
+        warning.contains("cannot be embedded in wav")
+            && warning.contains("does not save a separate image")
+            && warning.contains("MP3/M4A")
+    }));
+    assert!(result.warnings.iter().any(|warning| {
+        warning.contains("album artist and disc number")
+            && warning.contains("does not include a manifest")
+    }));
+    assert!(!result
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("These values remain in the manifest")));
+    let physical = physical_tags(&actual);
+    assert_eq!(physical["tags"]["INAM"][0], "Björk / Live");
+    assert_eq!(physical["tags"]["IART"][0], "Artist & Guest");
+    assert!(physical["pictures"].as_array().unwrap().is_empty());
+    assert_eq!(
+        decoded_audio_hash(&tools, &source),
+        decoded_audio_hash(&tools, &actual)
+    );
+}
+
+fn audio_file_fixture(
+    tools: &Toolchain,
+    workdir: &Path,
+    extension: &str,
+    encoder: &str,
+) -> (ExportPlan, std::path::PathBuf, std::path::PathBuf) {
+    let url = "https://www.youtube.com/watch?v=fixture";
+    let source_dir = workdir
+        .join("sources")
+        .join(hex::encode(Sha256::digest(url.as_bytes())));
+    fs::create_dir_all(&source_dir).unwrap();
+    let source = source_dir.join(format!("source.{extension}"));
+    make_audio(tools, &source, encoder);
+    fs::write(
+        source_dir.join("receipt.json"),
+        serde_json::to_vec(&source).unwrap(),
+    )
+    .unwrap();
+    let cover = workdir.join("cover.jpg");
+    make_cover(tools, &cover);
+    (
+        ExportPlan {
+            title: "Dr. Song".into(),
+            source_url: url.into(),
+            mode: CollectionMode::Album,
+            format: AudioFormat::Mp3,
+            artwork_mode: ArtworkMode::Shared,
+            shared_artwork_url: None,
+            shared_artwork_asset: Some("opaque-file-cover".into()),
+            shared_artwork_path: Some(cover.clone()),
+            output_kind: OutputKind::File,
+            auth: AuthOptions::default(),
+            tracks: vec![Track {
+                id: "fixture".into(),
+                source_url: url.into(),
+                uploader: String::new(),
+                duration: Some(0.25),
+                artwork_url: None,
+                source_metadata: tags(),
+                metadata: tags(),
+            }],
+        },
+        source,
+        cover,
+    )
+}
+
+#[test]
+#[ignore = "Requires FFmpeg and Python with Mutagen"]
 fn folder_and_zip_exports_match_preview_and_embed_the_imported_cover_bytes() {
     let tools = tools();
     let dir = tempfile::tempdir().unwrap();

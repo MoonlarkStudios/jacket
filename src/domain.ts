@@ -1,7 +1,7 @@
 export type CollectionMode = 'album' | 'collection';
 export type AudioFormat = 'compatible' | 'preserve' | 'mp3';
 export type ArtworkMode = 'perTrack' | 'shared' | 'none';
-export type OutputKind = 'zip' | 'folder';
+export type OutputKind = 'zip' | 'folder' | 'file';
 export type Browser = 'chrome' | 'firefox' | 'safari' | 'edge';
 
 export interface Metadata {
