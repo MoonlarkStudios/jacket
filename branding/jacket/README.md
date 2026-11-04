@@ -8,11 +8,11 @@ Jacket is a focused desktop utility for downloading audio albums and playlists a
 
 ## Artwork
 
-The app-icon master uses the approved **1254 × 1254** canvas. Transparent margins surround the charcoal tile. The sleeve, exposed record, ivory band, center label, and one groove preserve the approved concept's placement and proportions. The vector reconstruction replaces generated surface texture with restrained gradients and shadows.
+The app-icon master uses the approved **1254 × 1254** canvas. Transparent margins surround the charcoal tile. The refined symbol exposes more than half the record's diameter beyond the copper sleeve and uses two broad sage groove arcs, a small cream center dot, and a narrower cream band. Flat vector fills replace the generated reference's surface texture. The approved visual reference is preserved in `source/approved-jacket-icon.png`.
 
 - `svg/jacket-app-icon.svg`: full-detail vector master; intrinsic dimensions 1254 × 1254.
-- `svg/jacket-app-icon-small.svg`: optical master for 16–32 px; same canvas and symbol placement, with a slightly stronger band, brighter record edge, larger label and center hole, and no groove or shadow.
-- `svg/jacket-icon-{size}.svg`: SVGs with exact intrinsic dimensions of 16, 32, 64, 128, 256, 512, and 1024 px. The 16 and 32 px files use the optical variant.
+- `svg/jacket-app-icon-small.svg`: optical master for 16–32 px; same canvas and symbol placement, with two heavier sage grooves, a slightly stronger band and record edge, and a larger center dot.
+- `svg/jacket-icon-{size}.svg`: SVGs with exact intrinsic dimensions of 16, 24, 32, 64, 128, 256, 512, and 1024 px. The 16, 24, and 32 px files use the optical variant.
 - `png/jacket-icon-{size}.png`: raster exports at those sizes plus 1254 px; transparent outside the tile.
 - `svg/jacket-mark.svg` and `jacket-mark-dark.svg`: flat color symbols.
 - `svg/jacket-logo-light.svg` and `jacket-logo-dark.svg`: horizontal logo lockups, 1200 × 400.
@@ -20,16 +20,17 @@ The app-icon master uses the approved **1254 × 1254** canvas. Transparent margi
 - `svg/jacket-wordmark-{ink,paper}.svg`: outlined wordmark.
 - `svg/jacket-mark-mono-{ink,paper}.svg` and `jacket-logo-mono-{ink,paper}.svg`: single-color artwork with transparent cutouts.
 
-All SVG artwork is self-contained, with real vector paths, no raster images, no external resources, and no font requirement. The app-icon depth uses SVG gradients and filters. Flat and single-color artwork has no shadow filters.
+All SVG artwork is self-contained, with real vector paths, no raster images, no external resources, and no font requirement. The app icons and flat marks use solid fills without gradients, shadows, or texture. Single-color variants express the grooves and band as transparent cutouts.
 
 ## Color and type
 
 | Token | Color | Role |
 | --- | --- | --- |
-| Ink | `#282725` | Text, wordmark, record, icon tile |
-| Paper | `#F4EFE5` | Surfaces, packaging band, reverse wordmark |
-| Copper | `#D47749` | Sleeve and primary brand accent |
-| Groove | `#595B58` | Supporting record detail |
+| Ink | `#20221E` | Text, wordmark, record |
+| Paper | `#F3EFE5` | Surfaces, packaging band, reverse wordmark, center dot |
+| Copper | `#D47746` | Sleeve and primary brand accent |
+| Groove | `#B4C5A6` | Sage record grooves |
+| Tile | `#282B25` | Charcoal app-icon tile |
 | Muted | `#787369` | Secondary text on paper |
 
 Copper supplies the brand accent. Use Ink for small text on Paper; Copper on Paper is decorative rather than a small-text pairing. Use Ink text for Copper-filled controls.
@@ -46,7 +47,7 @@ Use the full app icon in desktop launchers and application lists. Use the flat l
 
 ## Review and rebuild
 
-Open `index.html` to review the identity and exact-size PNG exports on light and dark backgrounds. The HTML uses only local assets. `brand-tokens.json` records colors, typography, and geometry.
+Open `index.html` to review the identity and exact-size PNG exports on light and dark backgrounds, including the 16, 24, and 32 px sizes. The HTML uses only local assets. `previews/jacket-small-sizes.png` shows those sizes alongside enlarged pixel previews. `brand-tokens.json` records colors, typography, and geometry. The wordmark and product typography remain the existing outlined Avenir Next and system sans-serif.
 
 Run `node source/build.mjs` to regenerate SVG artwork. To regenerate PNGs as well, set `SHARP_MODULE` to an installed Sharp package path before running the same command. `source/wordmark-outline.json` contains the wordmark paths; regeneration does not require the original font. `source/outline-wordmark.swift` records how those outlines were extracted through CoreText on macOS.
 
