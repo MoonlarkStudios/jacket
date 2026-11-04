@@ -17,6 +17,7 @@ Follow the [README setup](README.md#run-the-desktop-app-from-source). `mise.toml
 | `mise run desktop` | Run the native app with local audio tools. |
 | `mise run dev` | Explore the browser preview with fictional example content. |
 | `mise run check` | Check formatting, Biome, Clippy, TypeScript, the production UI build, and all unit tests. |
+| `mise run lint:ci` | Validate GitHub Actions workflows and their embedded shell scripts. |
 | `mise run test:media` | Run offline media integration tests with FFmpeg/ffprobe and an independent Mutagen tag reader. |
 | `mise run format` | Format frontend files and Rust code. |
 | `mise run lint:fix` | Apply safe Biome fixes. |
@@ -26,6 +27,8 @@ Follow the [README setup](README.md#run-the-desktop-app-from-source). `mise.toml
 List individual tasks with `mise tasks`. `npm test` runs frontend tests only; use `mise run check` for the full quality gate. The checks do not modify source files. Python unit tests use synthetic session fixtures and never open a real browser database. Media integration tests generate their own audio and do not contact YouTube.
 
 GitHub Actions runs the quality gate and media integration tests on macOS and Linux. Linux jobs also build preview installers and test installation in disposable containers. A separate job checks the dependency lockfiles and Git history for known vulnerabilities and secrets. CI retains temporary preview artifacts. The [release workflow](docs/releasing.md#automated-release-process) prepares a GitHub Release draft with permanent installers and corresponding sources after a release PR is merged. A maintainer publishes the draft after acceptance; distribution signing is separate.
+
+CI caches npm downloads and Rust dependencies/build outputs separately from its checks. Rust caches are separated by runner, architecture and toolchain, and refreshed when dependency, vendored source or build configuration changes. Only complete successful jobs populate Rust caches; incremental files and installer bundles are excluded. The security job caches the pinned auditor binary, fetches current advisories on every run, and still scans secrets when a dependency audit fails. Linux installation tests download only the verified installers and their original checksums; the complete preview artifact retains all corresponding sources for release verification. Rebuilding older draft commits uses the full verified artifact when they predate the installer helper.
 
 ## Code boundaries
 

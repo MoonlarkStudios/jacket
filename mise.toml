@@ -88,7 +88,7 @@ run = "cargo test --locked --workspace"
 
 [tasks."test:bundling"]
 description = "Run native resource-staging regression tests"
-run = ["python scripts/test-tool-bundling.py", "python scripts/test-linux-bundling.py"]
+run = ["python scripts/test-tool-bundling.py", "python scripts/test-linux-bundling.py", "python scripts/test-linux-installers.py"]
 
 [tasks."test:auth"]
 description = "Test synthetic session capture without accessing browser data"
@@ -103,6 +103,11 @@ run = "cargo test --locked -p audio-engine --test media_pipeline -- --include-ig
 [tasks.lint]
 description = "Lint TypeScript/React/CSS and the Rust workspace"
 depends = ["lint:ts", "lint:rust"]
+
+[tasks."lint:ci"]
+description = "Validate GitHub Actions workflows and their embedded shell scripts"
+tools = { actionlint = "1.7.12", shellcheck = "0.11.0" }
+run = "actionlint"
 
 [tasks."lint:ts"]
 description = "Run Biome's recommended rules and import-order checks"
