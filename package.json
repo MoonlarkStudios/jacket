@@ -33,7 +33,7 @@
     "@mantine/core": "^9.7.2",
     "@mantine/hooks": "^9.7.2",
     "@tabler/icons-react": "^3.0.0",
-    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/api": "^2.12.4",
     "@tauri-apps/plugin-dialog": "^2.0.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
