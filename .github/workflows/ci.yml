@@ -45,7 +45,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev ffmpeg
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
         with:
           version: 2026.9.12
       - name: Restore native Rust dependencies and build outputs
@@ -96,7 +96,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ inputs.ref || github.sha }}
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
         id: tools
         with:
           version: 2026.9.12
