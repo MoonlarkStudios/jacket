@@ -974,7 +974,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn resource_resolution_loads_bundled_tools_from_both_native_package_layouts() {
-        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::{symlink, PermissionsExt};
         for (platform, executable, resources) in [
             (
                 "macos",
@@ -984,30 +984,33 @@ mod tests {
             ("linux", "jacket-linux/bin/jacket", "jacket-linux/resources"),
         ] {
             let root = tempfile::tempdir().unwrap();
-            let executable = root.path().join(executable);
-            let resources = root.path().join(resources);
-            std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
-            let binaries = resources.join("audio-tools/bin");
+            let package = root.path().join("package");
+            let binaries = package.join(resources).join("audio-tools/bin");
+            std::fs::create_dir_all(package.join(executable).parent().unwrap()).unwrap();
             std::fs::create_dir_all(&binaries).unwrap();
             for name in ["yt-dlp", "ffmpeg", "ffprobe", "node"] {
                 let tool = binaries.join(name);
                 std::fs::write(&tool, "#!/bin/sh\nexit 0\n").unwrap();
                 std::fs::set_permissions(tool, std::fs::Permissions::from_mode(0o755)).unwrap();
             }
-            let discovered = super::packaged_resources(&executable, platform).unwrap();
-            let tools = audio_engine::Toolchain::discover_with_resources(&discovered).unwrap();
-            assert_eq!(
-                tools.yt_dlp.canonicalize().unwrap(),
-                binaries.join("yt-dlp")
-            );
-            assert_eq!(
-                tools.ffmpeg.canonicalize().unwrap(),
-                binaries.join("ffmpeg")
-            );
-            assert_eq!(
-                tools.ffprobe.canonicalize().unwrap(),
-                binaries.join("ffprobe")
-            );
+            // macOS temp directories can spell /private/var as /var. Exercise
+            // an equivalent parent alias on every Unix host as well.
+            let alias = root.path().join("package-alias");
+            symlink(&package, &alias).unwrap();
+            let expected = binaries.canonicalize().unwrap();
+            for package_path in [&package, &alias] {
+                let discovered =
+                    super::packaged_resources(&package_path.join(executable), platform).unwrap();
+                let tools = audio_engine::Toolchain::discover_with_resources(&discovered).unwrap();
+                for (tool, name) in [
+                    (&tools.yt_dlp, "yt-dlp"),
+                    (&tools.ffmpeg, "ffmpeg"),
+                    (&tools.ffprobe, "ffprobe"),
+                    (tools.node.as_ref().expect("bundled Node"), "node"),
+                ] {
+                    assert_eq!(tool.canonicalize().unwrap(), expected.join(name));
+                }
+            }
         }
     }
 
