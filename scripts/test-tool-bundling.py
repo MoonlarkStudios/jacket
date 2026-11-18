@@ -7,10 +7,40 @@ from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 spec = importlib.util.spec_from_file_location('tool_staging', Path(__file__).with_name('stage-macos-tools.py'))
 staging = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(staging)
+
+
+class MachODependencies(unittest.TestCase):
+    def test_reads_imports_without_following_the_library_install_name(self):
+        library = Path('_rust.abi3t.so')
+        commands = '''Load command 0
+          cmd LC_ID_DYLIB
+      cmdsize 128
+         name /opt/homebrew/lib/cryptography.hazmat.bindings._rust.abi3t.so (offset 24)
+Load command 1
+          cmd LC_LOAD_DYLIB
+      cmdsize 56
+         name /usr/lib/libSystem.B.dylib (offset 24)
+Load command 2
+          cmd LC_LOAD_WEAK_DYLIB
+      cmdsize 56
+         name @rpath/Optional Library.dylib (offset 24)
+Load command 3
+          cmd LC_REEXPORT_DYLIB
+      cmdsize 64
+         name @loader_path/libcrypto.dylib (offset 24)
+'''
+        with mock.patch.object(staging, 'run', return_value=commands) as otool:
+            self.assertEqual(staging.dependencies(library), [
+                '/usr/lib/libSystem.B.dylib',
+                '@rpath/Optional Library.dylib',
+                '@loader_path/libcrypto.dylib',
+            ])
+        otool.assert_called_once_with('/usr/bin/otool', '-l', library)
 
 
 class ResourceModes(unittest.TestCase):

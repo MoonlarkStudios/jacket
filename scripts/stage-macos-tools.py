@@ -44,8 +44,14 @@ def macho(path):
 
 
 def dependencies(path):
-    return [line.strip().split(' (compatibility version')[0]
-            for line in run('/usr/bin/otool', '-L', path).splitlines()[1:] if 'compatibility version' in line]
+    # otool -L includes LC_ID_DYLIB alongside the actual imported libraries.
+    load_commands = run('/usr/bin/otool', '-l', path)
+    names = re.findall(
+        r'cmd LC_(?:LOAD(?:_WEAK|_UPWARD)?|REEXPORT|LAZY_LOAD)_DYLIB\s+'
+        r'cmdsize \d+\s+name (.+?) \(offset \d+\)',
+        load_commands,
+    )
+    return list(dict.fromkeys(names))
 
 
 def rpaths(path):
@@ -195,8 +201,6 @@ def stage(destination):
         for name in dependencies(source):
             dependency = resolve_dependency(name, source)
             if dependency is None:
-                continue
-            if dependency == source:  # dylib's own install name, not a dependency
                 continue
             if dependency not in mapping:
                 digest = hashlib.sha256(str(dependency).encode()).hexdigest()[:12]
