@@ -20,10 +20,11 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCK = ROOT / 'scripts/linux-runtime.lock.json'
-OUTPUT = ROOT / 'src-tauri/resources/linux/audio-tools'
+RUNTIME_ROOT = ROOT / 'target/native-runtime/linux'
+OUTPUT = RUNTIME_ROOT / 'audio-tools'
 DOWNLOADS = ROOT / 'target/linux-runtime-downloads'
 BUILD = ROOT / 'target/linux-runtime-build'
-SOURCES = ROOT / 'target/linux-preview'
+SOURCES = RUNTIME_ROOT
 
 
 def digest(path):

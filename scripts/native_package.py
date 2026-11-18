@@ -19,13 +19,28 @@ import tempfile
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
-IDENTIFIER = 'com.moonlark.audio-dl'
+MACOS_BUNDLE_IDENTIFIER = 'com.moonlarkstudios.jacket'
+LINUX_DESKTOP_ID = 'com.moonlark.audio-dl'
+MACOS_ICON = Path('apps/jacket/packaging/macos/Jacket.icns')
 REQUIRED_TOOLS = ('yt-dlp', 'ffmpeg', 'ffprobe', 'node')
 
 
 def digest(path):
     with path.open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def macos_deployment_target(root=ROOT):
+    return tomllib.loads((root / 'mise.toml').read_text())['env']['MACOSX_DEPLOYMENT_TARGET']
+
+
+def verify_macos_minimum(minimum, root=ROOT):
+    def version_parts(version):
+        return (tuple(map(int, version.split('.'))) + (0, 0, 0))[:3]
+
+    target = macos_deployment_target(root)
+    if version_parts(minimum) > version_parts(target):
+        raise ValueError(f'Bundled tools require macOS {minimum}. The deployment target is macOS {target}.')
 
 
 def verify_runtime(directory):
@@ -62,8 +77,10 @@ def verify_runtime_platform(directory, target_platform):
     if target_platform == 'linux':
         if platform.machine() != 'x86_64' or manifest.get('target') != 'x86_64-unknown-linux-gnu':
             raise ValueError('The Linux candidate requires its matching x86_64 Linux audio runtime')
-    elif manifest.get('platform') != 'Darwin' or manifest.get('architecture') != platform.machine():
-        raise ValueError('The macOS candidate requires a matching host-architecture macOS audio runtime')
+    else:
+        if manifest.get('platform') != 'Darwin' or manifest.get('architecture') != platform.machine():
+            raise ValueError('The macOS candidate requires a matching host-architecture macOS audio runtime')
+        verify_macos_minimum(manifest['minimumMacOS'], ROOT)
 
 
 def verify_linux_sources(companion, runtime):
@@ -138,13 +155,12 @@ def copy_notices(resources, dependencies):
 
 
 def write_sources(destination):
-    """Snapshot the native build inputs, including an uncommitted local port."""
+    """Snapshot the native build inputs, including local source changes."""
     roots = ('.gitattributes', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'rustfmt.toml',
              'mise.toml', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md',
              'CONTRIBUTING.md', 'AGENTS.md', 'apps/jacket', 'crates/audio-engine',
              'crates/jacket-core', 'crates/jacket-desktop', 'branding', 'scripts',
-             'third-party', 'assets', 'docs', '.github', 'src-tauri/icons/icon.icns',
-             'src-tauri/tauri.conf.json', 'src-tauri/tauri.macos.conf.json')
+             'third-party', 'assets', 'docs', '.github')
     with tarfile.open(destination, 'w:gz') as archive:
         for relative in roots:
             path = ROOT / relative
@@ -169,7 +185,7 @@ def build_candidate(options):
     runtime = verify_runtime(options.runtime)
     verify_runtime_platform(runtime, options.platform)
     dependencies = verify_dependencies(options.dependencies, options.platform)
-    companion = ROOT / 'target/linux-preview/jacket-linux-runtime-sources.tar.gz'
+    companion = ROOT / 'target/native-runtime/linux/jacket-linux-runtime-sources.tar.gz'
     if options.platform == 'linux':
         if not companion.is_file():
             raise ValueError('Linux runtime source companion is missing; rerun mise run tools:stage:linux')
@@ -196,30 +212,30 @@ def build_candidate(options):
             info = {
                 'CFBundleDevelopmentRegion': 'en',
                 'CFBundleExecutable': 'jacket',
-                'CFBundleIdentifier': IDENTIFIER,
+                'CFBundleIdentifier': MACOS_BUNDLE_IDENTIFIER,
                 'CFBundleName': 'Jacket',
                 'CFBundleDisplayName': 'Jacket',
                 'CFBundlePackageType': 'APPL',
                 'CFBundleShortVersionString': bundle_version,
                 'CFBundleVersion': bundle_version,
-                'CFBundleIconFile': 'Jacket.icns',
+                'CFBundleIconFile': MACOS_ICON.name,
                 'LSApplicationCategoryType': 'public.app-category.music',
-                'LSMinimumSystemVersion': '26.0',
+                'LSMinimumSystemVersion': macos_deployment_target(ROOT),
                 'NSHighResolutionCapable': True,
             }
             with (staged / 'Contents/Info.plist').open('wb') as stream:
                 plistlib.dump(info, stream)
-            shutil.copy2(ROOT / 'src-tauri/icons/icon.icns', resources / 'Jacket.icns')
+            shutil.copy2(ROOT / MACOS_ICON, resources / MACOS_ICON.name)
         else:
             binaries = staged / 'bin'
             resources = staged / 'resources'
             resources.mkdir(parents=True)
             binaries.mkdir(parents=True)
-            shutil.copy2(ROOT / 'branding/jacket/png/jacket-icon-256.png', resources / f'{IDENTIFIER}.png')
-            (staged / f'{IDENTIFIER}.desktop').write_text(
+            shutil.copy2(ROOT / 'branding/jacket/png/jacket-icon-256.png', resources / f'{LINUX_DESKTOP_ID}.png')
+            (staged / f'{LINUX_DESKTOP_ID}.desktop').write_text(
                 '[Desktop Entry]\nType=Application\nName=Jacket\n'
                 'Comment=Prepare tagged audio for your music library\n'
-                f'Exec=jacket\nIcon={IDENTIFIER}\nCategories=AudioVideo;Audio;\nTerminal=false\n'
+                f'Exec=jacket\nIcon={LINUX_DESKTOP_ID}\nCategories=AudioVideo;Audio;\nTerminal=false\n'
             )
             (staged / 'README.txt').write_text(
                 'Run bin/jacket in a graphical Linux session.\n'
@@ -257,7 +273,7 @@ def build_candidate(options):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--platform', choices=('macos', 'linux'), required=True)
-    parser.add_argument('--runtime', type=Path, required=True)
+    parser.add_argument('--runtime', type=Path, help='Override the platform-specific staged runtime')
     parser.add_argument('--dependencies', type=Path, default=ROOT / 'target/native-dependencies')
     target = Path(os.environ.get('CARGO_TARGET_DIR', ROOT / 'target'))
     if not target.is_absolute():
@@ -265,6 +281,8 @@ def main():
     parser.add_argument('--executable', type=Path, default=target / 'release/jacket')
     parser.add_argument('--output', type=Path, default=ROOT / 'target/native-candidates')
     options = parser.parse_args()
+    if options.runtime is None:
+        options.runtime = ROOT / 'target/native-runtime' / options.platform / 'audio-tools'
     try:
         build_candidate(options)
     except (OSError, ValueError, KeyError, tarfile.TarError, subprocess.SubprocessError) as error:

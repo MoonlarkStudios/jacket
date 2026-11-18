@@ -84,7 +84,7 @@ depends = ["check:ci"]
 
 [tasks."check:scripts"]
 description = "Verify native packaging, dependency boundaries and tool checks"
-run = "python scripts/native_tests.py"
+run = ["python scripts/native_tests.py", "python scripts/test-tool-bundling.py", "node --test .github/scripts/pr-title.test.mjs"]
 
 [tasks.lint]
 description = "Lint all native workspace targets with warnings denied"
@@ -118,7 +118,7 @@ run = "cargo fmt --all"
 
 [tasks."tools:stage"]
 description = "Stage and verify the complete macOS audio runtime"
-run = "python scripts/stage-macos-tools.py --destination target/native-runtime/audio-tools"
+run = "python scripts/stage-macos-tools.py"
 
 [tasks."tools:stage:linux"]
 description = "Build the pinned Linux runtime and corresponding source archive"
@@ -127,30 +127,16 @@ run = "python scripts/stage-linux-tools.py"
 [tasks."package:mac"]
 description = "Build an ad-hoc signed macOS native app candidate"
 depends = ["build", "tools:stage", "licenses:native"]
-run = "python scripts/native_package.py --platform macos --runtime target/native-runtime/audio-tools"
+run = "python scripts/native_package.py --platform macos"
 
 [tasks."package:linux"]
 description = "Build a Linux native portable candidate with bundled audio tools"
 depends = ["build", "tools:stage:linux", "licenses:native"]
-run = "python scripts/native_package.py --platform linux --runtime src-tauri/resources/linux/audio-tools"
+run = "python scripts/native_package.py --platform linux"
 
-[tasks."legacy:setup"]
-description = "Install dependencies for the retained React comparison interface"
-run = "npm ci"
-
-[tasks."legacy:preview"]
-description = "Explore the retained browser comparison interface"
-depends = ["legacy:setup"]
-run = "npm exec -- vite --host 127.0.0.1"
-
-[tasks."legacy:test"]
-description = "Run retained TypeScript behavior tests"
-depends = ["legacy:setup"]
-run = "node --test tests/*.test.mjs"
-
-[tasks."legacy:test:bundling"]
-description = "Test retained runtime staging and legacy installer verification helpers"
-run = ["python scripts/test-tool-bundling.py", "python scripts/test-linux-bundling.py", "python scripts/test-linux-installers.py"]
+[tasks."branding:sync"]
+description = "Regenerate the macOS bundle icon from the brand PNGs (macOS only)"
+run = "python scripts/sync-branding.py"
 
 [tasks.snapshot]
 description = "Capture the fictional native review and quit (requires a display)"

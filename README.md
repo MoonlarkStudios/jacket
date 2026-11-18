@@ -12,12 +12,10 @@ Paste a YouTube or YouTube Music link, review the tracks and metadata, and save
 local audio. Jacket is the preparation companion to Resonant: export a recording,
 then open it in Resonant for listening, practice and analysis.
 
-This branch ports Jacket to **Rust and iced 0.14**, following the native direction
-of Resonant v2. The audio engine, export formats and unfinished-work persistence
-remain Rust. The default app and checks use Cargo through mise. The retained
-React/Tauri implementation is migration reference; it is outside the native
-workspace. See [native port and qualification](docs/native-port.md) for the
-migration boundary and remaining platform acceptance.
+Jacket uses **Rust and iced 0.14**, following the native direction of Resonant v2.
+The app and development checks use Cargo through mise. See
+[native port and qualification](docs/native-port.md) for migration and platform
+acceptance.
 
 ## Run from source
 
@@ -36,8 +34,7 @@ mise run dev
 ```
 
 `rust-toolchain.toml` pins Rust with rustfmt and Clippy. mise also pins Python,
-Node and the check tools. Node is used by yt-dlp for JavaScript challenges;
-**npm and a webview are not required to build or run the native app**. Development
+Node and the check tools. yt-dlp uses Node for JavaScript challenges. Development
 runs discover FFmpeg, ffprobe and yt-dlp from your installation. `mise run doctor`
 checks those prerequisites without changing the machine.
 
@@ -105,8 +102,7 @@ A successful public-link test does not establish access to private content.
 
 The app keeps the `com.moonlark.audio-dl` data namespace for migration. Recovery
 contains source URLs, metadata and export destinations, and is stored privately.
-Run the native app independently from the legacy app while reviewing migration;
-see [native port](docs/native-port.md) for compatibility and local data details.
+See [native port](docs/native-port.md) for compatibility and local data details.
 
 Download only content you own or have permission to download, and follow the
 source service's terms. Jacket does not bypass DRM or grant access to restricted
@@ -134,6 +130,8 @@ The macOS bundle is ad-hoc signed for local qualification. Native installer
 acceptance, public signing/notarization and final dependency/source compliance
 must be completed before public distribution. The manual candidate workflow
 uploads review artifacts; it does not publish a release.
+See the [macOS packaging guide](docs/packaging-macos.md) and
+[Linux packaging guide](docs/linux-preview.md) for platform prerequisites and validation.
 
 macOS Apple Silicon and Linux x86_64 are the development/CI targets. CI checks
 compilation and device-independent behavior; it does not establish interactive

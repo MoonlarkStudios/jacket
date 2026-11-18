@@ -94,11 +94,8 @@ def collect(output, target, metadata=None, check_only=False):
         ], cwd=ROOT))
     resolved = {node['id'] for node in metadata['resolve']['nodes']}
     workspace = set(metadata['workspace_members'])
-    overrides = {}
-    for name in ('linux-license-overrides.json', 'native-license-overrides.json'):
-        path = ROOT / 'scripts' / name
-        if path.is_file():
-            overrides.update(json.loads(path.read_text()))
+    overrides_path = ROOT / 'scripts/native-license-overrides.json'
+    overrides = json.loads(overrides_path.read_text()) if overrides_path.is_file() else {}
     packages = []
     missing = []
     for package in sorted(metadata['packages'], key=lambda item: (item['name'], item['version'])):

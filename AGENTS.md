@@ -7,10 +7,10 @@ Apply its API guidance in the context of this application; Chromium-specific bui
 threading and directory rules do not replace Cargo conventions. See
 `CONTRIBUTING.md` for module and dependency conventions.
 
-The native app lives in `apps/jacket`; reusable crates live in `crates/`.
-`src/`, `src-tauri/` and the old packaging scripts are retained for migration
-reference. The native workspace must not depend on Tauri, a webview, or the
-legacy frontend build.
+The native app lives in `apps/jacket` and reusable crates live in `crates/`.
+Keep app-specific packaging assets in `apps/jacket/packaging/`, repository
+tooling in `scripts/`, and generated build and packaging outputs in `target/`.
+The native workspace must not depend on Tauri or a webview.
 
 Commit messages must be semantic and consist of a single subject line. Do not add
 a commit body or message trailers. Keep tests with the feature they verify.

@@ -353,6 +353,16 @@
       "https://raw.githubusercontent.com/brendanzab/gl-rs/f150967b1c44ae888e6676f93f639ebc82771bdc/LICENSE"
     ]
   },
+  "Rust:lofty@0.25.4": {
+    "file": "rust-lofty-0.25.4-LICENSE-MIT",
+    "url": "https://raw.githubusercontent.com/Serial-ATA/lofty-rs/618731cee7aac784f5f08643bd5d8d005f3c01d6/LICENSE-MIT",
+    "sha256": "0884e92e74c08412d08bb7cbd121e3c09cbf2ae357972440b06f81b3305b0176"
+  },
+  "Rust:lofty_attr@0.13.0": {
+    "file": "rust-lofty_attr-0.13.0-LICENSE-MIT",
+    "url": "https://raw.githubusercontent.com/Serial-ATA/lofty-rs/5affdd9aea68e7b06d5e1a651bec7814882f44c7/LICENSE-MIT",
+    "sha256": "0884e92e74c08412d08bb7cbd121e3c09cbf2ae357972440b06f81b3305b0176"
+  },
   "Rust:malloc_buf@0.0.6": {
     "canonicalLegalText": {
       "licenses": [
@@ -827,6 +837,11 @@
       "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Apache-2.0.txt",
       "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/Zlib.txt"
     ]
+  },
+  "Rust:ogg_pager@0.7.2": {
+    "file": "rust-ogg_pager-0.7.2-LICENSE-MIT",
+    "url": "https://raw.githubusercontent.com/Serial-ATA/lofty-rs/76ff7093a1f6a98c60297de4695709d04c8c1f47/LICENSE-MIT",
+    "sha256": "0884e92e74c08412d08bb7cbd121e3c09cbf2ae357972440b06f81b3305b0176"
   },
   "Rust:profiling@1.0.18": {
     "file": "native-aclysma-profiling-8271551172eb-NOTICES.txt",

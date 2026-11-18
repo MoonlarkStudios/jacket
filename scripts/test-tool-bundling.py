@@ -13,37 +13,6 @@ staging = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(staging)
 
 
-class DeploymentTarget(unittest.TestCase):
-    def test_platform_override_matches_tauris_packaged_minimum(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            config = root / 'src-tauri'
-            config.mkdir()
-            (config / 'tauri.conf.json').write_text(json.dumps({
-                'bundle': {'macOS': {'minimumSystemVersion': '12.0'}}
-            }))
-            (config / 'tauri.macos.conf.json').write_text(json.dumps({
-                'bundle': {'macOS': {'minimumSystemVersion': '26.0'}}
-            }))
-            self.assertEqual(staging.configured_minimum_macos(root), '26.0')
-            (config / 'tauri.macos.conf.json').write_text('{"bundle": {}}')
-            self.assertEqual(staging.configured_minimum_macos(root), '12.0')
-            (config / 'tauri.macos.conf.json').unlink()
-            self.assertEqual(staging.configured_minimum_macos(root), '12.0')
-
-    def test_platform_minimum_works_without_shared_macos_settings(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            config = root / 'src-tauri'
-            config.mkdir()
-            (config / 'tauri.conf.json').write_text('{"bundle": {}}')
-            self.assertEqual(staging.configured_minimum_macos(root), '10.13')
-            (config / 'tauri.macos.conf.json').write_text(json.dumps({
-                'bundle': {'macOS': {'minimumSystemVersion': '26.0'}}
-            }))
-            self.assertEqual(staging.configured_minimum_macos(root), '26.0')
-
-
 class ResourceModes(unittest.TestCase):
     def test_repeated_resource_copy_preserves_installed_inputs(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -57,16 +26,15 @@ class ResourceModes(unittest.TestCase):
             shutil.copy2(installed, generated)
             original_hash = hashlib.sha256(generated.read_bytes()).digest()
             staging.owner_writable_tree(staged)
-            target = root / 'tauri-resource-copy.py'
+            target = root / 'bundled-package.py'
             shutil.copy2(generated, target)
-            # Tauri's build script overwrites its resource path on every build.
             shutil.copy2(generated, target)
             self.assertEqual(target.read_bytes(), installed.read_bytes())
             self.assertTrue(target.stat().st_mode & 0o200)
             self.assertFalse(installed.stat().st_mode & 0o200)
             self.assertEqual(hashlib.sha256(generated.read_bytes()).digest(), original_hash)
 
-    def test_legacy_executable_repair_keeps_bytes_and_execute_bit(self):
+    def test_writable_generated_copy_keeps_bytes_and_execute_bit(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             executable = root / 'audio-tool'

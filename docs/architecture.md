@@ -39,9 +39,9 @@ tagging, artwork, hashes and transactional publication. It does not depend on
 iced or desktop dialogs. Its existing media integration suite generates synthetic
 audio and verifies exports independently with Mutagen.
 
-The retained `src/` and `src-tauri/` tree records the previous React/Tauri behavior.
-It is excluded from the native Cargo workspace. Runtime staging scripts are reused
-for their verified audio payloads; native packaging does not invoke Tauri.
+Checked-in platform assets live under `apps/jacket/packaging/`. The scripts in
+`scripts/` stage the audio runtimes under `target/native-runtime/` and build
+candidates under `target/native-candidates/`.
 
 ## Presentation and artwork
 

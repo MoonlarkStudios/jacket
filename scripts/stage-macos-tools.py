@@ -14,22 +14,12 @@ import shutil
 import subprocess
 import sys
 
+from native_package import verify_macos_minimum
+
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT = ROOT / 'src-tauri/resources/audio-tools'
+DEFAULT = ROOT / 'target/native-runtime/macos/audio-tools'
 SYSTEM = ('/usr/lib/', '/System/Library/')
 MACH_MAGICS = {b'\xcf\xfa\xed\xfe', b'\xce\xfa\xed\xfe', b'\xfe\xed\xfa\xcf', b'\xfe\xed\xfa\xce', b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca'}
-
-
-def configured_minimum_macos(root=ROOT):
-    # Tauri merges the platform configuration over the shared configuration.
-    # Keep validation aligned with the deployment target actually packaged.
-    minimum = '10.13'
-    for name in ('tauri.conf.json', 'tauri.macos.conf.json'):
-        config = root / 'src-tauri' / name
-        if config.is_file():
-            settings = json.loads(config.read_text()).get('bundle', {}).get('macOS', {})
-            minimum = settings.get('minimumSystemVersion', minimum)
-    return minimum
 
 
 def run(*args, env=None):
@@ -93,11 +83,7 @@ def copy_tree(source, target):
 
 
 def owner_writable_tree(root):
-    # Homebrew Python packages/license files often have mode 0444. Rust's
-    # fs::copy preserves those modes, then cannot overwrite its target on the
-    # next Tauri build. Change generated copies only, never installed inputs.
-    if not root.exists():
-        return
+    # Ensure generated copies can be replaced. Installed inputs keep their modes.
     for path in [root, *root.rglob('*')]:
         if not path.is_symlink():
             path.chmod(path.stat().st_mode | (0o700 if path.is_dir() else 0o600))
@@ -152,9 +138,6 @@ def validate(root):
 def stage(destination):
     if platform.system() != 'Darwin':
         raise RuntimeError('This staging mechanism currently targets macOS only')
-    # Repair legacy generated Tauri outputs before a repeated build.
-    for profile in ('debug', 'release'):
-        owner_writable_tree(ROOT / 'target' / profile / 'audio-tools')
     print('Staging installed audio tools and runtimes…', flush=True)
     tools = {name: installed(name) for name in ('yt-dlp', 'ffmpeg', 'ffprobe', 'node')}
     with tools['yt-dlp'].open('rb') as launcher_file:
@@ -290,11 +273,10 @@ assert Path(certifi.where()).is_file()
         for version in re.findall(r'cmd LC_BUILD_VERSION\s+cmdsize \d+\s+platform \d+\s+minos (\d+\.\d+(?:\.\d+)?)|cmd LC_VERSION_MIN_MACOSX\s+cmdsize \d+\s+version (\d+\.\d+(?:\.\d+)?)', load_commands):
             minimum_os = max(minimum_os, tuple(int(part) for part in next(part for part in version if part).split('.')))
     minimum_os = (minimum_os + (0, 0, 0))[:3]
-    configured_minimum = configured_minimum_macos()
-    if minimum_os > (tuple(int(part) for part in configured_minimum.split('.')) + (0, 0, 0))[:3]:
-        raise RuntimeError(f'Bundled tools require macOS {minimum_os}; raise minimumSystemVersion or stage compatible builds')
+    minimum_version = '.'.join(map(str, minimum_os))
+    verify_macos_minimum(minimum_version)
     files = {str(p.relative_to(staged)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(staged.rglob('*')) if p.is_file()}
-    (staged / 'manifest.json').write_text(json.dumps({'schemaVersion': 1, 'platform': platform.system(), 'architecture': platform.machine(), 'minimumMacOS': '.'.join(map(str, minimum_os)), 'versions': versions, 'installedSources': {k: str(v) for k, v in tools.items()}, 'files': files}, indent=2) + '\n')
+    (staged / 'manifest.json').write_text(json.dumps({'schemaVersion': 1, 'platform': platform.system(), 'architecture': platform.machine(), 'minimumMacOS': minimum_version, 'versions': versions, 'installedSources': {k: str(v) for k, v in tools.items()}, 'files': files}, indent=2) + '\n')
     # Relocation checks a path with spaces, isolated environment, and package hashes.
     import tempfile
     print('Checking runtime relocation with an isolated environment…', flush=True)
