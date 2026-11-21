@@ -3,10 +3,11 @@
   "descriptor": "Download and package albums and playlists.",
   "tagline": "From link to neatly packed.",
   "colors": {
-    "ink": "#282725",
-    "paper": "#F4EFE5",
-    "copper": "#D47749",
-    "groove": "#595B58",
+    "ink": "#20221E",
+    "paper": "#F3EFE5",
+    "copper": "#D47746",
+    "groove": "#B4C5A6",
+    "tile": "#282B25",
     "muted": "#787369"
   },
   "typography": {
@@ -19,38 +20,43 @@
       "height": 1254
     },
     "tile": {
-      "x": 80,
-      "y": 86,
-      "width": 1094,
-      "height": 1070,
-      "radius": 174
+      "x": 130,
+      "y": 132,
+      "width": 996,
+      "height": 990,
+      "radius": 178
     },
     "sleeve": {
-      "x": 246,
-      "y": 313,
-      "width": 528,
-      "height": 560
+      "x": 262,
+      "y": 344,
+      "width": 470,
+      "height": 532
     },
     "band": {
-      "x": 366,
-      "y": 310,
-      "width": 85,
-      "height": 566,
-      "widthRatio": 0.16098484848484848
+      "x": 367,
+      "y": 344,
+      "width": 44,
+      "height": 532,
+      "widthRatio": 0.09361702127659574
     },
     "record": {
       "centerX": 760,
-      "centerY": 600,
-      "radius": 266,
-      "grooveRadius": 197,
-      "labelRadius": 86
+      "centerY": 618,
+      "radius": 250,
+      "exposedDiameterRatio": 0.556,
+      "grooveRadii": {
+        "outer": 186,
+        "inner": 120
+      },
+      "grooveWidth": 24,
+      "centerDotRadius": 18
     },
     "smallVariant": {
       "maximumSize": 32,
-      "bandWidth": 89,
-      "labelRadius": 91,
-      "holeRadius": 22,
-      "grooves": 0
+      "bandWidth": 48,
+      "centerDotRadius": 22,
+      "grooves": 2,
+      "grooveWidth": 36
     }
   },
   "usage": {
