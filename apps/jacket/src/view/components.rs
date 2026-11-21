@@ -1,6 +1,6 @@
 use crate::app::{App, Message};
 use crate::icons::Icon;
-use crate::{artwork, icons};
+use crate::{artwork, icons, style::Presentation};
 use audio_engine::ArtworkMode;
 use iced::widget::{column, container, image, text};
 use iced::{Border, Element, Length};
@@ -49,12 +49,7 @@ pub fn cover(app: &App, size: f32, context: CoverContext) -> Element<'_, Message
             .center(Length::Fill)
             .into()
     } else if let Some(raster) = raster {
-        image(raster.handle(size as u32))
-            .width(size)
-            .height(size)
-            .content_fit(iced::ContentFit::Contain)
-            .filter_method(iced::widget::image::FilterMethod::Linear)
-            .into()
+        return raster_cover(raster, size, p);
     } else {
         let error = match context {
             CoverContext::Source => app.source_cover_error.as_ref(),
@@ -88,6 +83,27 @@ pub fn cover(app: &App, size: f32, context: CoverContext) -> Element<'_, Message
         .padding(8)
         .into()
     };
+    cover_frame(content, size, p)
+}
+
+pub fn raster_cover(
+    raster: &artwork::Raster,
+    size: f32,
+    p: Presentation,
+) -> Element<'static, Message> {
+    cover_frame(
+        image(raster.handle(size as u32))
+            .width(size)
+            .height(size)
+            .content_fit(iced::ContentFit::Contain)
+            .filter_method(iced::widget::image::FilterMethod::Linear)
+            .into(),
+        size,
+        p,
+    )
+}
+
+fn cover_frame(content: Element<'_, Message>, size: f32, p: Presentation) -> Element<'_, Message> {
     container(content)
         .width(size)
         .height(size)

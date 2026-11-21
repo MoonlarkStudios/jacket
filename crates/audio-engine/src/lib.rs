@@ -3,17 +3,19 @@ mod album;
 mod error;
 pub mod export;
 pub mod models;
+mod organized_output;
 pub mod process;
 mod song_artwork;
 pub mod source;
 pub mod tagging;
 
 pub use error::{EngineError, Result};
-pub use export::{export_archive, export_collection, preview_export};
+pub use export::{export_archive, export_collection, export_organized_file, preview_export};
 pub use models::{
     ArtworkMode, AudioFormat, AuthOptions, Browser, CollectionMode, ExportPlan, ExportPreview,
     ExportPreviewTrack, ExportResult, Inspection, InspectionUpdate, ManifestTrack, Metadata,
     OutputKind, ProgressEvent, Track,
 };
+pub use organized_output::OrganizedOutput;
 pub use process::{Cancellation, Toolchain};
 pub use source::{inspect, inspect_streaming};

@@ -1,11 +1,11 @@
 use crate::app::{App, Message};
 use crate::editor::Kind;
 use crate::icons::{self, Icon};
-use crate::settings::{ArtworkChoice, FormatChoice, ModeChoice, OutputChoice};
+use crate::settings::{FormatChoice, OutputChoice};
 use crate::style;
 use audio_engine::{ArtworkMode, AudioFormat, OutputKind};
 use iced::widget::{
-    button, checkbox, column, container, pick_list, row, rule, scrollable, space, text, Column,
+    button, column, container, pick_list, row, rule, scrollable, space, text, Column,
 };
 use iced::{Alignment, Element, Length};
 
@@ -14,6 +14,9 @@ pub fn view(app: &App, docked: bool) -> Element<'_, Message> {
     let Some(review) = &app.review else {
         return space().into();
     };
+    if docked && review.preferences.output_kind == OutputKind::File {
+        return file_inspector(app, review);
+    }
     let mut fields = Column::new().spacing(18).width(Length::Fill);
     if docked {
         fields = fields.push(text("Export").size(14).font(style::semibold()));
@@ -54,116 +57,16 @@ pub fn view(app: &App, docked: bool) -> Element<'_, Message> {
         ]
         .spacing(7),
     );
-    let artwork_control: Element<'_, Message> = if review.is_song() {
-        checkbox(!matches!(
-            review.preferences.artwork_mode,
-            ArtworkMode::None
-        ))
-        .label("Include cover")
-        .text_size(13)
-        .on_toggle_maybe((!app.busy()).then_some(|include| {
-            Message::Artwork(if include {
-                ArtworkChoice::Shared
-            } else {
-                ArtworkChoice::None
-            })
-        }))
-        .into()
-    } else {
-        pick_list(
-            ArtworkChoice::ALL,
-            Some(ArtworkChoice::from(review.preferences.artwork_mode)),
-            Message::Artwork,
-        )
-        .text_size(13)
-        .padding(9)
-        .width(Length::Fill)
-        .into()
-    };
-    let mut artwork = column![
-        text("Artwork").size(12).color(p.colors.text_muted),
-        artwork_control,
-    ]
-    .spacing(7);
-    if !matches!(review.preferences.artwork_mode, ArtworkMode::None) {
-        let imported = review.preferences.shared_artwork_asset.is_some();
-        artwork = artwork.push(
-            row![
-                button(
-                    row![
-                        icons::view(Icon::Upload, p.colors.text_muted, 14.0),
-                        text(if imported {
-                            "Replace cover"
-                        } else {
-                            "Choose cover"
-                        })
-                        .size(12)
-                    ]
-                    .spacing(6)
-                    .align_y(Alignment::Center)
-                )
-                .padding([5, 0])
-                .on_press_maybe((!app.busy() && !app.example).then_some(Message::ImportCover))
-                .style(p.quiet()),
-                space::horizontal(),
-                button(
-                    row![
-                        icons::view(Icon::Crop, p.colors.text_muted, 14.0),
-                        text("Crop").size(12)
-                    ]
-                    .spacing(5)
-                    .align_y(Alignment::Center)
-                )
-                .padding([5, 0])
-                .on_press_maybe(
-                    (!app.busy() && !app.example && app.can_crop_cover())
-                        .then_some(Message::CropCover)
-                )
-                .style(p.quiet()),
-            ]
-            .spacing(8),
-        );
-        if imported && app.cover.is_none() {
-            artwork = artwork.push(
-                text("This cover is unavailable. Choose it again before exporting.")
-                    .size(11)
-                    .color(p.colors.warning),
-            );
-        }
-    }
-    fields = fields.push(artwork);
-    if review.inspection.tracks.len() > 1 {
-        fields = fields.push(
-            column![
-                text("Tags").size(12).color(p.colors.text_muted),
-                pick_list(
-                    ModeChoice::ALL,
-                    Some(ModeChoice::from(review.preferences.mode)),
-                    Message::Mode
-                )
-                .text_size(12)
-                .padding(9)
-                .width(Length::Fill),
-                button(if review.can_undo_numbering() {
-                    "Undo track numbering"
-                } else {
-                    "Number tracks in order"
-                })
-                .padding([4, 0])
-                .on_press_maybe((!app.busy()).then_some(if review.can_undo_numbering() {
-                    Message::UndoNumbering
-                } else {
-                    Message::NumberTracks
-                }))
-                .style(p.quiet()),
-            ]
-            .spacing(7),
-        );
-    }
     fields = fields.push(rule::horizontal(1).style(p.line())).push(
         column![
             row![
-                text("Output name").size(12).color(p.colors.text_muted),
+                text(if review.preferences.output_kind == OutputKind::File {
+                    "Save As filename"
+                } else {
+                    "Output name"
+                })
+                .size(12)
+                .color(p.colors.text_muted),
                 space::horizontal(),
                 button(icons::view(Icon::Edit, p.colors.text_muted, 14.0))
                     .padding(3)
@@ -193,33 +96,85 @@ pub fn view(app: &App, docked: bool) -> Element<'_, Message> {
     column![
         content,
         rule::horizontal(1).style(p.line()),
-        button(
-            row![
-                text("Preview files").size(13),
-                space::horizontal(),
-                icons::view(
-                    Icon::ArrowRight,
-                    if app.can_preview() {
-                        p.colors.accent_text
-                    } else {
-                        p.derived.disabled
-                    },
-                    15.0
-                )
-            ]
-            .align_y(Alignment::Center)
-        )
-        .width(Length::Fill)
-        .padding([11, 12])
-        .on_press_maybe(app.can_preview().then_some(Message::Preview))
-        .style(p.primary()),
-        button("Discard review")
-            .padding(6)
-            .on_press_maybe((!app.busy()).then_some(Message::Reset))
-            .style(p.quiet()),
+        preview_button(app),
+        discard(app),
     ]
     .spacing(12)
     .height(Length::Fill)
+    .into()
+}
+
+fn file_inspector<'a>(app: &'a App, review: &'a jacket_core::Review) -> Element<'a, Message> {
+    let p = app.presentation();
+    let cover = if matches!(review.preferences.artwork_mode, ArtworkMode::None) {
+        "No cover"
+    } else {
+        "Embed cover when supported"
+    };
+    let options = super::focus_button::wrap(
+        "file-export-options",
+        button(
+            row![
+                icons::view(Icon::Settings, p.colors.text_muted, 15.0),
+                text("Export options").size(12)
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        )
+        .style(p.secondary())
+        .padding([8, 10]),
+        (!app.busy()).then_some(Message::OpenPanel(crate::app::Panel::Options)),
+        p.colors.accent,
+    );
+    column![
+        text("Export").size(14).font(style::semibold()),
+        super::destination::save_controls(app, super::destination::Placement::Inspector),
+        rule::horizontal(1).style(p.line()),
+        text(format!(
+            "{} · {cover}",
+            FormatChoice::from(review.preferences.format)
+        ))
+        .size(12)
+        .color(p.colors.text_muted),
+        options,
+        space::vertical(),
+        discard(app),
+    ]
+    .spacing(12)
+    .height(Length::Fill)
+    .into()
+}
+
+fn discard(app: &App) -> Element<'_, Message> {
+    button("Discard review")
+        .padding(6)
+        .on_press_maybe((!app.busy()).then_some(Message::Reset))
+        .style(app.presentation().quiet())
+        .into()
+}
+
+fn preview_button(app: &App) -> Element<'_, Message> {
+    let p = app.presentation();
+    button(
+        row![
+            text("Preview files").size(13),
+            space::horizontal(),
+            icons::view(
+                Icon::ArrowRight,
+                if app.can_preview() {
+                    p.colors.accent_text
+                } else {
+                    p.derived.disabled
+                },
+                15.0
+            )
+        ]
+        .align_y(Alignment::Center),
+    )
+    .width(Length::Fill)
+    .padding([11, 12])
+    .on_press_maybe(app.can_preview().then_some(Message::Preview))
+    .style(p.primary())
     .into()
 }
 

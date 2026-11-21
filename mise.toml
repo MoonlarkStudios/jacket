@@ -143,7 +143,7 @@ description = "Capture the fictional native review and quit (requires a display)
 run = "cargo run --locked -p jacket-iced --bin jacket -- --screenshot '{{ config_root }}/target/native-preview.png'"
 
 [tasks."qualify:ui"]
-description = "Capture 96 album, song, playlist, theme, size and edge-case views"
+description = "Capture native workflows across themes and window sizes"
 run = ["cargo build --locked -p jacket-iced --bin jacket", "python scripts/native_snapshots.py"]
 
 [tasks."licenses:native"]

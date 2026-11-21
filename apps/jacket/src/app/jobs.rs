@@ -2,7 +2,7 @@ use super::persistence;
 use super::{App, Message, Panel};
 use audio_engine::ProgressEvent;
 use iced::{window, Task};
-use jacket_core::{Review, SourceLink};
+use jacket_core::SourceLink;
 use jacket_desktop::downloader_updates;
 use jacket_desktop::{Event, Job};
 use std::time::Duration;
@@ -19,46 +19,35 @@ impl App {
             }
         }
         let mut auto_update = None;
-        let mut save_inspection = false;
+        let mut tasks = Vec::new();
+        let mut cover_request = None;
         for event in events {
             match event {
                 Event::Track(update) => {
-                    self.progress = Some(ProgressEvent {
-                        stage: "inspecting".into(),
-                        message: format!("Found {}", update.track.metadata.title),
-                        completed: update.index + 1,
-                        total: update.total.unwrap_or(update.index + 1),
-                    })
+                    if let Some(intake) = &mut self.intake {
+                        if let Some(request) = intake.observe(*update) {
+                            cover_request = Some(request);
+                        }
+                    }
                 }
                 Event::Progress(progress) => self.progress = Some(progress),
                 Event::Inspected(inspection) => {
-                    self.url = inspection.source_url.clone();
-                    self.review = Some(Review::new(
-                        inspection,
-                        self.appearance.default_format.into(),
-                    ));
-                    self.example = false;
-                    self.example_previous = None;
-                    self.result = None;
-                    self.cover = None;
-                    self.source_cover = None;
-                    self.source_cover_error = None;
-                    self.preview_cover = None;
-                    self.preview_cover_error = None;
-                    self.crop_source = None;
-                    self.track_scroll = 0.0;
-                    self.preview = None;
-                    self.pending_plan = None;
-                    self.notice = None;
-                    save_inspection = true;
+                    tasks.push(self.finish_inspection(inspection));
                 }
                 Event::Exported(result) => {
-                    self.finish_resumed_review(true);
-                    self.recovery = None;
-                    self.result = Some(result);
-                    self.notice = None;
+                    tasks.push(self.finish_export(result));
                 }
                 Event::Failed(error) => {
+                    if let Some(intake) = self.intake.take() {
+                        if intake.cancelling {
+                            self.notice = Some("Lookup cancelled.".into());
+                        } else {
+                            self.source_error = Some(error);
+                        }
+                        tasks.push(self.focus_after_lookup_stop());
+                        continue;
+                    }
+                    self.export_recording = None;
                     self.finish_resumed_review(false);
                     self.error = Some(error);
                     if let Some(desktop) = &self.desktop {
@@ -93,9 +82,9 @@ impl App {
             if let (Some(channel), Some(desktop)) = (auto_update, &self.desktop) {
                 self.admit(desktop.update_downloader(channel));
             }
-            if save_inspection {
-                return Task::batch([self.autosave(), self.cover_preview()]);
-            }
+        }
+        if let Some(request) = cover_request {
+            tasks.push(self.request_intake_cover(request));
         }
         if self.close_after_job
             && self.job.is_none()
@@ -108,24 +97,30 @@ impl App {
         }
         if self.raster_refresh_pending {
             self.raster_refresh_pending = false;
-            return self.display_scale_changed(self.display_scale);
+            tasks.push(self.display_scale_changed(self.display_scale));
         }
         if self.screenshot.is_some() && self.started.elapsed() > Duration::from_secs(2) {
-            return window::oldest()
-                .and_then(window::screenshot)
-                .map(Message::Screenshot);
+            tasks.push(
+                window::oldest()
+                    .and_then(window::screenshot)
+                    .map(Message::Screenshot),
+            );
         }
-        Task::none()
+        if tasks.is_empty() {
+            Task::none()
+        } else {
+            Task::batch(tasks)
+        }
     }
 
     pub(super) fn position_crop(&mut self) {
         if let Some((asset, _)) = self.crop_asset() {
-            let size = self
-                .crop_size
-                .parse::<u32>()
-                .unwrap_or(asset.width.min(asset.height));
-            let (x, y) =
-                crate::crop_view::origin(self.crop_pointer, asset.width, asset.height, size);
+            let (x, y) = crate::crop_view::origin(
+                self.crop_pointer,
+                asset.width,
+                asset.height,
+                self.crop_preview_size,
+            );
             self.crop_x = x.to_string();
             self.crop_y = y.to_string();
         }
@@ -175,10 +170,19 @@ impl App {
         };
         match SourceLink::parse(&self.url) {
             Ok(link) => {
+                self.source_error = None;
                 self.admit(desktop.inspect(link.target(self.intent).to_owned(), self.auth.clone()));
+                if let Some(job) = &self.job {
+                    self.intake = Some(super::intake::Intake::new(
+                        job.id().to_owned(),
+                        super::intake::SourceKind::from_link(&link, self.intent),
+                    ));
+                    self.progress = None;
+                    self.notice = None;
+                }
                 self.panel = Panel::Workspace;
             }
-            Err(error) => self.error = Some(error),
+            Err(error) => self.source_error = Some(error),
         }
         Task::none()
     }

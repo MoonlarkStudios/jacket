@@ -841,6 +841,57 @@ fn single_audio_files_embed_tags_and_cover_without_sidecars_or_source_changes() 
 }
 
 #[test]
+#[ignore = "Requires locally installed FFmpeg"]
+fn organized_audio_creates_directories_at_publication_and_keeps_existing_files() {
+    let tools = tools();
+    let fixture = tempfile::tempdir().unwrap();
+    let root = fixture.path().canonicalize().unwrap().join("Music");
+    fs::create_dir(&root).unwrap();
+    let workdir = fixture.path().join("work");
+    let (mut plan, _, _) = audio_file_fixture(&tools, &workdir, "m4a", "aac");
+    plan.format = AudioFormat::Compatible;
+    let album = root.join("Artist/Album");
+    let output = OrganizedOutput::new(root.clone(), album.join("Dr. Song")).unwrap();
+
+    let cancel = Cancellation::default();
+    let cancelled = export_organized_file(&tools, &plan, &output, &workdir, &cancel, |event| {
+        if event.stage == "packaging" {
+            cancel.cancel();
+        }
+    });
+    assert!(matches!(cancelled, Err(EngineError::Cancelled)));
+    assert!(fs::read_dir(&root).unwrap().next().is_none());
+
+    let original = export_organized_file(
+        &tools,
+        &plan,
+        &output,
+        &workdir,
+        &Cancellation::default(),
+        |_| {},
+    )
+    .unwrap();
+    let original_path = album.join("Dr. Song.m4a");
+    assert_eq!(Path::new(&original.output_path), original_path);
+    let original_data = fs::read(&original_path).unwrap();
+    let second = export_organized_file(
+        &tools,
+        &plan,
+        &output,
+        &workdir,
+        &Cancellation::default(),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(
+        Path::new(&second.output_path),
+        album.join("Dr. Song (2).m4a")
+    );
+    assert_eq!(fs::read(&original_path).unwrap(), original_data);
+    assert_eq!(fs::read_dir(&album).unwrap().count(), 2);
+}
+
+#[test]
 #[ignore = "Requires FFmpeg and Python with Mutagen"]
 fn preserved_wav_file_warns_about_unembedded_artwork_and_tags_without_sidecars() {
     let tools = tools();

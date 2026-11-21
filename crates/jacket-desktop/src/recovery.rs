@@ -18,6 +18,8 @@ pub struct Recovery {
     pub job_id: String,
     pub plan: ExportPlan,
     pub output_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) music_root: Option<PathBuf>,
     pub progress: ProgressEvent,
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -45,6 +47,7 @@ impl Recovery {
             job_id,
             plan,
             output_path,
+            music_root: None,
             progress: ProgressEvent {
                 stage: "queued".into(),
                 message: "Starting your download".into(),
@@ -360,11 +363,32 @@ mod tests {
 
         let restored = latest(root.path()).unwrap();
         assert_eq!(restored.output_path, "/tmp/Artist - Song.v2");
+        assert!(restored.music_root.is_none());
         assert_eq!(restored.plan.output_kind, OutputKind::File);
         assert!(matches!(restored.plan.format, AudioFormat::Preserve));
         assert_eq!(restored.plan.mode, CollectionMode::Album);
         assert_eq!(restored.plan.tracks[0].metadata.track_number, Some(3));
         assert_eq!(restored.plan.tracks[0].metadata.release_year, Some(1976));
+    }
+
+    #[test]
+    fn organized_recovery_restores_the_original_root_and_resolved_path() {
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path().join("External music");
+        let stem = root.join("Artist/Album/Song");
+        let mut record = fixture("music-folder-job");
+        record.plan.output_kind = OutputKind::File;
+        record.output_path = stem.to_str().unwrap().into();
+        record.music_root = Some(root.clone());
+        record.save(&data.path().join("music-folder-job")).unwrap();
+
+        let restored = latest(data.path()).unwrap();
+        assert_eq!(restored.music_root.as_deref(), Some(root.as_path()));
+        assert_eq!(Path::new(&restored.output_path), stem);
+        assert!(
+            !root.exists(),
+            "a disconnected root should still be recoverable"
+        );
     }
 
     #[test]

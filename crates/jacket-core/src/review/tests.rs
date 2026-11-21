@@ -71,6 +71,60 @@ fn repeated_entries_are_independent_occurrences_and_deselection_keeps_numbering_
 }
 
 #[test]
+fn moving_repeated_sources_preserves_selection_edit_history_and_export_order() {
+    let mut source = inspection(CollectionMode::Album, 4);
+    source.tracks[1].metadata.track_number = Some(8);
+    let mut review = Review::new(source, AudioFormat::Mp3);
+    review.select(0, false).expect("exclude first occurrence");
+    review.select(2, false).expect("exclude third occurrence");
+    review
+        .apply_bulk(&BulkEdits {
+            artist: Some("Edited artist".into()),
+            ..BulkEdits::default()
+        })
+        .expect("edit selected occurrences");
+    review.number_album_tracks().expect("number tracks");
+    review
+        .move_track(1, 3)
+        .expect("move second occurrence to the end");
+    assert_eq!(review.selected.iter().copied().collect::<Vec<_>>(), [2, 3]);
+    let restored = Review::from_draft(review.draft()).expect("restore custom order");
+    let plan = restored
+        .plan(AuthOptions::default())
+        .expect("ordered export");
+    assert_eq!(plan.tracks[0].metadata.title, "Prefix Song 4 (Live)");
+    assert_eq!(plan.tracks[1].metadata.title, "Prefix Song 2 (Live)");
+    assert_eq!(plan.tracks[1].metadata.track_number, Some(2));
+    assert!(review.undo_numbering().expect("undo after reordering"));
+    assert_eq!(review.inspection.tracks[3].metadata.track_number, Some(8));
+    assert!(review.undo_bulk().expect("undo after reordering"));
+    assert_eq!(review.inspection.tracks[3].metadata.artist, "Artist");
+    assert_eq!(
+        review.undo_move().expect("restore original position"),
+        Some(1)
+    );
+    assert_eq!(
+        review.inspection.tracks[1].metadata.title,
+        "Prefix Song 2 (Live)"
+    );
+    assert_eq!(review.selected.iter().copied().collect::<Vec<_>>(), [1, 3]);
+    let identity = review.identity();
+    assert!(review.move_track(1, 4).is_err());
+    assert_eq!(review.identity(), identity);
+}
+
+#[test]
+fn numbering_twice_keeps_the_original_undo() {
+    let mut source = inspection(CollectionMode::Album, 2);
+    source.tracks[0].metadata.track_number = Some(12);
+    let mut review = Review::new(source, AudioFormat::Mp3);
+    review.number_album_tracks().expect("number tracks");
+    review.number_album_tracks().expect("repeat numbering");
+    assert!(review.undo_numbering().expect("undo the original edit"));
+    assert_eq!(review.inspection.tracks[0].metadata.track_number, Some(12));
+}
+
+#[test]
 fn album_overrides_preserve_per_track_unknowns_and_original_source_metadata() {
     let mut source = inspection(CollectionMode::Album, 2);
     source.tracks[1].metadata.release_year = Some(2018);
@@ -87,6 +141,23 @@ fn album_overrides_preserve_per_track_unknowns_and_original_source_metadata() {
     assert_eq!(plan.tracks[1].metadata.track_number, Some(1));
     assert_eq!(plan.tracks[1].source_metadata.album, "Example album");
     assert_eq!(review.inspection.tracks[1].metadata.album, "Example album");
+}
+
+#[test]
+fn shared_album_tags_keep_the_playlists_name() {
+    let mut review = Review::new(inspection(CollectionMode::Collection, 2), AudioFormat::Mp3);
+    review
+        .set_mode(CollectionMode::Album)
+        .expect("use shared tags");
+    review
+        .update_album("Compilation".into(), "Various artists".into(), Some(2024))
+        .expect("set shared tags");
+    let plan = review.plan(AuthOptions::default()).expect("valid plan");
+    assert_eq!(plan.title, review.inspection.title);
+    assert!(plan
+        .tracks
+        .iter()
+        .all(|track| track.metadata.album == "Compilation"));
 }
 
 #[test]

@@ -17,11 +17,17 @@ link contains both. The review hero shows the album cover, title, artist, year,
 track count and duration. An ordered table keeps repeated playlist occurrences
 independently selectable and editable.
 
-At 1180 × 800, the Export inspector remains beside the review. Output kind, audio
-format, artwork, tag behavior and output name are grouped by the decision they
-control. At the 600 × 600 minimum, Export options move into a panel and Preview
-remains visible below the review. Editing forms explain shared album inheritance
-rather than accepting changes that would be overridden silently.
+The review header offers shared album tags and cover controls. Playlists can keep
+individual tags or apply shared album fields. Track edits open beside the list
+at 1180 × 800 and below it at 600 × 600. Apply & next commits the edit and opens
+the following track. Shared fields are edited together, and the selected-track
+editor previews bulk changes before applying them.
+
+Track order supports single-position moves and moving directly to a numbered
+position. Moves retain the selection for each occurrence and can be undone while
+the review is open. Numbering is a separate action that follows the list within
+each disc. The export inspector groups output kind, audio format and output name.
+At 600 × 600, Export options open in a panel and Preview stays below the review.
 
 The file preview shows the artwork selected for the export, effective metadata
 and the actual naming plan. Provisional codec extensions are identified without
@@ -47,9 +53,12 @@ settings change replaces it. See [theme authoring](themes.md).
 
 ## Verification
 
-The current snapshot runner defines 96 cases. In every preset, both window sizes
-cover eight album panels, song review/preview/editing/options, playlist
-review/preview and long-metadata song review. Normal-size welcome and 10,000-entry
+The current snapshot runner defines 174 cases. In every preset, both window sizes
+cover album and playlist workflows including shared tags, quick track edits and
+order. They also cover song review, editing, crop, preview and options,
+long-metadata song review, organized save, preview and music folder settings,
+song and album completion, and song and playlist lookup.
+Normal-size welcome and 10,000-entry
 list cases complete the matrix. Additional `--theme-file` captures exercise a
 custom palette without modifying the ordinary preference. The dated results
 below describe the initial redesign's smaller matrix, not this expanded workflow

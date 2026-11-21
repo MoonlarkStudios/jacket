@@ -187,6 +187,8 @@ pub fn settings(app: &App) -> Element<'_, Message> {
         .spacing(12)
         .align_y(Alignment::Center),
         rule::horizontal(1).style(presentation.line()),
+        super::destination::settings(app),
+        rule::horizontal(1).style(presentation.line()),
         section_title("Browser access"),
         text(if app.auth.browser.is_some() {
             "Browser session connected"
