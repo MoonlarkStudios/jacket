@@ -1,6 +1,5 @@
 # Native candidates are intentionally manual until the desktop acceptance,
 # signing, dependency notices and corresponding-source checks are completed.
-# This replaces the automatic Tauri installer/release publishing path.
 name: Build native candidates
 
 on:
@@ -55,6 +54,38 @@ jobs:
       - name: Build Linux native portable candidate
         if: runner.os == 'Linux'
         run: mise run package:linux
+      - name: Verify candidate archive checksums
+        working-directory: target/native-candidates
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            shasum -a 256 -c SHA256SUMS
+          else
+            sha256sum -c SHA256SUMS
+          fi
+      - name: Verify signed macOS app identifier
+        if: runner.os == 'macOS'
+        working-directory: target/native-candidates
+        shell: bash
+        run: |
+          expected_id=com.moonlarkstudios.jacket
+          shopt -s nullglob
+          archives=(jacket-*-native-macos.tar.gz)
+          if (( ${#archives[@]} != 1 )); then
+            echo 'Expected exactly one native macOS app archive.' >&2
+            exit 1
+          fi
+          extracted=$(mktemp -d "$RUNNER_TEMP/jacket-macos.XXXXXX")
+          trap 'rm -rf "$extracted"' EXIT
+          tar -xzf "${archives[0]}" -C "$extracted"
+          bundle="$extracted/Jacket.app"
+          actual_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$bundle/Contents/Info.plist")
+          if [ "$actual_id" != "$expected_id" ]; then
+            printf 'Expected bundle identifier %s, found %s\n' "$expected_id" "$actual_id" >&2
+            exit 1
+          fi
+          /usr/bin/codesign --verify --deep --strict --verbose=2 "$bundle"
+          /usr/bin/codesign --verify --verbose -R "=identifier = \"$expected_id\"" "$bundle"
+          printf 'Verified signed macOS bundle identifier %s\n' "$actual_id"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: jacket-native-${{ runner.os }}-${{ github.sha }}

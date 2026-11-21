@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       pr_number:
-        description: Release PR number whose title should be checked
+        description: PR number whose title should be checked
         type: string
         required: true
 
@@ -29,5 +29,5 @@ jobs:
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
-            const { checkTitle } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/releases.mjs`);
+            const { checkTitle } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/pr-title.mjs`);
             await checkTitle({ github, context, core });

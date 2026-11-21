@@ -90,6 +90,8 @@ jobs:
     name: Rust dependencies and secret checks
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      GITLEAKS_VERSION: "8.24.3"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -126,6 +128,12 @@ jobs:
       - name: Audit the native Rust dependency graph
         if: ${{ !cancelled() && steps.audit-tool.outcome == 'success' }}
         run: mise exec -- cargo audit
-      - name: Scan Git history for secrets
+      - name: Install pinned secret scanner
+        id: secret-scanner
         if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
-        run: mise exec gitleaks@8.24.3 -- gitleaks git --redact --no-banner
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
+        run: mise install "gitleaks@$GITLEAKS_VERSION"
+      - name: Scan Git history for secrets
+        if: ${{ !cancelled() && steps.secret-scanner.outcome == 'success' }}
+        run: mise exec "gitleaks@$GITLEAKS_VERSION" -- gitleaks git --redact --no-banner

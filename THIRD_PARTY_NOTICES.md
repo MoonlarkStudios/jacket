@@ -11,8 +11,7 @@ The native dependency graph is fixed by `Cargo.lock`. Major components include
 [winit](https://github.com/rust-windowing/winit), [rfd](https://github.com/PolyMeilex/rfd),
 [Lofty](https://github.com/Serial-ATA/lofty-rs),
 [Reqwest](https://github.com/seanmonstar/reqwest), and
-[zip](https://github.com/zip-rs/zip2). The native app does not ship the retained
-React/Tauri frontend or its GTK/WebKit dependency tree.
+[zip](https://github.com/zip-rs/zip2).
 
 `mise run licenses:native` retains the target's resolved Cargo package notices,
 license expressions, repository identities and exact source trees. Native
@@ -25,8 +24,7 @@ including build/test dependencies when present in Cargo's graph.
 Some published crates omit separate license files. Checked-in supplements under
 [third-party/licenses](third-party/licenses) retain upstream notices with immutable
 revision/URL provenance and SHA-256 hashes in
-[scripts/native-license-overrides.json](scripts/native-license-overrides.json)
-and the earlier [override inventory](scripts/linux-license-overrides.json).
+[scripts/native-license-overrides.json](scripts/native-license-overrides.json).
 Exact upstream `.cargo_vcs_info.json` revisions or verified publisher release tags
 identify the native supplements. Where publishers provide no separate notice, the
 retained declaration and canonical legal text are explicitly identified in provenance.
@@ -78,15 +76,6 @@ See [FFmpeg's licensing guidance](https://ffmpeg.org/legal.html) and
 Development builds can use installed audio tools. Ignored generated runtimes are
 not part of a source checkout. Optional managed yt-dlp updates retain the upstream
 downloader's license and update independently from Jacket.
-
-## Retained legacy implementation
-
-The `src/`, `src-tauri/`, `package.json` and `package-lock.json` files retain the
-previous React/Tauri implementation for migration reference. Their dependencies
-include Tauri, React, Mantine and Tabler Icons. The MIT-licensed GLib safety
-backport under [vendor](vendor/README.md) belongs to that legacy build, which is
-excluded from the native workspace and candidates. Earlier Linux installer scripts
-and notices describe that older packaging path.
 
 YouTube, Google and other third-party marks belong to their respective owners.
 Jacket has no affiliation with them.

@@ -5,6 +5,7 @@ import importlib.util
 import json
 import platform
 from pathlib import Path
+import plistlib
 import tarfile
 import tempfile
 import tomllib
@@ -125,6 +126,51 @@ class RuntimeIntegrity(unittest.TestCase):
 
 
 class CandidatePackaging(unittest.TestCase):
+    def test_macos_candidate_sets_bundle_identifier_icon_and_deployment_target(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'Cargo.toml').write_text('[workspace.package]\nversion = "0.1.0-beta.3"\n')
+            (root / 'mise.toml').write_text('[env]\nMACOSX_DEPLOYMENT_TARGET = "26.0"\n')
+            icon = root / packaging.MACOS_ICON
+            icon.parent.mkdir(parents=True)
+            icon.write_bytes((ROOT / packaging.MACOS_ICON).read_bytes())
+            runtime = root / 'audio-tools'
+            (runtime / 'bin').mkdir(parents=True)
+            for name in packaging.REQUIRED_TOOLS:
+                tool = runtime / 'bin' / name
+                tool.write_text('#!/bin/sh\nexit 0\n')
+                tool.chmod(0o755)
+            manifest_path = runtime / 'manifest.json'
+            manifest = {'platform': 'Darwin', 'architecture': 'arm64', 'minimumMacOS': '26.0.0',
+                        'files': {f'bin/{path.name}': packaging.digest(path)
+                                  for path in (runtime / 'bin').iterdir()}}
+            manifest_path.write_text(json.dumps(manifest))
+            dependencies = root / 'dependencies'
+            dependencies.mkdir()
+            (dependencies / 'jacket-native-dependency-sources.tar.gz').write_bytes(b'synthetic native sources')
+            options = mock.Mock(platform='macos', runtime=runtime, dependencies=dependencies,
+                                executable=runtime / 'bin/node', output=root / 'output')
+            with (mock.patch.object(packaging, 'ROOT', root),
+                  mock.patch.object(packaging.platform, 'system', return_value='Darwin'),
+                  mock.patch.object(packaging.platform, 'machine', return_value='arm64'),
+                  mock.patch.object(packaging, 'verify_dependencies', return_value=dependencies),
+                  mock.patch.object(packaging, 'copy_notices'),
+                  mock.patch.object(packaging.subprocess, 'run') as codesign):
+                candidate = packaging.build_candidate(options)
+                self.assertEqual(codesign.call_count, 2)
+                manifest['minimumMacOS'] = '26.0.1'
+                manifest_path.write_text(json.dumps(manifest))
+                with self.assertRaisesRegex(ValueError, 'deployment target is macOS 26.0'):
+                    packaging.build_candidate(options)
+            contents = candidate / 'Contents'
+            with (contents / 'Info.plist').open('rb') as stream:
+                info = plistlib.load(stream)
+            self.assertEqual(info['CFBundleIdentifier'], 'com.moonlarkstudios.jacket')
+            self.assertEqual(info['LSMinimumSystemVersion'], '26.0')
+            self.assertEqual((contents / 'Resources' / info['CFBundleIconFile']).read_bytes(), icon.read_bytes())
+            with tarfile.open(options.output / 'jacket-0.1.0-beta.3-native-source.tar.gz') as source:
+                self.assertIn(f'jacket-source/{packaging.MACOS_ICON}', source.getnames())
+
     @unittest.skipUnless(platform.system() == 'Linux', 'Linux portable candidate smoke')
     def test_complete_candidate_retains_tools_and_publishes_matching_source_checksums(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -160,7 +206,7 @@ class CandidatePackaging(unittest.TestCase):
             executable = root / 'jacket'
             executable.write_text('#!/bin/sh\nexit 0\n')
             executable.chmod(0o755)
-            companion = root / 'target/linux-preview/jacket-linux-runtime-sources.tar.gz'
+            companion = root / 'target/native-runtime/linux/jacket-linux-runtime-sources.tar.gz'
             companion.parent.mkdir(parents=True)
             with tarfile.open(companion, 'w:gz') as package:
                 package.add(runtime / 'build-info.json', arcname='build-info.json')
@@ -184,6 +230,9 @@ class CandidatePackaging(unittest.TestCase):
             with mock.patch.object(packaging, 'ROOT', root):
                 candidate = packaging.build_candidate(options)
                 self.assertTrue((candidate / 'bin/jacket').stat().st_mode & 0o111)
+                desktop_entry = (candidate / 'com.moonlark.audio-dl.desktop').read_text()
+                self.assertIn('Icon=com.moonlark.audio-dl\n', desktop_entry)
+                self.assertTrue((candidate / 'resources/com.moonlark.audio-dl.png').is_file())
                 packaging.verify_runtime(candidate / 'resources/audio-tools')
                 with self.assertRaisesRegex(ValueError, 'already exists'):
                     packaging.build_candidate(options)

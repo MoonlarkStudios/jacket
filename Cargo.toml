@@ -2,7 +2,6 @@
 members = ["apps/jacket", "crates/audio-engine", "crates/jacket-core", "crates/jacket-desktop"]
 default-members = ["apps/jacket"]
 resolver = "3"
-exclude = ["src-tauri", "vendor/glib"]
 
 [workspace.package]
 version = "0.1.0-beta.3"

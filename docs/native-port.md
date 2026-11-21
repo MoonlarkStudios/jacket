@@ -3,16 +3,14 @@
 The native branch replaces the React/Tauri application with a Rust and iced 0.14
 app. It follows Resonant v2's separation of application UI, review/domain logic,
 native services and reusable audio engine, while preserving Jacket's GPL license.
-The original implementation remains available in `src/` and `src-tauri/` as a
-migration reference. It is not a member of the native Cargo workspace.
+The original implementation and installers remain available in the repository
+history and published release tags.
 
 ## Development and candidates
 
 Use the [README](../README.md) and [contribution guide](../CONTRIBUTING.md) for the
-current setup and tasks. The default `dev`, `desktop`, `build`, `check`, `lint` and
-`test` tasks are native. `legacy:preview` and `legacy:test` are explicit comparison
-tools and require npm. `mise run example` provides fictional tracks for visual
-review; it must not export example downloads.
+current setup and tasks. `mise run example` provides fictional tracks for visual
+review and disables example downloads.
 
 The `jacket` binary is in `target/debug` or `target/release`. Local candidates are
 created by `mise run package:mac` or `mise run package:linux`. Existing candidate
@@ -26,13 +24,13 @@ package operation. Packages do not silently substitute host audio tools.
 macOS packaging produces an ad-hoc signed `Jacket.app` for local testing on Apple
 Silicon macOS 26 or later. It is not notarized or signed with a distribution identity.
 Linux packaging produces a portable `jacket-linux/` directory and a `.tar.gz`,
-rather than the old Tauri DEB/RPM installers. Run `bin/jacket` inside a graphical
-session. System Python 3, CA certificates and native windowing/display drivers
+with the complete audio runtime. Run `bin/jacket` inside a graphical session.
+System Python 3, CA certificates and native windowing/display drivers
 remain prerequisites. `com.moonlark.audio-dl.desktop` is an installation template; adjust its
 Exec/Icon paths or install the files into standard locations before using it.
 
 The source archive beside the candidate snapshots the native build inputs,
-including an uncommitted local port. It is not based on `git archive HEAD`.
+including local source changes.
 Exact resolved Cargo dependency sources/notices, the Geist OFL license, Linux
 runtime sources and checksums accompany the candidate. `mise run licenses:native`
 generates the target-specific Cargo inventory; collection fails on missing or
@@ -43,7 +41,7 @@ Homebrew runtime components. Candidate generation is not publication.
 
 ## Migration and local data
 
-The application identifier remains `com.moonlark.audio-dl`. On macOS, app data is
+The data and cache namespace is `com.moonlark.audio-dl`. On macOS, app data is
 under `~/Library/Application Support/com.moonlark.audio-dl` and cache under
 `~/Library/Caches/com.moonlark.audio-dl`. On Linux, XDG data/cache roots are used,
 typically `~/.local/share/com.moonlark.audio-dl` and
@@ -143,6 +141,5 @@ replace graphical, native-dialog, live-source or account testing. Windows, Intel
 Macs and older macOS versions need separate build/runtime qualification. Old Tauri
 screenshots and installer tests are historical evidence and do not qualify iced.
 
-The automatic Tauri release workflow is replaced with manual native candidate
-builds. The retained published-release verifier is manual and applies only to old
-Tauri releases. No workflow on this branch automatically publishes native binaries.
+The manual candidate workflow builds and verifies archives on both platforms.
+See the [release checklist](releasing.md) before publishing native binaries.
