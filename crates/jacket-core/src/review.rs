@@ -17,6 +17,27 @@ pub struct Review {
     revision: u64,
     bulk_undo: Vec<Change>,
     numbering_undo: Vec<NumberChange>,
+    last_move: Option<TrackMove>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TrackMove {
+    from: usize,
+    to: usize,
+}
+
+impl TrackMove {
+    fn index_after(self, index: usize) -> usize {
+        if index == self.from {
+            self.to
+        } else if self.from < index && index <= self.to {
+            index - 1
+        } else if self.to <= index && index < self.from {
+            index + 1
+        } else {
+            index
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -42,6 +63,7 @@ impl Review {
             revision: 1,
             bulk_undo: Vec::new(),
             numbering_undo: Vec::new(),
+            last_move: None,
         }
     }
 
@@ -55,10 +77,11 @@ impl Review {
             revision: draft.revision,
             bulk_undo: Vec::new(),
             numbering_undo: Vec::new(),
+            last_move: None,
         })
     }
 
-    /// Recovery already contains the exact committed tags and source-order selection.
+    /// Recovery already contains the selected occurrences in their committed order.
     pub fn from_plan(plan: &ExportPlan) -> Self {
         Self {
             inspection: Inspection {
@@ -76,6 +99,7 @@ impl Review {
             revision: 1,
             bulk_undo: Vec::new(),
             numbering_undo: Vec::new(),
+            last_move: None,
         }
     }
 
@@ -132,6 +156,58 @@ impl Review {
         Ok(())
     }
 
+    /// Move an occurrence to its final zero-based position, carrying its selection
+    /// and edit history with it even when multiple occurrences share a source.
+    pub fn move_track(&mut self, from: usize, to: usize) -> Result<(), String> {
+        if from.max(to) >= self.inspection.tracks.len() {
+            return Err("Choose a position in the track list.".into());
+        }
+        if from != to {
+            self.changed()?;
+            let movement = TrackMove { from, to };
+            self.reorder(movement);
+            self.last_move = Some(movement);
+        }
+        Ok(())
+    }
+
+    pub fn can_undo_move(&self) -> bool {
+        self.last_move.is_some()
+    }
+
+    pub fn undo_move(&mut self) -> Result<Option<usize>, String> {
+        let Some(last) = self.last_move else {
+            return Ok(None);
+        };
+        self.changed()?;
+        self.reorder(TrackMove {
+            from: last.to,
+            to: last.from,
+        });
+        self.last_move = None;
+        Ok(Some(last.from))
+    }
+
+    fn reorder(&mut self, movement: TrackMove) {
+        let TrackMove { from, to } = movement;
+        if from < to {
+            self.inspection.tracks[from..=to].rotate_left(1);
+        } else {
+            self.inspection.tracks[to..=from].rotate_right(1);
+        }
+        self.selected = self
+            .selected
+            .iter()
+            .map(|&index| movement.index_after(index))
+            .collect();
+        for change in &mut self.bulk_undo {
+            change.index = movement.index_after(change.index);
+        }
+        for change in &mut self.numbering_undo {
+            change.index = movement.index_after(change.index);
+        }
+    }
+
     pub fn edit_track(&mut self, index: usize, metadata: Metadata) -> Result<(), String> {
         validate_metadata(&metadata)?;
         let before = self
@@ -174,8 +250,9 @@ impl Review {
         if year.is_some_and(|value| !(1000..=9999).contains(&value)) {
             return Err("Enter a year from 1000 to 9999, or leave it blank.".into());
         }
-        let follows_album = self.preferences.title == self.preferences.album_title.trim()
-            || self.preferences.title == self.inspection.title;
+        let follows_album = self.inspection.suggested_mode == CollectionMode::Album
+            && (self.preferences.title == self.preferences.album_title.trim()
+                || self.preferences.title == self.inspection.title);
         self.changed()?;
         self.preferences.album_title = title;
         self.preferences.album_artist = artist;
@@ -194,6 +271,24 @@ impl Review {
     /// its source identified it as an album. Selection does not change intent.
     pub fn is_song(&self) -> bool {
         self.inspection.tracks.len() == 1
+    }
+
+    /// The provider image available when the review uses a shared cover.
+    pub fn source_artwork_url(&self) -> Option<&str> {
+        let first_track_cover = || {
+            self.inspection
+                .tracks
+                .iter()
+                .find_map(|track| track.artwork_url.as_deref())
+        };
+        self.preferences.shared_artwork.as_deref().or_else(|| {
+            let inspection = self.inspection.artwork_url.as_deref();
+            if self.is_song() {
+                first_track_cover().or(inspection)
+            } else {
+                inspection.or_else(first_track_cover)
+            }
+        })
     }
 
     /// The tags used in the export, without changing the inspected or edited
@@ -256,16 +351,7 @@ impl Review {
             } else {
                 self.preferences.artwork_mode
             };
-        let shared_artwork_url = self.preferences.shared_artwork.clone().or_else(|| {
-            self.is_song()
-                .then(|| {
-                    self.inspection.tracks[0]
-                        .artwork_url
-                        .clone()
-                        .or_else(|| self.inspection.artwork_url.clone())
-                })
-                .flatten()
-        });
+        let shared_artwork_url = self.source_artwork_url().map(str::to_owned);
         Ok(ExportPlan {
             title: self.preferences.title.clone(),
             source_url: self.inspection.source_url.clone(),
@@ -342,7 +428,7 @@ impl Review {
             .map(|track| track.metadata.track_number)
             .collect::<Vec<_>>();
         fill_numbers(&mut self.inspection, true);
-        self.numbering_undo = self
+        let changes: Vec<_> = self
             .inspection
             .tracks
             .iter()
@@ -356,6 +442,9 @@ impl Review {
                 after: track.metadata.track_number,
             })
             .collect();
+        if !changes.is_empty() {
+            self.numbering_undo = changes;
+        }
         Ok(())
     }
 

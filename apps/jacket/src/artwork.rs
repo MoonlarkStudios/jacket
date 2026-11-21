@@ -12,18 +12,7 @@ pub fn source_url(review: &Review) -> Option<&str> {
     if review.preferences.shared_artwork_asset.is_some() {
         return None;
     }
-    review
-        .preferences
-        .shared_artwork
-        .as_deref()
-        .or(review.inspection.artwork_url.as_deref())
-        .or_else(|| {
-            review
-                .inspection
-                .tracks
-                .iter()
-                .find_map(|track| track.artwork_url.as_deref())
-        })
+    review.source_artwork_url()
 }
 
 /// The image actually selected by an export plan. Per-track output is represented

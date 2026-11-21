@@ -1,8 +1,11 @@
+use super::destination::{ExportDestination, MusicFolder, MusicFolderEditor};
+use super::intake::{Intake, IntakeCoverRequest};
+use super::receipt::{Receipt, Recording};
 use crate::editor::{self, Editor};
 use crate::settings::{
     Appearance, ArtworkChoice, BrowserChoice, FormatChoice, ModeChoice, OutputChoice,
 };
-use audio_engine::{AuthOptions, ExportPlan, ExportPreview, ExportResult, ProgressEvent};
+use audio_engine::{AuthOptions, ExportPlan, ExportPreview, ProgressEvent};
 use iced::window;
 use jacket_core::{CompletionIdentity, Review, SourceIntent};
 use jacket_desktop::artwork_assets::Asset;
@@ -18,15 +21,29 @@ use std::time::Instant;
 pub enum Panel {
     Workspace,
     Settings,
+    MusicFolder,
     Appearance,
     Options,
     SourceNotes,
     Preview,
     Editor,
+    SongEditor,
+    CollectionEditor,
+    TrackOrder,
     Crop,
     Replace,
     Discard,
     Close,
+}
+
+impl Panel {
+    pub fn inline_editor(self) -> bool {
+        matches!(self, Self::SongEditor | Self::CollectionEditor)
+    }
+
+    pub fn review_tool(self) -> bool {
+        self.inline_editor() || self == Self::TrackOrder
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,6 +64,7 @@ pub struct Boot {
     pub(super) recovery: Option<Recovery>,
     pub(super) appearance: Appearance,
     pub(super) appearance_valid: bool,
+    pub(super) music_folder: Option<MusicFolder>,
     pub(super) downloader_preferences: downloader_updates::Preferences,
     pub(super) warning: Option<String>,
 }
@@ -67,10 +85,12 @@ pub enum Message {
     ConfirmFind,
     Example,
     TrackScrolled(f32),
+    TrackListSized(f32),
     Toggle(usize, bool),
     SelectAll(bool),
     OpenEditor(editor::Kind),
     Editor(editor::Action),
+    RestoreSourceTags,
     Format(FormatChoice),
     Artwork(ArtworkChoice),
     Output(OutputChoice),
@@ -79,7 +99,15 @@ pub enum Message {
     ClosePanel,
     Preview,
     Save,
+    SaveAs,
     Destination(Option<PathBuf>),
+    OpenMusicFolder,
+    ChooseMusicRoot,
+    MusicRootPicked(Option<PathBuf>),
+    MusicRule(String),
+    ApplyMusicFolder,
+    ClearMusicFolder,
+    MusicFolderSaved(Result<Option<MusicFolder>, String>),
     Cancel,
     Saved(CompletionIdentity, Result<bool, String>),
     DismissError,
@@ -89,7 +117,7 @@ pub enum Message {
     DismissRecovery,
     ExportSaved(
         Box<ExportPlan>,
-        PathBuf,
+        ExportDestination,
         CompletionIdentity,
         Result<bool, String>,
     ),
@@ -97,6 +125,15 @@ pub enum Message {
     UndoBulk,
     NumberTracks,
     UndoNumbering,
+    MoveTrack {
+        from: usize,
+        to: usize,
+    },
+    UndoTrackMove,
+    ChooseTrackPosition(usize),
+    TrackPosition(String),
+    ApplyTrackPosition,
+    CancelTrackPosition,
     RecoveryDismissed(Result<(), String>),
     CloseRequested(window::Id),
     ConfirmClose,
@@ -125,9 +162,11 @@ pub enum Message {
     PickDownloader,
     DownloaderPath(Option<PathBuf>),
     SourceCover(String, Result<crate::artwork::Raster, String>),
+    IntakeCover(IntakeCoverRequest, Result<crate::artwork::Raster, String>),
     PreviewCover(String, Result<crate::artwork::Raster, String>),
     Dropped(PathBuf),
     ImportCover,
+    UseSourceCover,
     CoverFile(Option<PathBuf>),
     CoverImported(Result<(Asset, PathBuf), String>),
     RemoteCoverImported(CompletionIdentity, Result<(Asset, PathBuf), String>),
@@ -142,11 +181,14 @@ pub enum Message {
     ApplyCrop,
     OpenOutput,
     OpenPlaylist,
+    DismissReceipt,
+    ReceiptCover(Result<crate::artwork::Raster, String>),
     Opened(Result<(), String>),
     Screenshot(window::Screenshot),
     ScreenshotSaved(Result<(), String>),
     FocusSource,
     Escape,
+    CapturedEscape,
 }
 
 impl fmt::Debug for Message {
@@ -164,8 +206,13 @@ pub(super) struct SuspendedReview {
     pub(super) source_cover: Option<crate::artwork::Raster>,
     pub(super) source_cover_error: Option<String>,
     pub(super) track_scroll: f32,
-    pub(super) result: Option<ExportResult>,
+    pub(super) result: Option<Receipt>,
     pub(super) appearance: Appearance,
+}
+
+pub struct TrackPositionEdit {
+    pub index: usize,
+    pub position: String,
 }
 
 pub struct App {
@@ -174,15 +221,21 @@ pub struct App {
     pub job: Option<Job>,
     pub url: String,
     pub intent: SourceIntent,
+    pub intake: Option<Intake>,
+    pub source_error: Option<String>,
+    pub(super) intake_cover_handoff: Option<IntakeCoverRequest>,
     pub panel: Panel,
     pub editor: Option<Editor>,
     pub preview: Option<ExportPreview>,
     pub progress: Option<ProgressEvent>,
-    pub result: Option<ExportResult>,
+    pub result: Option<Receipt>,
+    pub(super) export_recording: Option<Recording>,
     pub recovery: Option<Recovery>,
     pub error: Option<String>,
     pub notice: Option<String>,
     pub appearance: Appearance,
+    pub music_folder: Option<MusicFolder>,
+    pub music_folder_editor: Option<MusicFolderEditor>,
     pub theme: crate::theme::ResolvedTheme,
     pub display_scale: f32,
     pub(super) owned_rasters: std::collections::BTreeMap<String, crate::artwork::Raster>,
@@ -207,9 +260,14 @@ pub struct App {
     pub preview_cover_error: Option<String>,
     pub(super) crop_source: Option<(Asset, PathBuf)>,
     pub track_scroll: f32,
+    pub(super) track_viewport_height: f32,
+    pub(super) collection_editor_anchor: Option<f32>,
+    pub arranged_track: Option<usize>,
+    pub track_position: Option<TrackPositionEdit>,
     pub crop_x: String,
     pub crop_y: String,
     pub crop_size: String,
+    pub crop_preview_size: u32,
     pub(super) pending_plan: Option<ExportPlan>,
     pub(super) close_window: Option<window::Id>,
     pub(super) close_after_job: bool,

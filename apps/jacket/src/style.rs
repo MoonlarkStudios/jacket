@@ -46,18 +46,6 @@ impl Presentation {
         }
     }
 
-    pub fn badge(self) -> container::Style {
-        container::Style {
-            background: Some(theme::blend(self.colors.accent, self.colors.panel, 0.10).into()),
-            text_color: Some(self.colors.accent),
-            border: Border {
-                radius: 4.0.into(),
-                ..Border::default()
-            },
-            ..container::Style::default()
-        }
-    }
-
     pub fn line(self) -> impl Fn(&Theme) -> rule::Style {
         move |theme| {
             let mut style = rule::default(theme);

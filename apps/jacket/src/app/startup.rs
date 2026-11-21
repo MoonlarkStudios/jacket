@@ -77,11 +77,15 @@ impl App {
             job: None,
             url: String::new(),
             intent: SourceIntent::Song,
+            intake: None,
+            source_error: None,
+            intake_cover_handoff: None,
             panel: Panel::Workspace,
             editor: None,
             preview: None,
             progress: None,
             result: None,
+            export_recording: None,
             recovery: None,
             error: theme_error,
             notice: None,
@@ -90,6 +94,8 @@ impl App {
                 .resolve(1)
                 .expect("startup themes have already been validated"),
             appearance,
+            music_folder: None,
+            music_folder_editor: None,
             display_scale: 1.0,
             owned_rasters: std::collections::BTreeMap::new(),
             raster_loading: std::collections::BTreeSet::new(),
@@ -113,9 +119,14 @@ impl App {
             preview_cover_error: None,
             crop_source: None,
             track_scroll: 0.0,
+            track_viewport_height: 0.0,
+            collection_editor_anchor: None,
+            arranged_track: None,
+            track_position: None,
             crop_x: "0".into(),
             crop_y: "0".into(),
             crop_size: "1000".into(),
+            crop_preview_size: 1000,
             pending_plan: None,
             close_window: None,
             close_after_job: false,
@@ -131,6 +142,16 @@ impl App {
             _example_cover_file: None,
         };
         if isolated {
+            if args.iter().any(|arg| arg == "--organized") {
+                app.music_folder = Some(super::destination::MusicFolder {
+                    root: if cfg!(windows) {
+                        "C:\\Music".into()
+                    } else {
+                        "/Music".into()
+                    },
+                    rule: jacket_core::PathRule::default(),
+                });
+            }
             let mut inspection = example::album();
             if args.iter().any(|arg| arg == "--song") {
                 inspection.tracks.truncate(1);
@@ -172,6 +193,7 @@ impl App {
                             app.crop_x = "80".into();
                             app.crop_y = "80".into();
                             app.crop_size = "480".into();
+                            app.crop_preview_size = 480;
                             app.panel = Panel::Crop;
                         }
                         Err(error) => app.error = Some(error.to_string()),
@@ -179,15 +201,88 @@ impl App {
                     Some("settings") => app.panel = Panel::Settings,
                     Some("appearance") => app.panel = Panel::Appearance,
                     Some("options") => app.panel = Panel::Options,
+                    Some("music-folder") => {
+                        let _ = app.open_music_folder();
+                    }
                     Some("preview") => {
                         let _ = app.prepare_preview();
                     }
-                    Some("editor") => {
-                        app.editor = app
+                    Some("opening" | "opening-tracks") => {
+                        use super::intake::{Intake, SourceKind};
+                        if let Some(review) = app.review.take() {
+                            let (kind, url) = if review.is_song() {
+                                (
+                                    SourceKind::Song,
+                                    "https://music.youtube.com/watch?v=fixture0001",
+                                )
+                            } else {
+                                (
+                                    SourceKind::Playlist,
+                                    "https://www.youtube.com/playlist?list=PLSample123456",
+                                )
+                            };
+                            app.url = url.to_owned();
+                            let mut intake = Intake::new("example-opening".to_owned(), kind);
+                            if args[index + 1] == "opening-tracks" {
+                                let inspection = review.inspection;
+                                let total = inspection.tracks.len();
+                                for (index, track) in
+                                    inspection.tracks.into_iter().take(3).enumerate()
+                                {
+                                    intake.observe(audio_engine::InspectionUpdate {
+                                        title: inspection.title.clone(),
+                                        source_url: url.to_owned(),
+                                        suggested_mode: inspection.suggested_mode,
+                                        artwork_url: None,
+                                        index,
+                                        total: Some(total),
+                                        track,
+                                    });
+                                }
+                                intake.cover = Some(crate::artwork::example_cover());
+                            }
+                            app.intake = Some(intake);
+                        }
+                    }
+                    Some("saved") => {
+                        if let Some(plan) = app
                             .review
                             .as_ref()
-                            .map(|r| Editor::new(editor::Kind::Track(0), r));
-                        app.panel = Panel::Editor;
+                            .and_then(|review| review.plan(app.auth.clone()).ok())
+                        {
+                            use audio_engine::{ExportResult, OutputKind};
+                            let root = if cfg!(windows) { "C:\\Music" } else { "/Music" };
+                            let path = PathBuf::from(root)
+                                .join("The Paper Trails")
+                                .join("Room to breathe");
+                            let path = if plan.output_kind == OutputKind::File {
+                                path.join("First light (2).m4a")
+                            } else {
+                                path
+                            };
+                            let playlist_path = (plan.output_kind == OutputKind::Folder)
+                                .then(|| path.join("playlist.m3u").display().to_string());
+                            app.export_recording =
+                                Some(super::receipt::Recording::from_plan(&app, &plan));
+                            let _ = app.finish_export(ExportResult {
+                                output_path: path.display().to_string(),
+                                output_kind: plan.output_kind,
+                                playlist_path,
+                                track_count: plan.tracks.len(),
+                                warnings: Vec::new(),
+                            });
+                        }
+                    }
+                    Some("editor") => {
+                        let _ = app.update(super::Message::OpenEditor(editor::Kind::Track(0)));
+                    }
+                    Some("shared-tags") => {
+                        let _ =
+                            app.update(super::Message::Mode(crate::settings::ModeChoice::Album));
+                        let _ = app.update(super::Message::OpenEditor(editor::Kind::Album));
+                    }
+                    Some("track-order") => {
+                        let _ = app.update(super::Message::OpenPanel(Panel::TrackOrder));
                     }
                     Some("bulk") => {
                         app.editor = app

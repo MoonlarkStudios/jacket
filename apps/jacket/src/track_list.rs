@@ -1,16 +1,18 @@
 //! Fixed-height, occurrence-indexed track rows with bounded widget creation.
-use crate::app::{App, Message};
+use crate::app::{App, Message, Panel};
 use crate::editor::Kind;
 use crate::theme;
+use crate::view::focus_button;
 use iced::widget::text::Wrapping;
 use iced::widget::{
-    button, checkbox, column, container, keyed, responsive, row, scrollable, space, text,
+    button, checkbox, column, container, keyed, responsive, row, scrollable, sensor, space, text,
+    tooltip,
 };
 use iced::{Alignment, Element, Length};
 use std::borrow::Cow;
 use std::ops::Range;
 
-const ROW_HEIGHT: f32 = 52.0;
+pub const ROW_HEIGHT: f32 = 52.0;
 const OVERSCAN: usize = 3;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -20,12 +22,26 @@ enum RowKey {
     After,
 }
 
+pub fn edit_id(index: usize) -> String {
+    format!("edit-track-{index}")
+}
+
+pub fn move_id(index: usize, up: bool) -> String {
+    let direction = if up { "up" } else { "down" };
+    format!("move-track-{index}-{direction}")
+}
+
+pub fn position_id(index: usize) -> String {
+    format!("position-track-{index}")
+}
+
 pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
     let Some(review) = &app.review else {
         return space().into();
     };
     let p = app.presentation();
-    let enabled = !app.busy();
+    let arranging = app.panel == Panel::TrackOrder;
+    let enabled = !app.busy() && app.panel == Panel::Workspace;
     let count = review.inspection.tracks.len();
     let all_selected = count > 0 && review.selected.len() == count;
     let mut toolbar = row![
@@ -38,16 +54,26 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
             .size(12)
             .color(p.colors.text_muted),
         space::horizontal(),
-        button(text("Edit selected").size(12))
-            .padding([5, 8])
-            .on_press_maybe(
-                (enabled && !review.selected.is_empty()).then_some(Message::OpenEditor(Kind::Bulk))
-            )
-            .style(p.quiet()),
+        focus_button::wrap(
+            "collection-edit-selected",
+            button(text("Edit selected").size(12))
+                .padding([5, 8])
+                .style(p.quiet()),
+            (enabled && !review.selected.is_empty()).then_some(Message::OpenEditor(Kind::Bulk)),
+            p.colors.accent,
+        ),
+        focus_button::wrap(
+            "open-track-order",
+            button(text("Track order…").size(12))
+                .padding([5, 8])
+                .style(p.secondary()),
+            (enabled && count > 1).then_some(Message::OpenPanel(Panel::TrackOrder)),
+            p.colors.accent,
+        ),
     ]
     .spacing(12)
     .align_y(Alignment::Center);
-    if review.can_undo_bulk() {
+    if review.can_undo_bulk() && !arranging {
         toolbar = toolbar.push(
             button(text("Undo edit").size(12))
                 .padding([5, 8])
@@ -55,6 +81,23 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
                 .style(p.quiet()),
         );
     }
+    if arranging {
+        toolbar = row![
+            text("Track order").size(14).font(crate::style::semibold()),
+            text(app.arranged_track.map_or_else(
+                || "Use the arrows or choose Move…".into(),
+                |index| format!("Position {} of {count}", index + 1)
+            ))
+            .size(12)
+            .color(p.colors.text_muted),
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center);
+    }
+    let editor_track = app.editor.as_ref().and_then(|editor| match editor.kind {
+        Kind::Track(index) => Some(index),
+        _ => None,
+    });
     let viewport = responsive(move |size| {
         let range = visible_rows(
             count,
@@ -62,9 +105,10 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
             (size.height - 26.0).max(ROW_HEIGHT),
         );
         let artist_width = (size.width * 0.25).clamp(90.0, 170.0);
+        let number_width = if arranging && count >= 10_000 { 36 } else { 28 };
         let mut headings = row![
             space().width(18),
-            text("#").size(10).width(28),
+            text("#").size(10).width(number_width),
             text(if compact { "Track" } else { "Title" })
                 .size(10)
                 .width(Length::Fill)
@@ -76,7 +120,7 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
                 .push(text("Artist").size(10).width(artist_width))
                 .push(text("Time").size(10).width(42));
         }
-        headings = headings.push(space().width(40));
+        headings = headings.push(space().width(if arranging { 124 } else { 40 }));
         let header = container(headings)
             .padding([5, 12])
             .width(Length::Fill)
@@ -96,10 +140,14 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
         for index in range.clone() {
             // A source ID may repeat; each ordered occurrence owns its controls.
             let track = &review.inspection.tracks[index];
-            let number = track.metadata.track_number.map_or_else(
-                || format!("{:02}", index + 1),
-                |number| format!("{number:02}"),
-            );
+            let number = if arranging {
+                format!("{:02}", index + 1)
+            } else {
+                track.metadata.track_number.map_or_else(
+                    || format!("{:02}", index + 1),
+                    |number| format!("{number:02}"),
+                )
+            };
             let title = text(single_line(&track.metadata.title))
                 .size(13)
                 .width(Length::Fill)
@@ -130,11 +178,11 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
                 container(
                     text(number)
                         .size(11)
-                        .width(28)
+                        .width(number_width)
                         .wrapping(Wrapping::None)
                         .color(p.colors.text_muted)
                 )
-                .width(28)
+                .width(number_width)
                 .clip(true),
                 container(labels).width(Length::Fill).clip(true),
             ]
@@ -170,14 +218,45 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
                         .clip(true),
                     );
             }
-            line = line.push(
-                button(text("Edit").size(11))
+            line = if arranging {
+                line.push(
+                    row![
+                        focus_button::wrap(
+                            position_id(index),
+                            button(text("Move…").size(11))
+                                .width(52)
+                                .padding([5, 6])
+                                .style(p.quiet()),
+                            (!app.busy() && app.track_position.is_none())
+                                .then_some(Message::ChooseTrackPosition(index)),
+                            p.colors.accent,
+                        ),
+                        move_button(app, index, count, true),
+                        move_button(app, index, count, false)
+                    ]
+                    .spacing(6),
+                )
+            } else {
+                line.push(focus_button::wrap(
+                    edit_id(index),
+                    button(
+                        text(if editor_track == Some(index) {
+                            "Open"
+                        } else {
+                            "Edit"
+                        })
+                        .size(11),
+                    )
                     .padding([5, 7])
                     .width(40)
-                    .on_press_maybe(enabled.then_some(Message::OpenEditor(Kind::Track(index))))
                     .style(p.quiet()),
-            );
+                    enabled.then_some(Message::OpenEditor(Kind::Track(index))),
+                    p.colors.accent,
+                ))
+            };
             let selected = review.selected.contains(&index);
+            let active =
+                editor_track == Some(index) || (arranging && app.arranged_track == Some(index));
             let row_surface = container(line)
                 .padding([6, 12])
                 .height(ROW_HEIGHT - 1.0)
@@ -185,8 +264,14 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
                 .align_y(Alignment::Center)
                 .clip(true)
                 .style(move |_| container::Style {
-                    background: selected
-                        .then(|| theme::blend(p.colors.accent, p.colors.panel, 0.055).into()),
+                    background: (selected || active).then(|| {
+                        theme::blend(
+                            p.colors.accent,
+                            p.colors.panel,
+                            if active { 0.19 } else { 0.055 },
+                        )
+                        .into()
+                    }),
                     text_color: Some(p.colors.text),
                     ..container::Style::default()
                 });
@@ -217,7 +302,11 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
             .height(Length::Fill)
             .width(Length::Fill)
             .on_scroll(|viewport| Message::TrackScrolled(viewport.absolute_offset().y));
-        column![header, table]
+        let measured = sensor(table)
+            .key(app.panel)
+            .on_show(|size| Message::TrackListSized(size.height))
+            .on_resize(|size| Message::TrackListSized(size.height));
+        column![header, measured]
             .spacing(0)
             .height(Length::Fill)
             .into()
@@ -227,6 +316,32 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
         .spacing(8)
         .height(Length::Fill)
         .into()
+}
+
+fn move_button(app: &App, index: usize, count: usize, up: bool) -> Element<'_, Message> {
+    let p = app.presentation();
+    let to = if up {
+        index.checked_sub(1)
+    } else {
+        Some(index + 1).filter(|&next| next < count)
+    };
+    tooltip(
+        focus_button::wrap(
+            move_id(index, up),
+            button(text(if up { "↑" } else { "↓" }).size(15))
+                .width(30)
+                .padding([4, 7])
+                .style(p.secondary()),
+            to.filter(|_| !app.busy() && app.track_position.is_none())
+                .map(|to| Message::MoveTrack { from: index, to }),
+            p.colors.accent,
+        ),
+        container(text(if up { "Move up" } else { "Move down" }).size(12))
+            .padding(6)
+            .style(move |_| p.panel()),
+        tooltip::Position::Left,
+    )
+    .into()
 }
 
 // Preserve original tags while keeping explicit line breaks out of row geometry.

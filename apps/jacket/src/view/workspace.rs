@@ -1,14 +1,38 @@
 use super::components::{self, CoverContext};
-use super::options;
+use super::{collection_tools, cover_controls, focus_button, options};
 use crate::app::{App, Message, Panel};
 use crate::editor::Kind;
 use crate::icons::{self, Icon};
+use crate::settings::ModeChoice;
 use crate::style;
 use audio_engine::{CollectionMode, OutputKind};
 use iced::widget::{button, column, container, row, rule, space, text};
 use iced::{Alignment, Element, Length};
 
 pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
+    if app.panel == Panel::SongEditor {
+        let p = app.presentation();
+        return column![
+            super::song::view(app, compact),
+            rule::horizontal(1).style(p.line()),
+            container(
+                container(super::song::edit_actions(app))
+                    .max_width(760)
+                    .width(Length::Fill)
+            )
+            .padding(if compact { [10, 18] } else { [12, 28] })
+            .width(Length::Fill)
+            .style(move |_| p.surface(p.colors.panel)),
+        ]
+        .height(Length::Fill)
+        .into();
+    }
+    if let Some(opening) = super::opening::view(app, compact) {
+        return opening;
+    }
+    if let Some(receipt) = &app.result {
+        return super::receipt::view(app, receipt, compact);
+    }
     let p = app.presentation();
     let content: Element<'_, Message> = if let Some(review) = &app.review {
         let left: Element<'_, Message> = if review.is_song() {
@@ -16,84 +40,62 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
         } else {
             collection(app, compact)
         };
-        if compact {
-            left
-        } else {
-            row![
-                left,
-                rule::vertical(1).style(p.line()),
-                container(options::view(app, true))
-                    .width(284)
-                    .padding(20)
+        let mut split = row![left].height(Length::Fill);
+        if !compact {
+            let inspector = match app.panel {
+                Panel::CollectionEditor => collection_tools::editor(app, false),
+                Panel::TrackOrder => collection_tools::order(app, false),
+                _ => options::view(app, true),
+            };
+            split = split.push(rule::vertical(1).style(p.line())).push(
+                container(inspector)
+                    .width(if app.panel == Panel::CollectionEditor {
+                        384
+                    } else {
+                        284
+                    })
+                    .padding(if app.panel == Panel::CollectionEditor {
+                        0
+                    } else {
+                        20
+                    })
                     .height(Length::Fill)
-                    .style(move |_| p.surface(p.colors.panel))
-            ]
-            .height(Length::Fill)
-            .into()
-        }
-    } else if let Some(result) = &app.result {
-        let mut content = column![
-            container(icons::view(Icon::Check, p.colors.success, 28.0))
-                .padding(14)
-                .style(move |_| p.panel()),
-            text("Download complete").size(22).font(style::semibold()),
-            text(format!(
-                "{} {} saved",
-                result.track_count,
-                if result.track_count == 1 {
-                    "track"
-                } else {
-                    "tracks"
-                }
-            ))
-            .size(14)
-            .color(p.colors.text_muted),
-            text(&result.output_path)
-                .size(12)
-                .width(Length::Fill)
-                .color(p.colors.text_muted),
-            row![
-                button(
-                    row![
-                        icons::view(Icon::Folder, p.colors.accent_text, 15.0),
-                        text(if result.output_kind == OutputKind::File {
-                            "Show file"
-                        } else {
-                            "Open folder"
-                        })
-                        .size(13)
-                    ]
-                    .spacing(7)
-                    .align_y(Alignment::Center)
-                )
-                .padding([10, 14])
-                .on_press(Message::OpenOutput)
-                .style(p.primary()),
-                button("New download")
-                    .padding([10, 14])
-                    .on_press(Message::ConfirmReset)
-                    .style(p.secondary()),
-            ]
-            .spacing(10),
-        ]
-        .spacing(16)
-        .max_width(540);
-        if result.playlist_path.is_some() {
-            content = content.push(
-                button("Open playlist")
-                    .on_press(Message::OpenPlaylist)
-                    .style(p.quiet()),
+                    .style(move |_| p.surface(p.colors.panel)),
             );
         }
-        for warning in &result.warnings {
-            content = content.push(text(warning).size(12).color(p.colors.warning));
-        }
-        container(content).center(Length::Fill).padding(28).into()
+        split.into()
     } else {
         empty_workspace(app)
     };
     if compact {
-        let footer: Element<'_, Message> = if app.review.is_some() {
+        let footer: Element<'_, Message> = if app.panel == Panel::CollectionEditor {
+            column![
+                rule::horizontal(1).style(p.line()),
+                collection_tools::editor(app, true)
+            ]
+            .into()
+        } else if app.panel == Panel::TrackOrder {
+            container(collection_tools::order(app, true))
+                .padding([10, 16])
+                .width(Length::Fill)
+                .height(76)
+                .align_y(Alignment::Center)
+                .style(move |_| p.surface(p.colors.panel))
+                .into()
+        } else if app
+            .review
+            .as_ref()
+            .is_some_and(|review| review.preferences.output_kind == OutputKind::File)
+        {
+            container(super::destination::save_controls(
+                app,
+                super::destination::Placement::Compact,
+            ))
+            .padding([10, 16])
+            .width(Length::Fill)
+            .style(move |_| p.surface(p.colors.panel))
+            .into()
+        } else if app.review.is_some() {
             container(
                 row![
                     button(
@@ -139,7 +141,7 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
         };
         column![content, footer].height(Length::Fill).into()
     } else {
-        content
+        column![content].height(Length::Fill).into()
     }
 }
 
@@ -148,14 +150,16 @@ fn collection(app: &App, compact: bool) -> Element<'_, Message> {
     let Some(review) = &app.review else {
         return space().into();
     };
-    let title = if review.preferences.mode == CollectionMode::Album
-        && !review.preferences.album_title.trim().is_empty()
-    {
+    let shared = review.preferences.mode == CollectionMode::Album;
+    let album = review.inspection.suggested_mode == CollectionMode::Album;
+    let title = if album && shared && !review.preferences.album_title.trim().is_empty() {
         review.preferences.album_title.as_str()
-    } else {
+    } else if album {
         review.inspection.title.as_str()
+    } else {
+        review.preferences.title.as_str()
     };
-    let artist = if !review.preferences.album_artist.trim().is_empty() {
+    let artist = if shared && !review.preferences.album_artist.trim().is_empty() {
         review.preferences.album_artist.as_str()
     } else {
         ""
@@ -169,7 +173,11 @@ fn collection(app: &App, compact: bool) -> Element<'_, Message> {
     let count = review.inspection.tracks.len();
     let metadata = [
         (!artist.is_empty()).then(|| artist.to_owned()),
-        review.preferences.year.map(|year| year.to_string()),
+        review
+            .preferences
+            .year
+            .filter(|_| shared)
+            .map(|year| year.to_string()),
         Some(format!(
             "{count} {}",
             if count == 1 { "track" } else { "tracks" }
@@ -181,13 +189,9 @@ fn collection(app: &App, compact: bool) -> Element<'_, Message> {
     .collect::<Vec<_>>()
     .join("  ·  ");
     let mut details = column![
-        text(if review.preferences.mode == CollectionMode::Album {
-            "Album"
-        } else {
-            "Playlist"
-        })
-        .size(11)
-        .color(p.colors.accent),
+        text(if album { "Album" } else { "Playlist" })
+            .size(11)
+            .color(p.colors.accent),
         iced::widget::tooltip(
             container(
                 text(title)
@@ -215,26 +219,45 @@ fn collection(app: &App, compact: bool) -> Element<'_, Message> {
     ]
     .spacing(8)
     .width(Length::Fill);
-    let album = review.preferences.mode == CollectionMode::Album;
-    let kind = if album { Kind::Album } else { Kind::OutputName };
-    let mut actions = row![button(
-        row![
-            icons::view(Icon::Edit, p.colors.text_muted, 13.0),
-            text(if album {
-                "Edit album"
-            } else {
-                "Rename playlist"
-            })
-            .size(12)
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center)
-    )
-    .padding([5, 0])
-    .on_press_maybe((!app.busy()).then_some(Message::OpenEditor(kind)))
-    .style(p.quiet()),]
-    .spacing(12)
-    .align_y(Alignment::Center);
+    let idle = !app.busy() && app.panel == Panel::Workspace;
+    let action = |id, label, message| {
+        focus_button::wrap(
+            id,
+            button(text(label).size(12))
+                .padding([5, 7])
+                .style(p.quiet()),
+            idle.then_some(message),
+            p.colors.accent,
+        )
+    };
+    let mut actions = row![].spacing(6).align_y(Alignment::Center);
+    if shared {
+        actions = actions.push(action(
+            "collection-edit-album",
+            "Edit shared tags",
+            Message::OpenEditor(Kind::Album),
+        ));
+    }
+    if !album {
+        actions = actions.push(action(
+            "collection-rename",
+            "Rename playlist",
+            Message::OpenEditor(Kind::PlaylistName),
+        ));
+    }
+    actions = actions.push(action(
+        "collection-tag-mode",
+        if shared {
+            "Use individual tags"
+        } else {
+            "Use shared album tags"
+        },
+        Message::Mode(if shared {
+            ModeChoice::Collection
+        } else {
+            ModeChoice::Album
+        }),
+    ));
     if !app.example && !review.inspection.warnings.is_empty() {
         actions = actions.push(
             button(
@@ -251,33 +274,22 @@ fn collection(app: &App, compact: bool) -> Element<'_, Message> {
                 .color(p.colors.warning),
             )
             .padding([5, 0])
-            .on_press(Message::OpenPanel(Panel::SourceNotes))
+            .on_press_maybe(idle.then_some(Message::OpenPanel(Panel::SourceNotes)))
             .style(p.quiet()),
         );
     }
-    if app.source_cover_error.is_some() {
+    if idle && app.example {
         actions = actions.push(
-            button("Retry cover")
+            button("Close example")
                 .padding([5, 0])
-                .on_press_maybe((!app.busy()).then_some(Message::RetryArtwork))
+                .on_press_maybe((!app.busy()).then_some(Message::ConfirmReset))
                 .style(p.quiet()),
         );
     }
-    if app.example {
-        actions = actions
-            .push(
-                container(text("Example").size(10))
-                    .padding([3, 6])
-                    .style(move |_| p.badge()),
-            )
-            .push(
-                button("Close example")
-                    .padding([5, 0])
-                    .on_press_maybe((!app.busy()).then_some(Message::ConfirmReset))
-                    .style(p.quiet()),
-            );
+    if !app.panel.review_tool() {
+        details = details.push(actions.wrap().vertical_spacing(4));
+        details = details.push(cover_controls::view(app, review));
     }
-    details = details.push(actions);
     let hero = row![
         components::cover(
             app,
@@ -288,10 +300,25 @@ fn collection(app: &App, compact: bool) -> Element<'_, Message> {
     ]
     .spacing(if compact { 16 } else { 20 })
     .align_y(Alignment::Center);
-    let collection = column![
+    let heading = if compact && app.panel == Panel::CollectionEditor {
+        container(
+            text(title)
+                .size(13)
+                .font(style::semibold())
+                .wrapping(iced::widget::text::Wrapping::None)
+                .width(Length::Fill)
+                .height(18),
+        )
+        .padding([8, 16])
+        .width(Length::Fill)
+        .clip(true)
+    } else {
         container(hero)
             .padding(if compact { 16 } else { 22 })
-            .width(Length::Fill),
+            .width(Length::Fill)
+    };
+    let collection = column![
+        heading,
         rule::horizontal(1).style(p.line()),
         container(crate::track_list::view(app, compact))
             .padding(if compact { 12 } else { 16 })
