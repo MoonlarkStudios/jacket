@@ -1,0 +1,3 @@
+# Preserve the exact bytes of upstream notices and their recorded checksums.
+third-party/licenses/* -whitespace
+assets/fonts/OFL.txt -whitespace

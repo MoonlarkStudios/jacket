@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640" viewBox="0 0 640 640">
+  <title>Room to breathe — The Paper Trails</title>
+  <desc>Original geometric landscape for Jacket's fictional album review example.</desc>
+  <defs><clipPath id="window"><rect x="48" y="48" width="544" height="400" rx="2"/></clipPath></defs>
+  <rect width="640" height="640" fill="#183b3f"/>
+  <g clip-path="url(#window)">
+    <rect x="48" y="48" width="544" height="400" fill="#e2e6d7"/>
+    <circle cx="390" cy="196" r="102" fill="#d8be76"/>
+    <path d="M48 328 206 202 357 334 466 242 592 334V448H48Z" fill="#81998a"/>
+    <path d="M48 370 184 304 286 325 392 375 507 319 592 344V448H48Z" fill="#4a776d"/>
+    <path d="M48 416 171 353 272 364 394 414 506 380 592 398V448H48Z" fill="#284f4f"/>
+  </g>
+  <text x="48" y="511" fill="#f4f1e5" font-family="Geist, sans-serif" font-size="44" font-weight="400" letter-spacing="-1.5">Room to breathe</text>
+  <path d="M48 548H592" stroke="#71918a" stroke-width="1"/>
+  <text x="48" y="591" fill="#bdcfbd" font-family="Geist, sans-serif" font-size="15" font-weight="400" letter-spacing="3">THE PAPER TRAILS</text>
+</svg>

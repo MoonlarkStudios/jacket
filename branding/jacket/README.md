@@ -51,4 +51,8 @@ Open `index.html` to review the identity and exact-size PNG exports on light and
 
 Run `node source/build.mjs` to regenerate SVG artwork. To regenerate PNGs as well, set `SHARP_MODULE` to an installed Sharp package path before running the same command. `source/wordmark-outline.json` contains the wordmark paths; regeneration does not require the original font. `source/outline-wordmark.swift` records how those outlines were extracted through CoreText on macOS.
 
-The application uses these assets through `scripts/sync-branding.py` (`mise run branding:sync`). Regenerate the PNG exports after editing the SVG sources, then sync to update `public/branding` and `src-tauri/icons`. Tauri's icon generator creates the native containers, with the optical artwork substituted into the small ICNS entries. The app retains the original bundle identifier and preference namespace for compatibility with existing installations.
+After regenerating the PNGs, run `mise run branding:sync` to bundle the exact
+size-specific exports in `apps/jacket/packaging/macos/Jacket.icns`. The native
+window and Linux package use the 256 px PNG directly. The app header uses the
+flat SVG mark. `mise run check:scripts` checks that the bundle icon is up to
+date and verifies on macOS that Apple’s `iconutil` can extract each size.

@@ -119,6 +119,7 @@ pub enum OutputKind {
     #[default]
     Zip,
     Folder,
+    File,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -203,6 +204,18 @@ pub struct ExportPreview {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audio_file_output_kind_has_an_explicit_transport_value() {
+        assert_eq!(
+            serde_json::to_string(&OutputKind::File).unwrap(),
+            "\"file\""
+        );
+        assert_eq!(
+            serde_json::from_str::<OutputKind>("\"file\"").unwrap(),
+            OutputKind::File
+        );
+    }
 
     #[test]
     fn older_manifest_tracks_have_unknown_embedding_status() {

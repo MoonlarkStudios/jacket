@@ -7,41 +7,40 @@ from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 spec = importlib.util.spec_from_file_location('tool_staging', Path(__file__).with_name('stage-macos-tools.py'))
 staging = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(staging)
 
 
-class DeploymentTarget(unittest.TestCase):
-    def test_platform_override_matches_tauris_packaged_minimum(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            config = root / 'src-tauri'
-            config.mkdir()
-            (config / 'tauri.conf.json').write_text(json.dumps({
-                'bundle': {'macOS': {'minimumSystemVersion': '12.0'}}
-            }))
-            (config / 'tauri.macos.conf.json').write_text(json.dumps({
-                'bundle': {'macOS': {'minimumSystemVersion': '26.0'}}
-            }))
-            self.assertEqual(staging.configured_minimum_macos(root), '26.0')
-            (config / 'tauri.macos.conf.json').write_text('{"bundle": {}}')
-            self.assertEqual(staging.configured_minimum_macos(root), '12.0')
-            (config / 'tauri.macos.conf.json').unlink()
-            self.assertEqual(staging.configured_minimum_macos(root), '12.0')
-
-    def test_platform_minimum_works_without_shared_macos_settings(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            config = root / 'src-tauri'
-            config.mkdir()
-            (config / 'tauri.conf.json').write_text('{"bundle": {}}')
-            self.assertEqual(staging.configured_minimum_macos(root), '10.13')
-            (config / 'tauri.macos.conf.json').write_text(json.dumps({
-                'bundle': {'macOS': {'minimumSystemVersion': '26.0'}}
-            }))
-            self.assertEqual(staging.configured_minimum_macos(root), '26.0')
+class MachODependencies(unittest.TestCase):
+    def test_reads_imports_without_following_the_library_install_name(self):
+        library = Path('_rust.abi3t.so')
+        commands = '''Load command 0
+          cmd LC_ID_DYLIB
+      cmdsize 128
+         name /opt/homebrew/lib/cryptography.hazmat.bindings._rust.abi3t.so (offset 24)
+Load command 1
+          cmd LC_LOAD_DYLIB
+      cmdsize 56
+         name /usr/lib/libSystem.B.dylib (offset 24)
+Load command 2
+          cmd LC_LOAD_WEAK_DYLIB
+      cmdsize 56
+         name @rpath/Optional Library.dylib (offset 24)
+Load command 3
+          cmd LC_REEXPORT_DYLIB
+      cmdsize 64
+         name @loader_path/libcrypto.dylib (offset 24)
+'''
+        with mock.patch.object(staging, 'run', return_value=commands) as otool:
+            self.assertEqual(staging.dependencies(library), [
+                '/usr/lib/libSystem.B.dylib',
+                '@rpath/Optional Library.dylib',
+                '@loader_path/libcrypto.dylib',
+            ])
+        otool.assert_called_once_with('/usr/bin/otool', '-l', library)
 
 
 class ResourceModes(unittest.TestCase):
@@ -57,16 +56,15 @@ class ResourceModes(unittest.TestCase):
             shutil.copy2(installed, generated)
             original_hash = hashlib.sha256(generated.read_bytes()).digest()
             staging.owner_writable_tree(staged)
-            target = root / 'tauri-resource-copy.py'
+            target = root / 'bundled-package.py'
             shutil.copy2(generated, target)
-            # Tauri's build script overwrites its resource path on every build.
             shutil.copy2(generated, target)
             self.assertEqual(target.read_bytes(), installed.read_bytes())
             self.assertTrue(target.stat().st_mode & 0o200)
             self.assertFalse(installed.stat().st_mode & 0o200)
             self.assertEqual(hashlib.sha256(generated.read_bytes()).digest(), original_hash)
 
-    def test_legacy_executable_repair_keeps_bytes_and_execute_bit(self):
+    def test_writable_generated_copy_keeps_bytes_and_execute_bit(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             executable = root / 'audio-tool'
