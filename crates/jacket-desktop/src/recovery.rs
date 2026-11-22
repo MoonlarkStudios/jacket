@@ -1,6 +1,6 @@
 use crate::reviews::CompletionIdentity;
 use audio_engine::{ExportPlan, ProgressEvent};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     fs,
     io::{Read, Write},
@@ -9,6 +9,8 @@ use std::{
 };
 
 const RECORD: &str = "recovery.json";
+const CHECKPOINT: &str = "recovery-progress.json";
+const SCHEMA_VERSION: u32 = 2;
 const MAX_RECORD_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -29,6 +31,20 @@ pub struct Recovery {
     updated_at: u64,
     #[serde(default)]
     dismissed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    checkpoint_key: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Checkpoint {
+    job_id: String,
+    key: String,
+    progress: ProgressEvent,
+    error: Option<String>,
+    updated_at: u64,
+    dismissed: bool,
+    completed_path: Option<String>,
 }
 
 pub fn valid_job_id(id: &str) -> bool {
@@ -61,30 +77,81 @@ impl Recovery {
             review_identity: None,
             updated_at: 0,
             dismissed: false,
+            checkpoint_key: None,
         }
     }
 
+    /// Persist the export plan and a baseline state before an attempt.
     pub fn save(&mut self, workdir: &Path) -> std::io::Result<()> {
         if let Some(identity) = &self.review_identity {
             identity
                 .validate()
                 .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
         }
-        self.updated_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-            .min(u64::MAX as u128) as u64;
+        self.updated_at = timestamp();
         private_directory(workdir)?;
-        let mut temporary = tempfile::NamedTempFile::new_in(workdir)?;
-        temporary.write_all(&serde_json::to_vec(self)?)?;
-        temporary.as_file_mut().sync_all()?;
-        temporary
-            .persist(workdir.join(RECORD))
-            .map_err(|error| error.error)?;
-        crate::reviews::sync_directory(workdir)?;
-        Ok(())
+        let temporary = tempfile::Builder::new()
+            .rand_bytes(16)
+            .tempfile_in(workdir)?;
+        // Bind checkpoints to this snapshot so a crash between writing a new
+        // baseline and its first progress update cannot replay an older attempt.
+        let key = temporary
+            .path()
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("temporary record filenames are ASCII");
+        self.schema_version = SCHEMA_VERSION;
+        self.checkpoint_key = Some(key.to_owned());
+        write_record(workdir, RECORD, temporary, self)
     }
+
+    pub(crate) fn save_checkpoint(&mut self, workdir: &Path) -> std::io::Result<()> {
+        let Some(key) = &self.checkpoint_key else {
+            return self.save(workdir);
+        };
+        private_directory(workdir)?;
+        if !workdir
+            .join(RECORD)
+            .symlink_metadata()
+            .is_ok_and(|metadata| metadata.is_file())
+        {
+            return self.save(workdir);
+        }
+        self.updated_at = timestamp();
+        let checkpoint = Checkpoint {
+            job_id: self.job_id.clone(),
+            key: key.clone(),
+            progress: self.progress.clone(),
+            error: self.error.clone(),
+            updated_at: self.updated_at,
+            dismissed: self.dismissed,
+            completed_path: (self.progress.stage == "complete").then(|| self.output_path.clone()),
+        };
+        let temporary = tempfile::NamedTempFile::new_in(workdir)?;
+        write_record(workdir, CHECKPOINT, temporary, &checkpoint)
+    }
+}
+
+fn timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u64::MAX as u128) as u64
+}
+
+fn write_record(
+    workdir: &Path,
+    name: &str,
+    mut temporary: tempfile::NamedTempFile,
+    value: &impl Serialize,
+) -> std::io::Result<()> {
+    temporary.write_all(&serde_json::to_vec(value)?)?;
+    temporary.as_file_mut().sync_all()?;
+    temporary
+        .persist(workdir.join(name))
+        .map_err(|error| error.error)?;
+    crate::reviews::sync_directory(workdir)
 }
 
 fn private_directory(path: &Path) -> std::io::Result<()> {
@@ -114,11 +181,7 @@ fn private_directory(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn load(directory: &Path) -> Option<Recovery> {
-    if directory.symlink_metadata().ok()?.file_type().is_symlink() {
-        return None;
-    }
-    let path = directory.join(RECORD);
+fn read_record<T: DeserializeOwned>(path: &Path) -> Option<T> {
     let metadata = path.symlink_metadata().ok()?;
     if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > MAX_RECORD_BYTES
     {
@@ -133,9 +196,15 @@ fn load(directory: &Path) -> Option<Recovery> {
     if bytes.len() as u64 > MAX_RECORD_BYTES {
         return None;
     }
-    let record: Recovery = serde_json::from_slice(&bytes).ok()?;
-    if record.schema_version != 1
-        || !valid_job_id(&record.job_id)
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn load(directory: &Path) -> Option<Recovery> {
+    if directory.symlink_metadata().ok()?.file_type().is_symlink() {
+        return None;
+    }
+    let mut record: Recovery = read_record(&directory.join(RECORD))?;
+    if !valid_job_id(&record.job_id)
         || directory.file_name()?.to_str()? != record.job_id
         || record.plan.tracks.is_empty()
         || (record.plan.output_kind == audio_engine::OutputKind::File
@@ -146,6 +215,28 @@ fn load(directory: &Path) -> Option<Recovery> {
             .is_some_and(|identity| identity.validate().is_err())
     {
         return None;
+    }
+    match (record.schema_version, record.checkpoint_key.as_deref()) {
+        (1, None) => (),
+        (SCHEMA_VERSION, Some(key)) => {
+            if let Some(checkpoint) =
+                read_record::<Checkpoint>(&directory.join(CHECKPOINT)).filter(|checkpoint| {
+                    checkpoint.job_id == record.job_id
+                        && checkpoint.key == key
+                        && (checkpoint.progress.stage == "complete")
+                            == checkpoint.completed_path.is_some()
+                })
+            {
+                record.progress = checkpoint.progress;
+                record.error = checkpoint.error;
+                record.updated_at = checkpoint.updated_at;
+                record.dismissed = checkpoint.dismissed;
+                if let Some(path) = checkpoint.completed_path {
+                    record.output_path = path;
+                }
+            }
+        }
+        _ => return None,
     }
     Some(record)
 }
@@ -250,7 +341,7 @@ pub fn dismiss(root: &Path, job_id: &str) -> std::io::Result<()> {
     let directory = root.join(job_id);
     if let Some(mut record) = load(&directory) {
         record.dismissed = true;
-        record.save(&directory)?;
+        record.save_checkpoint(&directory)?;
     }
     Ok(())
 }
@@ -355,6 +446,79 @@ mod tests {
     }
 
     #[test]
+    fn progress_failure_and_dismissal_checkpoint_without_rewriting_the_plan() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("long-export");
+        let mut record = fixture("long-export");
+        record.plan.tracks = vec![record.plan.tracks[0].clone(); 1_000];
+        record.progress.total = record.plan.tracks.len();
+        record.save(&directory).unwrap();
+        let baseline = fs::read(directory.join(RECORD)).unwrap();
+
+        record.progress.stage = "preparing".into();
+        record.progress.completed = 413;
+        record.save_checkpoint(&directory).unwrap();
+        let progress = fs::read(directory.join(CHECKPOINT)).unwrap();
+        assert!(progress.len() < 1_024);
+        let restored = latest(root.path()).unwrap();
+        assert_eq!(restored.progress.completed, 413);
+        assert_eq!(restored.progress.total, 1_000);
+        assert_eq!(restored.plan.tracks.len(), 1_000);
+        assert_eq!(restored.output_path, "/tmp/Album.zip");
+
+        record.progress.stage = "failed".into();
+        record.error = Some("Tool failed.".into());
+        record.save_checkpoint(&directory).unwrap();
+        let restored = latest(root.path()).unwrap();
+        assert_eq!(restored.progress.stage, "failed");
+        assert_eq!(restored.error.as_deref(), Some("Tool failed."));
+
+        dismiss(root.path(), "long-export").unwrap();
+        assert!(latest(root.path()).is_none());
+        assert_eq!(fs::read(directory.join(RECORD)).unwrap(), baseline);
+    }
+
+    #[test]
+    fn checkpoint_from_an_earlier_baseline_does_not_replace_restart_state() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("resumed");
+        let mut record = fixture("resumed");
+        record.save(&directory).unwrap();
+        record.progress.stage = "failed".into();
+        record.error = Some("First attempt failed.".into());
+        record.save_checkpoint(&directory).unwrap();
+
+        let mut resumed = latest(root.path()).unwrap();
+        resumed.progress.stage = "preparing".into();
+        resumed.error = None;
+        resumed.save(&directory).unwrap();
+        let restarted = latest(root.path()).unwrap();
+        assert_eq!(restarted.progress.stage, "preparing");
+        assert!(restarted.error.is_none());
+
+        resumed.progress.stage = "packaging".into();
+        resumed.save_checkpoint(&directory).unwrap();
+        assert_eq!(latest(root.path()).unwrap().progress.stage, "packaging");
+    }
+
+    #[test]
+    fn a_damaged_checkpoint_leaves_the_durable_plan_available_for_resume() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("fallback");
+        let mut record = fixture("fallback");
+        record.plan.shared_artwork_asset = Some("existing-cover".into());
+        record.save(&directory).unwrap();
+        fs::write(directory.join(CHECKPOINT), b"incomplete checkpoint").unwrap();
+
+        let restored = latest(root.path()).unwrap();
+        assert_eq!(restored.progress.stage, "queued");
+        assert_eq!(restored.output_path, "/tmp/Album.zip");
+        assert!(artwork_asset_ids(root.path())
+            .unwrap()
+            .contains("existing-cover"));
+    }
+
+    #[test]
     fn file_recovery_retains_the_destination_stem_format_and_album_metadata() {
         let root = tempfile::tempdir().unwrap();
         let mut record = fixture("file-job");
@@ -424,9 +588,17 @@ mod tests {
         )
         .unwrap();
 
-        let restored = latest(root.path()).unwrap();
+        let mut restored = latest(root.path()).unwrap();
         assert_eq!(restored.plan.output_kind, OutputKind::Zip);
         assert_eq!(restored.output_path, "/tmp/Album.zip");
+        assert_eq!(restored.schema_version, 1);
+
+        restored.progress.stage = "preparing".into();
+        restored.save_checkpoint(&directory).unwrap();
+        let migrated = latest(root.path()).unwrap();
+        assert_eq!(migrated.schema_version, SCHEMA_VERSION);
+        assert_eq!(migrated.progress.stage, "preparing");
+        assert_eq!(migrated.plan.output_kind, OutputKind::Zip);
     }
 
     #[test]

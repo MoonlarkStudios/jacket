@@ -353,6 +353,12 @@ fn download_with_recovery<T>(
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct AcquiredAudio {
+    path: PathBuf,
+    codec: String,
+}
+
 fn acquire(
     tools: &Toolchain,
     track: &Track,
@@ -360,7 +366,7 @@ fn acquire(
     workdir: &Path,
     cancel: &Cancellation,
     on_retry: impl FnMut(),
-) -> Result<PathBuf> {
+) -> Result<AcquiredAudio> {
     let source_url = validate_source_url(&track.source_url)?;
     let dir = workdir
         .join("sources")
@@ -369,8 +375,12 @@ fn acquire(
     let receipt = dir.join("receipt.json");
     if let Ok(bytes) = fs::read(&receipt) {
         if let Ok(path) = serde_json::from_slice::<PathBuf>(&bytes) {
-            if path.starts_with(&dir) && path.is_file() && codec(tools, &path, cancel).is_ok() {
-                return Ok(path);
+            if path.starts_with(&dir) && path.is_file() {
+                match codec(tools, &path, cancel) {
+                    Ok(codec) => return Ok(AcquiredAudio { path, codec }),
+                    Err(EngineError::Cancelled) => return Err(EngineError::Cancelled),
+                    Err(_) => (),
+                }
             }
         }
     }
@@ -416,9 +426,9 @@ fn acquire(
         .ok_or_else(|| {
             EngineError::Invalid("Downloader did not report a completed audio file.".into())
         })?;
-    codec(tools, &path, cancel)?;
+    let codec = codec(tools, &path, cancel)?;
     fs::write(receipt, serde_json::to_vec(&path)?)?;
-    Ok(path)
+    Ok(AcquiredAudio { path, codec })
 }
 
 fn artwork(tools: &Toolchain, source: &str, dir: &Path, cancel: &Cancellation) -> Result<PathBuf> {
@@ -532,6 +542,16 @@ pub fn prepare_audio(
     preparation: AudioPreparation<'_>,
     cancel: &Cancellation,
 ) -> Result<String> {
+    let source_codec = codec(tools, preparation.source, cancel)?;
+    prepare_audio_with_codec(tools, preparation, &source_codec, cancel)
+}
+
+fn prepare_audio_with_codec(
+    tools: &Toolchain,
+    preparation: AudioPreparation<'_>,
+    source_codec: &str,
+    cancel: &Cancellation,
+) -> Result<String> {
     let AudioPreparation {
         source,
         output,
@@ -540,8 +560,7 @@ pub fn prepare_audio(
         cover,
         format,
     } = preparation;
-    let source_codec = codec(tools, source, cancel)?;
-    let (ext, copy) = target(&source_codec, format)?;
+    let (ext, copy) = target(source_codec, format)?;
     let embed_cover = cover.is_some() && matches!(ext, "m4a" | "mp3" | "flac");
     let mut cmd = Command::new(&tools.ffmpeg);
     cmd.args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
@@ -1097,7 +1116,10 @@ fn prepare_bundle(
                 total,
             });
         })?;
-        let source_codec = codec(tools, &acquired, cancel)?;
+        let AcquiredAudio {
+            path,
+            codec: source_codec,
+        } = acquired;
         let (ext, _) = target(&source_codec, plan.format)?;
         let filename = if let Some(planned) = album_track {
             let (stem, _) = planned
@@ -1146,16 +1168,17 @@ fn prepare_bundle(
             total,
         });
         let prepared = bundle.join(&filename);
-        let output_codec = prepare_audio(
+        let output_codec = prepare_audio_with_codec(
             tools,
             AudioPreparation {
-                source: &acquired,
+                source: &path,
                 output: &prepared,
                 metadata: &track.metadata,
                 source_url: &track.source_url,
                 cover: cover.as_deref(),
                 format: plan.format,
             },
+            &source_codec,
             cancel,
         )?;
         let artwork_path = if let Some(cover) = &cover {
@@ -2016,18 +2039,19 @@ printf '%s\n' "$folder/source.aac"
         .unwrap();
         assert_eq!(retry_messages, 1);
         assert_eq!(
-            fs::read_to_string(first.parent().unwrap().join("attempts"))
+            fs::read_to_string(first.path.parent().unwrap().join("attempts"))
                 .unwrap()
                 .trim(),
             "1"
         );
         assert_eq!(
-            fs::read_to_string(second.parent().unwrap().join("attempts"))
+            fs::read_to_string(second.path.parent().unwrap().join("attempts"))
                 .unwrap()
                 .trim(),
             "2"
         );
-        assert_eq!(fs::read(&first).unwrap(), b"audio fixture");
+        assert_eq!(fs::read(&first.path).unwrap(), b"audio fixture");
+        assert_eq!(first.codec, "aac");
         for (id, expected, expected_attempts) in [("first", first, "1"), ("second", second, "2")] {
             let cached = acquire(
                 &tools,
@@ -2040,7 +2064,7 @@ printf '%s\n' "$folder/source.aac"
             .unwrap();
             assert_eq!(cached, expected);
             assert_eq!(
-                fs::read_to_string(cached.parent().unwrap().join("attempts"))
+                fs::read_to_string(cached.path.parent().unwrap().join("attempts"))
                     .unwrap()
                     .trim(),
                 expected_attempts

@@ -357,6 +357,49 @@ fn clearing_music_tags_and_artwork_does_not_resurrect_source_metadata() {
 }
 
 #[test]
+#[cfg(unix)]
+#[ignore = "Requires FFmpeg"]
+fn cached_export_probes_the_source_and_finished_file_once_each() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    let mut tools = tools();
+    let dir = tempfile::tempdir().unwrap();
+    let workdir = dir.path();
+    let (mut plan, source, _) = audio_file_fixture(&tools, workdir, "m4a", "aac");
+    plan.format = AudioFormat::Compatible;
+    symlink(&tools.ffprobe, workdir.join("real-ffprobe")).unwrap();
+    tools.ffprobe = workdir.join("counting-ffprobe");
+    fs::write(
+        &tools.ffprobe,
+        r#"#!/bin/sh
+set -eu
+for file do :; done
+printf '%s\n' "$file" >> "${0%/*}/probes"
+exec "${0%/*}/real-ffprobe" "$@"
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&tools.ffprobe, fs::Permissions::from_mode(0o700)).unwrap();
+
+    let output = workdir.join("Library song");
+    export_collection(
+        &tools,
+        &plan,
+        &output,
+        workdir,
+        &Cancellation::default(),
+        |_| {},
+    )
+    .unwrap();
+    assert!(output.with_extension("m4a").is_file());
+    let probes = fs::read_to_string(workdir.join("probes")).unwrap();
+    let paths: Vec<_> = probes.lines().map(Path::new).collect();
+    assert_eq!(paths.len(), 2, "Unexpected probes: {probes}");
+    assert_eq!(paths[0], source);
+    assert_eq!(paths[1].parent(), Some(workdir.join("bundle").as_path()));
+}
+
+#[test]
 #[ignore = "Requires FFmpeg and Python with Mutagen"]
 fn wav_export_warns_and_manifest_separates_requested_and_embedded_fields() {
     let tools = tools();

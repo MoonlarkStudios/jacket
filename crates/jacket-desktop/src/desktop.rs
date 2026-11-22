@@ -430,7 +430,7 @@ impl Desktop {
                     }
                     let emit = |progress: audio_engine::ProgressEvent| {
                         record.progress = progress.clone();
-                        let _ = record.save(&workdir);
+                        let _ = record.save_checkpoint(&workdir);
                         // Progress is replaceable; a slow UI must never block file publication.
                         let _ = events.try_send(Event::Progress(progress));
                     };
@@ -478,7 +478,7 @@ impl Desktop {
                             .into();
                         let message = error.to_string();
                         record.error = Some(message.clone());
-                        let checkpoint = record.save(&workdir);
+                        let checkpoint = record.save_checkpoint(&workdir);
                         Err(if checkpoint.is_err() {
                             format!("{message} The recovery checkpoint could not be saved; downloaded media remains in the local cache.")
                         } else {
