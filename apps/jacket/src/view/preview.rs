@@ -188,6 +188,13 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
         .spacing(12)
         .align_y(Alignment::Center),
     );
+    if album.is_some_and(|album| album.kept() > 0) {
+        body = body.push(
+            text("Kept tracks retain their format, tags, and artwork. Use Save As… to apply your settings to every selected track.")
+                .size(12)
+                .color(p.colors.text_muted),
+        );
+    }
     let mut audio = Column::new().width(Length::Fill).spacing(0);
     for (index, track) in preview.tracks.iter().take(MAX_AUDIO_ROWS).enumerate() {
         let planned = album.and_then(|album| album.tracks.get(index));
@@ -209,13 +216,15 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
         let mut labels = column![filename].spacing(4).width(Length::Fill);
         if let Some(planned) = planned {
             let (label, color) = match planned.state {
-                AlbumTrackState::Keep => ("Already in folder", p.colors.text_muted),
+                AlbumTrackState::Keep => ("Keep existing file", p.colors.text_muted),
                 AlbumTrackState::Add => ("Will add", p.colors.success),
                 AlbumTrackState::AddCopy => ("Will add with a new filename", p.colors.warning),
             };
             labels = labels.push(text(label).size(11).color(color));
         }
-        if plan.output_kind != OutputKind::File {
+        if plan.output_kind != OutputKind::File
+            && !planned.is_some_and(|track| track.state == AlbumTrackState::Keep)
+        {
             let detail = summary.track_detail(&track.metadata);
             if !detail.is_empty() {
                 labels = labels.push(text(detail).size(11).color(p.colors.text_muted));
@@ -237,17 +246,12 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
             .color(p.colors.text_muted),
         );
     }
-    if let Some(album) = album {
-        let all_present = album.kept() == album.tracks.len();
+    if album.is_some() {
         return body
             .push(
-                text(if all_present {
-                    "Every selected track is already in this folder."
-                } else {
-                    "Existing audio, artwork, and playlists will be kept."
-                })
-                .size(12)
-                .color(p.colors.text_muted),
+                text("Existing artwork files and playlists are preserved.")
+                    .size(12)
+                    .color(p.colors.text_muted),
             )
             .into();
     }

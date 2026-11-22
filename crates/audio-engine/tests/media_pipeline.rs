@@ -998,6 +998,7 @@ fn organized_album_fills_the_songs_folder_and_can_be_saved_again_without_downloa
     });
     assert!(raced.is_err());
     assert!(!album.join("playlist.m3u").exists());
+    fs::write(workdir.join("bundle/manifest.json"), b"{interrupted").unwrap();
     let result = export_organized_album(&tools, &plan, &output, &workdir, &cancel, |_| {}).unwrap();
     assert_eq!(Path::new(&result.output_path), album);
     let summary = result.album_save.unwrap();
@@ -1028,6 +1029,121 @@ fn organized_album_fills_the_songs_folder_and_can_be_saved_again_without_downloa
         fs::read_to_string(album.join("playlist.m3u")).unwrap(),
         playlist
     );
+}
+
+#[test]
+#[ignore = "Requires locally installed FFmpeg"]
+fn interrupted_album_restores_the_staged_sidecars_after_all_audio_was_published() {
+    assert_interrupted_album_restores_sidecars(false);
+}
+
+#[test]
+#[ignore = "Requires locally installed FFmpeg"]
+fn explicitly_resuming_an_older_album_job_restores_its_staged_sidecars() {
+    assert_interrupted_album_restores_sidecars(true);
+}
+
+fn assert_interrupted_album_restores_sidecars(legacy: bool) {
+    let tools = tools();
+    let fixture = tempfile::tempdir().unwrap();
+    let root = fixture.path().canonicalize().unwrap();
+    let workdir = root.join("work");
+    let (mut plan, _, cover) = audio_file_fixture(&tools, &workdir, "m4a", "aac");
+    let artwork_url = "https://i.ytimg.com/vi/fixture/album.jpg";
+    plan.mode = CollectionMode::Album;
+    plan.format = AudioFormat::Compatible;
+    plan.output_kind = OutputKind::Folder;
+    plan.artwork_mode = ArtworkMode::PerTrack;
+    plan.tracks[0].artwork_url = Some(artwork_url.into());
+    let images = workdir.join("images");
+    fs::create_dir(&images).unwrap();
+    fs::copy(
+        &cover,
+        images.join(format!(
+            "{}.jpg",
+            hex::encode(Sha256::digest(artwork_url.as_bytes()))
+        )),
+    )
+    .unwrap();
+
+    let album = root.join("Album");
+    let stems = vec!["Dr. Song".into()];
+    let output = OrganizedOutput::album(root.clone(), album.clone(), stems.clone()).unwrap();
+    fs::create_dir(&album).unwrap();
+    let blocker = album.join("artwork");
+    fs::write(&blocker, b"existing file").unwrap();
+    let cancel = Cancellation::default();
+    assert!(export_organized_album(&tools, &plan, &output, &workdir, &cancel, |_| {}).is_err());
+    let audio = album.join("Dr. Song.m4a");
+    let saved = fs::read(&audio).unwrap();
+    assert_eq!(fs::read(&blocker).unwrap(), b"existing file");
+    assert!(!album.join("playlist.m3u").exists());
+    assert!(!album.join("manifest.json").exists());
+
+    // The interrupted publication cannot be replayed into a different album.
+    let other = root.join("Other album");
+    fs::create_dir(&other).unwrap();
+    fs::copy(&audio, other.join("Dr. Song.m4a")).unwrap();
+    let other_output = OrganizedOutput::album(root.clone(), other.clone(), stems).unwrap();
+    let result =
+        export_organized_album(&tools, &plan, &other_output, &workdir, &cancel, |_| {}).unwrap();
+    assert!(result.playlist_path.is_none());
+    assert!(!other.join("manifest.json").exists());
+
+    fs::remove_file(&blocker).unwrap();
+    if legacy {
+        fs::remove_file(workdir.join("album-publication")).unwrap();
+        // An ordinary save never guesses that an unbound cache is a legacy job.
+        export_organized_album(&tools, &plan, &output, &workdir, &cancel, |_| {}).unwrap();
+        assert!(!album.join("manifest.json").exists());
+        assert!(!album.join("playlist.m3u").exists());
+
+        let mut edited = plan.clone();
+        edited.tracks[0].metadata.artist = "Different artist".into();
+        assert!(
+            resume_organized_album(&tools, &edited, &output, &workdir, &cancel, |_| {}).is_err()
+        );
+        assert!(!album.join("manifest.json").exists());
+    }
+    let interrupted = Cancellation::default();
+    let result = resume_organized_album(&tools, &plan, &output, &workdir, &interrupted, |_| {
+        interrupted.cancel();
+    });
+    assert!(matches!(result, Err(EngineError::Cancelled)));
+    assert!(workdir.join("album-publication").is_file());
+    assert!(!album.join("manifest.json").exists());
+    assert!(!album.join("playlist.m3u").exists());
+
+    let result = resume_organized_album(&tools, &plan, &output, &workdir, &cancel, |event| {
+        assert_eq!(
+            event.stage, "packaging",
+            "Staged audio needs no preparation"
+        );
+    })
+    .unwrap();
+    let summary = result.album_save.unwrap();
+    assert_eq!((summary.added, summary.kept), (0, 1));
+    assert_eq!(fs::read(&audio).unwrap(), saved);
+    assert_eq!(
+        fs::read(album.join("artwork/01.jpg")).unwrap(),
+        fs::read(cover).unwrap()
+    );
+    let playlist = album.join("playlist.m3u");
+    assert_eq!(
+        Path::new(result.playlist_path.as_deref().unwrap()),
+        playlist
+    );
+    assert!(fs::read_to_string(playlist)
+        .unwrap()
+        .contains("\nDr. Song.m4a\n"));
+    let manifest = fs::read(album.join("manifest.json")).unwrap();
+    assert_eq!(
+        manifest,
+        fs::read(workdir.join("bundle/manifest.json")).unwrap()
+    );
+    let manifest: Value = serde_json::from_slice(&manifest).unwrap();
+    assert_eq!(manifest["tracks"][0]["embeddedArtwork"], true);
+    assert_eq!(manifest["tracks"][0]["sha256"], hash_file(&audio).unwrap());
 }
 
 #[test]

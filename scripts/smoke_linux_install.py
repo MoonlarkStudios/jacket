@@ -111,6 +111,15 @@ def prepare(home):
     downloader = fixture / 'fixture-downloader'
     downloader.write_text('''#!/bin/sh
 if [ "$1" = "--version" ]; then printf '2026.11.21\\n'; exit 0; fi
+for source_url do :; done
+case "$source_url" in
+    *v=fixture0002)
+        if [ -n "${JACKET_ALBUM_GATE:-}" ]; then
+            touch "$JACKET_ALBUM_GATE.started"
+            while [ ! -f "$JACKET_ALBUM_GATE" ]; do sleep 0.1; done
+        fi
+        ;;
+esac
 while [ "$#" -gt 1 ]; do
     if [ "$1" = "--output" ]; then
         output="$(dirname -- "$2")/source.mp3"
@@ -144,16 +153,93 @@ exit 1
     return audio, old, new, config, review
 
 
-def verify_export(destination):
+def verify_export(destination, expected_tags=MEDIA_TAGS):
     wait_for(str(destination), destination.is_file)
     probe = run(TOOLS / 'ffprobe', '-v', 'error', '-show_format', '-show_streams',
                 '-of', 'json', destination, capture_output=True, text=True)
     metadata = json.loads(probe.stdout)
     tags = metadata['format']['tags']
-    assert all(tags.get(key) == value for key, value in MEDIA_TAGS.items()), tags
+    assert all(tags.get(key) == value for key, value in expected_tags.items()), tags
     assert any(stream['disposition']['attached_pic'] and stream['width'] == 32
                and stream['height'] == 32 for stream in metadata['streams']), metadata
     print(f'Verified written file, tags and embedded artwork: {destination}', flush=True)
+
+
+def prepare_album_review(review, started_review):
+    saved = json.loads(started_review)
+    draft = saved['draft']
+    inspection = draft['inspection']
+    first = inspection['tracks'][0]
+    second_url = 'https://www.youtube.com/watch?v=fixture0002'
+    second_tags = dict(first['metadata'], title='Second light', trackNumber=2)
+    second = dict(first, id='fixture0002', sourceUrl=second_url,
+                  sourceMetadata=second_tags, metadata=second_tags)
+    album_title = MEDIA_TAGS['album']
+    album_url = 'https://music.youtube.com/playlist?list=OLAK5uy_fixture'
+    session = 'offline-album-review'
+    saved['sessionId'] = session
+    draft.update(sessionId=session, url=album_url, selected=[0, 1])
+    inspection.update(title=album_title, sourceUrl=album_url, suggestedMode='album',
+                      tracks=[first, second])
+    draft['preferences'].update(title=album_title, mode='album', albumTitle=album_title,
+                                albumArtist=MEDIA_TAGS['artist'], outputKind='folder')
+    write_json(review, saved)
+
+
+def album_is_cancelled():
+    cache = Path(os.environ.get('XDG_CACHE_HOME', Path.home() / '.cache'))
+    for baseline in (cache / 'com.moonlark.audio-dl/jobs').glob('job-*/recovery.json'):
+        record = json.loads(baseline.read_text())
+        if not record.get('musicAlbumStems'):
+            continue
+        progress = baseline.with_name('recovery-progress.json')
+        state = json.loads(progress.read_text()) if progress.is_file() else record
+        if state['progress']['stage'] == 'cancelled':
+            return True
+    return False
+
+
+def album_recovery(evidence, log, environment, recording, album, review, started_review):
+    prepare_album_review(review, started_review)
+    first = album / 'First light.mp3'
+    second = album / 'Second light.mp3'
+    first_hash = sha256(first.read_bytes()).hexdigest()
+    gate = recording.parent / 'allow-album-download'
+    environment = dict(environment, JACKET_ALBUM_GATE=str(gate))
+    failure = evidence / 'album-failure.png'
+    with process([JACKET, '--compact'], log, failure_image=failure, env=environment) as app:
+        jacket = window('Jacket', app)
+        time.sleep(1)
+        key(jacket, 'ctrl+s')
+        time.sleep(0.6)
+        run('import', '-window', jacket, evidence / 'album-preview.png')
+        key(jacket, 'Return')
+        wait_for('the missing album track to start', gate.with_suffix('.started').is_file)
+        key(jacket, 'Escape')
+        wait_for('the cancelled album checkpoint', album_is_cancelled)
+        assert not second.exists() and not (album / 'playlist.m3u').exists()
+        time.sleep(0.6)
+        run('wmctrl', '-ic', hex(int(jacket)))
+        assert app.wait(timeout=15) == 0
+
+    gate.touch()
+    with process([JACKET, '--compact'], log, failure_image=failure, env=environment) as app:
+        jacket = window('Jacket', app)
+        time.sleep(1)
+        run('import', '-window', jacket, evidence / 'album-resume.png')
+        click(jacket, 471, 146)
+        verify_export(second, dict(MEDIA_TAGS, title='Second light'))
+        wait_for('the recovered album to clear its review',
+                 lambda: json.loads(review.read_text())['draft'] is None)
+        assert sha256(first.read_bytes()).hexdigest() == first_hash
+        playlist = (album / 'playlist.m3u').read_text().splitlines()
+        assert [entry for entry in playlist if not entry.startswith('#')] == [first.name, second.name]
+        manifest = json.loads((album / 'manifest.json').read_text())
+        assert [track['relativePath'] for track in manifest['tracks']] == [first.name, second.name]
+        time.sleep(0.7)
+        run('import', '-window', jacket, evidence / 'album-save.png')
+        run('wmctrl', '-ic', hex(int(jacket)))
+        assert app.wait(timeout=15) == 0
 
 
 def smoke(evidence):
@@ -191,6 +277,8 @@ def smoke(evidence):
             run('import', '-window', jacket, evidence / 'organized-save.png')
             run('wmctrl', '-ic', hex(int(jacket)))
             assert app.wait(timeout=15) == 0
+        album_recovery(evidence, log, environment, recording, destination.parent, review,
+                       started_review)
         review.write_bytes(started_review)
         with process([JACKET, '--compact'], log, failure_image=evidence / 'failure.png', env=environment) as app:
             jacket = window('Jacket', app)

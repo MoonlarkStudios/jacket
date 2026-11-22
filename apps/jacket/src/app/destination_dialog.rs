@@ -36,6 +36,8 @@ mod linux {
     use std::path::{Path, PathBuf};
     use std::process::{Command, Output};
 
+    const CANCEL_EXIT_STATUS: i32 = 10;
+
     pub(in super::super) async fn pick(
         title: &'static str,
         directory: Option<PathBuf>,
@@ -68,6 +70,12 @@ mod linux {
         command
             .env("GTK_USE_PORTAL", "0")
             .env("GDK_DEBUG", "no-portals")
+            // GTK can exit with Zenity's default cancellation status before
+            // opening a dialog. Give user dismissal its own child exit code.
+            .env("ZENITY_OK", "0")
+            .env("ZENITY_CANCEL", CANCEL_EXIT_STATUS.to_string())
+            .env("ZENITY_ESC", CANCEL_EXIT_STATUS.to_string())
+            .env("ZENITY_ERROR", "255")
             .args(["--file-selection", "--title", title]);
         let filename = match selection {
             Selection::Folder => {
@@ -88,7 +96,7 @@ mod linux {
     }
 
     fn zenity_response(output: Output) -> io::Result<Option<PathBuf>> {
-        if output.status.code() == Some(1) && output.stdout.is_empty() {
+        if output.status.code() == Some(CANCEL_EXIT_STATUS) && output.stdout.is_empty() {
             return Ok(None);
         }
         if !output.status.success() {
@@ -113,26 +121,43 @@ mod linux {
 
     #[cfg(test)]
     mod tests {
-        use super::zenity_response;
+        use super::{zenity_response, CANCEL_EXIT_STATUS};
         use std::os::unix::process::ExitStatusExt;
         use std::path::Path;
         use std::process::{ExitStatus, Output};
 
-        #[test]
-        fn native_picker_preserves_the_path_and_distinguishes_errors() {
-            let output = |status: i32, stdout: &[u8]| Output {
+        fn output(status: i32, stdout: &[u8], stderr: &[u8]) -> Output {
+            Output {
                 status: ExitStatus::from_raw(status << 8),
                 stdout: stdout.to_vec(),
-                stderr: Vec::new(),
-            };
+                stderr: stderr.to_vec(),
+            }
+        }
+
+        #[test]
+        fn native_picker_preserves_the_selected_path() {
             assert_eq!(
-                zenity_response(output(0, b"/tmp/music \n"))
+                zenity_response(output(0, b"/tmp/music \n", b""))
                     .unwrap()
                     .as_deref(),
                 Some(Path::new("/tmp/music "))
             );
-            assert_eq!(zenity_response(output(1, b"")).unwrap(), None);
-            assert!(zenity_response(output(255, b"")).is_err());
+            assert!(zenity_response(output(0, b"relative-path\n", b"")).is_err());
+        }
+
+        #[test]
+        fn native_picker_distinguishes_display_failure_and_user_dismissal() {
+            let gtk_warning = b"GtkDialog mapped without a transient parent. This is discouraged.";
+            assert_eq!(
+                zenity_response(output(CANCEL_EXIT_STATUS, b"", gtk_warning)).unwrap(),
+                None
+            );
+            assert!(
+                zenity_response(output(1, b"", b"Gtk-WARNING: Failed to open display")).is_err()
+            );
+            assert!(zenity_response(output(1, b"", b"")).is_err());
+            assert!(zenity_response(output(255, b"", b"")).is_err());
+            assert!(zenity_response(output(CANCEL_EXIT_STATUS, b"unexpected", b"")).is_err());
         }
     }
 }

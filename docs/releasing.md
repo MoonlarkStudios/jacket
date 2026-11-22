@@ -28,13 +28,16 @@ version for a fix after stable.
    commit. The **Linux installers** workflow validates the tag and exact commit
    on `main`, builds both packages, signs the RPM, and exercises the final assets.
    Passing artifacts and their provenance go into an unpublished GitHub release.
-2. Install those exact signed assets on a clean Ubuntu desktop and a clean Fedora
-   Workstation desktop. Record the package checksums, distro, session, and result.
+2. Install those exact signed assets on clean Ubuntu and Fedora Workstation
+   Wayland desktops. Record the package checksums, distro, session, and result.
    Launch from the app menu. Check the artwork and About version. Review a track,
    change the music root, save with the resolved artist/album/song rule, cancel
    Save As, and then complete a one-off save. Verify tags and artwork on disk.
-   Try an album or playlist, and verify the app can reopen a saved draft after
-   upgrading. Verify one permitted public source separately on both desktops.
+   Preview an album with one track already in the library. Cancel while adding
+   the remaining tracks, restart Jacket, and resume the save. Verify the existing
+   audio is preserved and the finished album has its playlist and manifest.
+   Verify the app can reopen a saved draft after upgrading. Verify one permitted
+   public source separately on both desktops.
 3. Review the [third-party notices](../THIRD_PARTY_NOTICES.md) and retain the
    matching application, Cargo dependencies, and audio-runtime source assets
    alongside the two installers. Match the draft's assets to the tested manifest.

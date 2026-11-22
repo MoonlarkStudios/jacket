@@ -14,7 +14,7 @@ pub use album_output::{preview_album_output, AlbumPreview, AlbumTrackState};
 pub use error::{EngineError, Result};
 pub use export::{
     export_archive, export_collection, export_organized_album, export_organized_file,
-    preview_export,
+    preview_export, resume_organized_album,
 };
 pub use models::{
     AlbumSaveSummary, ArtworkMode, AudioFormat, AuthOptions, Browser, CollectionMode, ExportPlan,

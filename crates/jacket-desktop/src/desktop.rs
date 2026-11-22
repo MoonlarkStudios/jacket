@@ -353,7 +353,7 @@ impl Desktop {
             record.music_album_stems = organized.album_stems().map(<[_]>::to_vec);
         }
         record.review_identity = identity;
-        self.export_record(record)
+        self.export_record(record, false)
     }
 
     pub fn resume(&self, record: Recovery) -> Result<Job, String> {
@@ -363,10 +363,10 @@ impl Desktop {
         if record.plan.auth.managed_session.is_some() {
             return Err("Reconnect your session and start a new export.".into());
         }
-        self.export_record(record)
+        self.export_record(record, true)
     }
 
-    fn export_record(&self, mut record: Recovery) -> Result<Job, String> {
+    fn export_record(&self, mut record: Recovery, resume: bool) -> Result<Job, String> {
         if !recovery::valid_job_id(&record.job_id) {
             return Err("Invalid download identifier.".into());
         }
@@ -436,9 +436,12 @@ impl Desktop {
                     };
                     let result = match &organized {
                         Some(organized) if organized.album_stems().is_some() => {
-                            audio_engine::export_organized_album(
-                                &tools, &plan, organized, &workdir, cancel, emit,
-                            )
+                            let save_album = if resume {
+                                audio_engine::resume_organized_album
+                            } else {
+                                audio_engine::export_organized_album
+                            };
+                            save_album(&tools, &plan, organized, &workdir, cancel, emit)
                         }
                         Some(organized) => audio_engine::export_organized_file(
                             &tools, &plan, organized, &workdir, cancel, emit,
