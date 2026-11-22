@@ -53,9 +53,10 @@ pub fn view(app: &App, docked: bool) -> Element<'_, Message> {
             .padding(9)
             .width(Length::Fill),
             text(match review.preferences.format {
-                AudioFormat::Compatible => "Keeps AAC in M4A; other sources use MP3.",
-                AudioFormat::Preserve => "Retains the source audio codec.",
-                AudioFormat::Mp3 => "Saves every selected track as MP3.",
+                AudioFormat::Compatible =>
+                    "New files use M4A for AAC and ALAC, and MP3 for other codecs.",
+                AudioFormat::Preserve => "New files retain the source audio codec.",
+                AudioFormat::Mp3 => "New files use MP3.",
             })
             .size(11)
             .color(p.colors.text_muted)
