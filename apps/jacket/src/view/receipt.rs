@@ -22,7 +22,7 @@ pub fn view<'a>(app: &'a App, receipt: &'a Receipt, compact: bool) -> Element<'a
         OutputKind::Zip => ("ZIP archive saved", Icon::Archive, "Show in folder"),
     };
     if let Some(album) = &output.album_save {
-        status = if album.added == 0 {
+        status = if album.added == 0 && output.playlist_path.is_none() {
             "Album already in your library"
         } else {
             "Album folder updated"

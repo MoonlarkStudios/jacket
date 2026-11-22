@@ -48,14 +48,18 @@ fn view_at(app: &App, size: iced::Size) -> Element<'_, Message> {
                             ]
                             .spacing(4)
                             .width(Length::Fill),
-                            button("Resume")
-                                .padding([7, 12])
-                                .on_press_maybe((!app.busy()).then_some(Message::Resume))
-                                .style(p.primary()),
-                            button("Dismiss")
-                                .padding([7, 10])
-                                .on_press_maybe((!app.busy()).then_some(Message::DismissRecovery))
-                                .style(p.quiet()),
+                            super::focus_button::wrap(
+                                "resume-recovery",
+                                button("Resume").padding([7, 12]).style(p.primary()),
+                                (!app.busy()).then_some(Message::Resume),
+                                p.colors.accent,
+                            ),
+                            super::focus_button::wrap(
+                                "dismiss-recovery",
+                                button("Dismiss").padding([7, 10]).style(p.quiet()),
+                                (!app.busy()).then_some(Message::DismissRecovery),
+                                p.colors.accent,
+                            ),
                         ]
                         .spacing(10)
                         .align_y(Alignment::Center),

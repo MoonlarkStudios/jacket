@@ -6,6 +6,7 @@ use crate::{
     tagging::{embedded_metadata, finish_tags, metadata_warnings, supports_embedded_artwork},
     EngineError, OrganizedOutput, Result,
 };
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
     fs,
@@ -52,13 +53,16 @@ fn hash_bytes(bytes: &[u8]) -> String {
 }
 
 pub fn hash_file(path: &Path) -> Result<String> {
-    hash_reader(fs::File::open(path)?)
+    hash_reader(fs::File::open(path)?, None)
 }
 
-fn hash_reader(mut file: impl Read) -> Result<String> {
+fn hash_reader(mut file: impl Read, cancel: Option<&Cancellation>) -> Result<String> {
     let mut digest = Sha256::new();
     let mut buffer = [0; 65536];
     loop {
+        if let Some(cancel) = cancel {
+            cancel.check()?;
+        }
         let count = file.read(&mut buffer)?;
         if count == 0 {
             break;
@@ -439,7 +443,7 @@ fn artwork(tools: &Toolchain, source: &str, dir: &Path, cancel: &Cancellation) -
     }
     cancel.check()?;
     fs::create_dir_all(dir)?;
-    let output = dir.join(format!("{}.jpg", hash_bytes(source.as_bytes())));
+    let output = artwork_cache_path(dir, source);
     if complete_jpeg(&output) {
         return Ok(output);
     }
@@ -465,6 +469,10 @@ fn artwork(tools: &Toolchain, source: &str, dir: &Path, cancel: &Cancellation) -
     }
     normalize_artwork(tools, &bytes, dir, &output, cancel)?;
     Ok(output)
+}
+
+fn artwork_cache_path(directory: &Path, source: &str) -> PathBuf {
+    directory.join(format!("{}.jpg", hash_bytes(source.as_bytes())))
 }
 
 // A previous process may have stopped while writing an image. Do not reuse a
@@ -931,6 +939,30 @@ pub fn export_organized_album(
     cancel: &Cancellation,
     emit: impl FnMut(ProgressEvent),
 ) -> Result<ExportResult> {
+    save_organized_album(tools, plan, output, workdir, cancel, emit, false)
+}
+
+/// Resume a saved album job whose work directory belongs to this plan and destination.
+pub fn resume_organized_album(
+    tools: &Toolchain,
+    plan: &ExportPlan,
+    output: &OrganizedOutput,
+    workdir: &Path,
+    cancel: &Cancellation,
+    emit: impl FnMut(ProgressEvent),
+) -> Result<ExportResult> {
+    save_organized_album(tools, plan, output, workdir, cancel, emit, true)
+}
+
+fn save_organized_album(
+    tools: &Toolchain,
+    plan: &ExportPlan,
+    output: &OrganizedOutput,
+    workdir: &Path,
+    cancel: &Cancellation,
+    mut emit: impl FnMut(ProgressEvent),
+    resume: bool,
+) -> Result<ExportResult> {
     cancel.check()?;
     validate_plan(plan)?;
     let preview = preview_album_output(plan, output)?;
@@ -944,21 +976,251 @@ pub fn export_organized_album(
         album_save: Some(AlbumSaveSummary { added, kept }),
         warnings: Vec::new(),
     };
+    let publication = workdir.join("album-publication");
+    let identity = hash_bytes(&serde_json::to_vec(&(
+        "album-publication-v1",
+        plan,
+        output.root().as_os_str().as_encoded_bytes(),
+        output.path().as_os_str().as_encoded_bytes(),
+        output.album_stems(),
+    ))?);
+    let (recorded, legacy) = match fs::read_to_string(&publication) {
+        Ok(saved) => (saved == identity, false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (
+            false,
+            resume
+                && workdir.join("bundle/manifest.json").try_exists()?
+                && workdir.join("bundle/playlist.m3u").try_exists()?,
+        ),
+        Err(error) => return Err(error.into()),
+    };
+    if recorded || legacy {
+        if let Some((prepared, pending)) =
+            resume_album_publication(plan, output, workdir, &preview, cancel)?
+        {
+            if legacy {
+                mark_album_publication(workdir, &publication, &identity)?;
+            }
+            result.album_save = Some(AlbumSaveSummary {
+                added: pending,
+                kept: plan.tracks.len() - pending,
+            });
+            emit(ProgressEvent {
+                stage: "packaging".into(),
+                message: "Finishing your album save".into(),
+                completed: plan.tracks.len() - pending,
+                total: plan.tracks.len(),
+            });
+            result.warnings = prepared.warnings;
+            publish_album_files(output, prepared.files, cancel, &mut result)?;
+            clear_album_publication(&publication, &mut result);
+            return Ok(result);
+        }
+        if added == 0 {
+            return Err(EngineError::Invalid(
+                "The saved album files changed. Choose Save As… to save a complete copy.".into(),
+            ));
+        }
+    }
     if added == 0 {
         return Ok(result);
     }
 
+    match fs::remove_file(&publication) {
+        Ok(()) => (),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+        Err(error) => return Err(error.into()),
+    }
     require_resolved_cover(plan)?;
     let mut prepared =
         prepare_bundle(tools, plan, workdir, cancel, emit, Some((output, &preview)))?;
-    result.warnings.append(&mut prepared.warnings);
+    cancel.check()?;
+    mark_album_publication(workdir, &publication, &identity)?;
+    result.warnings = prepared.warnings;
     // Publish all audio before sidecars so a failed save never publishes a
     // playlist that points at tracks still waiting to be added.
     prepared.files.sort_by_key(|(name, _)| album_sidecar(name));
-    for (relative, source) in prepared.files {
+    publish_album_files(output, prepared.files, cancel, &mut result)?;
+    clear_album_publication(&publication, &mut result);
+    Ok(result)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AlbumManifest {
+    schema_version: u32,
+    title: String,
+    source_url: String,
+    mode: CollectionMode,
+    tracks: Vec<ManifestTrack>,
+    warnings: Vec<String>,
+}
+
+/// A retry can publish the staged files as long as the exact recordings named
+/// in its manifest are on disk or still in the cache. If a name was claimed or
+/// a previously kept track was removed, replan against the current folder.
+fn resume_album_publication(
+    plan: &ExportPlan,
+    output: &OrganizedOutput,
+    workdir: &Path,
+    preview: &AlbumPreview,
+    cancel: &Cancellation,
+) -> Result<Option<(PreparedBundle, usize)>> {
+    let bundle = workdir.join("bundle");
+    let manifest_path = bundle.join("manifest.json");
+    let Ok(manifest_bytes) = fs::read(&manifest_path) else {
+        return Ok(None);
+    };
+    let Ok(manifest) = serde_json::from_slice::<AlbumManifest>(&manifest_bytes) else {
+        return Ok(None);
+    };
+    if manifest.schema_version != 1
+        || manifest.title != plan.title
+        || manifest.source_url != plan.source_url
+        || manifest.mode != plan.mode
+        || manifest.tracks.len() != plan.tracks.len()
+    {
+        return Ok(None);
+    }
+    let mut files = Vec::new();
+    let mut artwork = Vec::new();
+    let mut names = std::collections::HashSet::new();
+    let mut expected_playlist = String::from("#EXTM3U\n");
+    for (index, track) in manifest.tracks.iter().enumerate() {
+        cancel.check()?;
+        validate_bundle_entry(&track.relative_path)?;
+        let planned = &plan.tracks[index];
+        if track.relative_path.contains('/')
+            || album_sidecar(&track.relative_path)
+            || !names.insert(&track.relative_path)
+            || track.source_id != planned.id
+            || track.source_url != planned.source_url
+            || track.metadata != planned.metadata
+            || track.source_metadata != planned.source_metadata
+        {
+            return Ok(None);
+        }
+        add_to_playlist(&mut expected_playlist, planned, &track.relative_path);
+        let current = output.path().join(&track.relative_path);
+        let source = match open_existing_track(&current) {
+            Ok(file) => file,
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound
+                    && track.embedded_metadata.is_some() =>
+            {
+                let planned = &preview.tracks[index];
+                if planned.state == AlbumTrackState::Keep
+                    || current.file_stem() != Path::new(&planned.name).file_stem()
+                {
+                    return Ok(None);
+                }
+                let path = bundle.join(&track.relative_path);
+                let Ok(file) = open_existing_track(&path) else {
+                    return Ok(None);
+                };
+                files.push((track.relative_path.clone(), path));
+                file
+            }
+            Err(_) => return Ok(None),
+        };
+        if hash_reader(source, Some(cancel))? != track.sha256 {
+            return Ok(None);
+        }
+        let Some(relative) = &track.artwork_path else {
+            continue;
+        };
+        if planned_artwork_path(plan, index).as_ref() != Some(relative) {
+            return Ok(None);
+        }
+        if !names.insert(relative) {
+            continue;
+        }
+        let source = match plan.artwork_mode {
+            ArtworkMode::Shared if plan.shared_artwork_asset.is_some() => {
+                let Some(path) = &plan.shared_artwork_path else {
+                    return Ok(None);
+                };
+                path.clone()
+            }
+            mode => {
+                let url = match mode {
+                    ArtworkMode::Shared => plan.shared_artwork_url.as_ref(),
+                    ArtworkMode::PerTrack => plan.tracks[index].artwork_url.as_ref(),
+                    ArtworkMode::None => None,
+                };
+                let Some(url) = url else {
+                    return Ok(None);
+                };
+                artwork_cache_path(&workdir.join("images"), url)
+            }
+        };
+        if !source.is_file() && output.path().join(relative).symlink_metadata().is_err() {
+            return Ok(None);
+        }
+        artwork.push((relative.clone(), source));
+    }
+    let playlist_path = bundle.join("playlist.m3u");
+    if !fs::read(&playlist_path).is_ok_and(|playlist| playlist == expected_playlist.as_bytes()) {
+        return Ok(None);
+    }
+    let pending = files.len();
+    files.extend(artwork);
+    files.extend([
+        ("manifest.json".into(), manifest_path),
+        ("playlist.m3u".into(), playlist_path),
+    ]);
+    Ok(Some((
+        PreparedBundle {
+            files,
+            warnings: manifest.warnings,
+        },
+        pending,
+    )))
+}
+
+fn mark_album_publication(workdir: &Path, publication: &Path, identity: &str) -> Result<()> {
+    let bundle = workdir.join("bundle");
+    for name in ["manifest.json", "playlist.m3u"] {
+        fs::OpenOptions::new()
+            .write(true)
+            .open(bundle.join(name))?
+            .sync_all()?;
+    }
+    #[cfg(unix)]
+    fs::File::open(&bundle)?.sync_all()?;
+    let mut marker = tempfile::NamedTempFile::new_in(workdir)?;
+    marker.write_all(identity.as_bytes())?;
+    marker.as_file().sync_all()?;
+    marker.persist(publication).map_err(|error| error.error)?;
+    #[cfg(unix)]
+    fs::File::open(workdir)?.sync_all()?;
+    Ok(())
+}
+
+fn clear_album_publication(publication: &Path, result: &mut ExportResult) {
+    if fs::remove_file(publication).is_err() {
+        result.warnings.push(
+            "Your album was saved, but Jacket could not clear its temporary publication record."
+                .into(),
+        );
+    }
+}
+
+fn publish_album_files(
+    output: &OrganizedOutput,
+    files: Vec<(String, PathBuf)>,
+    cancel: &Cancellation,
+    result: &mut ExportResult,
+) -> Result<()> {
+    #[cfg(unix)]
+    let mut directories = std::collections::BTreeSet::new();
+    for (relative, source) in files {
         cancel.check()?;
         validate_bundle_entry(&relative)?;
         let destination = output.path().join(&relative);
+        let parent = destination
+            .parent()
+            .expect("organized album entry has a parent");
         let entry = OrganizedOutput::new(output.root().to_owned(), destination.clone())?;
         let sidecar = album_sidecar(&relative);
         if sidecar && destination.symlink_metadata().is_ok() {
@@ -967,16 +1229,17 @@ pub fn export_organized_album(
                     .warnings
                     .push("Kept the existing playlist unchanged.".into());
             }
+            #[cfg(unix)]
+            if parent
+                .symlink_metadata()
+                .is_ok_and(|metadata| metadata.is_dir())
+            {
+                directories.insert(parent.to_owned());
+            }
             continue;
         }
         entry.prepare_parent()?;
-        let staged = stage_output_file(
-            &source,
-            destination
-                .parent()
-                .expect("organized album entry has a parent"),
-            cancel,
-        )?;
+        let staged = stage_output_file(&source, parent, cancel)?;
         match staged.persist_noclobber(&destination) {
             Ok(_) => {
                 if relative == "playlist.m3u" {
@@ -998,8 +1261,24 @@ pub fn export_organized_album(
             }
             Err(error) => return Err(error.error.into()),
         }
+        #[cfg(unix)]
+        directories.insert(parent.to_owned());
     }
-    Ok(result)
+    // Persist destination entries before removing the record needed to replay them.
+    #[cfg(unix)]
+    {
+        directories.extend(
+            output
+                .path()
+                .ancestors()
+                .take_while(|directory| directory.starts_with(output.root()))
+                .map(Path::to_path_buf),
+        );
+        for directory in directories.iter().rev() {
+            fs::File::open(directory)?.sync_all()?;
+        }
+    }
+    Ok(())
 }
 
 fn album_sidecar(name: &str) -> bool {
@@ -1094,7 +1373,7 @@ fn prepare_bundle(
                     artwork_path: None,
                     source_codec: String::new(),
                     output_codec: String::new(),
-                    sha256: hash_reader(saved)?,
+                    sha256: hash_reader(saved, Some(cancel))?,
                 });
                 continue;
             }
