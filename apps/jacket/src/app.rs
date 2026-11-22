@@ -2,6 +2,7 @@
 mod artwork;
 mod controller;
 mod destination;
+mod destination_dialog;
 mod intake;
 mod jobs;
 mod lifecycle;

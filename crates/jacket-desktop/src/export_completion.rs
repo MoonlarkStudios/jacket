@@ -146,6 +146,7 @@ mod tests {
             output_kind: OutputKind::Zip,
             playlist_path: None,
             track_count: 1,
+            album_save: None,
             warnings: vec![],
         }
     }

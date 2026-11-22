@@ -1,0 +1,18 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Jacket
+Source: https://github.com/MoonlarkStudios/jacket
+
+Files: usr/libexec/jacket/bin/jacket
+ usr/share/applications/com.moonlark.audio-dl.desktop
+ usr/share/icons/hicolor/*/apps/com.moonlark.audio-dl.png
+Copyright: Jacket contributors
+License: GPL-3.0-or-later
+ The full license text is available in /usr/share/common-licenses/GPL-3.
+
+Files: usr/share/metainfo/com.moonlark.audio-dl.metainfo.xml
+Copyright: Jacket contributors
+License: CC0-1.0
+ https://creativecommons.org/publicdomain/zero/1.0/
+Comment: Bundled software and fonts retain their own terms. See
+ /usr/share/licenses/jacket/THIRD_PARTY_NOTICES.md and the notices in
+ /usr/libexec/jacket/resources.

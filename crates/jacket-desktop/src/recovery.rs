@@ -20,6 +20,8 @@ pub struct Recovery {
     pub output_path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) music_root: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) music_album_stems: Option<Vec<String>>,
     pub progress: ProgressEvent,
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -48,6 +50,7 @@ impl Recovery {
             plan,
             output_path,
             music_root: None,
+            music_album_stems: None,
             progress: ProgressEvent {
                 stage: "queued".into(),
                 message: "Starting your download".into(),

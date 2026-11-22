@@ -16,7 +16,12 @@ pub enum Placement {
 
 pub fn save_controls(app: &App, placement: Placement) -> Element<'_, Message> {
     let p = app.presentation();
-    let path = app.music_file_path();
+    let album = app.is_album_folder();
+    let path = if album {
+        app.music_album_path()
+    } else {
+        app.music_file_path()
+    };
     let configured = app.music_folder.is_some();
     let compact = placement == Placement::Compact;
     let change = focus_button::wrap(
@@ -45,19 +50,31 @@ pub fn save_controls(app: &App, placement: Placement) -> Element<'_, Message> {
         content = content.push(
             column![
                 row![
-                    text("Save to music folder")
-                        .size(12)
-                        .font(style::semibold()),
+                    text(if album {
+                        "Album folder"
+                    } else {
+                        "Save to music folder"
+                    })
+                    .size(12)
+                    .font(style::semibold()),
                     space::horizontal(),
                     change
                 ]
                 .spacing(6)
                 .align_y(Alignment::Center),
-                readable_path(full_path(stem, format), if compact { 50 } else { 72 }, app),
+                readable_path(
+                    if album {
+                        stem.display().to_string()
+                    } else {
+                        full_path(stem, format)
+                    },
+                    if compact { 50 } else { 72 },
+                    app,
+                ),
             ]
             .spacing(4),
         );
-        if !matches!(format, AudioFormat::Mp3) {
+        if !album && !matches!(format, AudioFormat::Mp3) {
             content = content.push(
                 text(match format {
                     AudioFormat::Compatible if placement == Placement::Inspector => {
@@ -72,10 +89,11 @@ pub fn save_controls(app: &App, placement: Placement) -> Element<'_, Message> {
         }
     } else {
         content = content.push(change);
-        if app
-            .review
-            .as_ref()
-            .is_some_and(|review| review.selected.len() != 1)
+        if !album
+            && app
+                .review
+                .as_ref()
+                .is_some_and(|review| review.selected.len() != 1)
         {
             content = content.push(
                 text("Select one track to save an audio file.")
@@ -121,26 +139,39 @@ pub fn save_controls(app: &App, placement: Placement) -> Element<'_, Message> {
         navigation.2.then_some(navigation.1),
         p.colors.accent,
     );
-    let mut actions = row![navigate, space::horizontal()]
-        .spacing(8)
-        .align_y(Alignment::Center);
+    let mut actions = row![].spacing(8).align_y(Alignment::Center);
+    if !(album && placement == Placement::Inspector) {
+        actions = actions.push(navigate);
+    }
+    actions = actions.push(space::horizontal());
     if !configured && placement == Placement::Inspector {
         content = content.push(save_as);
     } else {
         actions = actions.push(save_as);
     }
     if configured {
+        let ready = app.can_export()
+            && (!album
+                || placement != Placement::Preview
+                || matches!(app.album_preview, Some(Ok(_))));
         let save = focus_button::wrap(
-            "save-organized-audio",
-            button(text("Save audio file").size(13))
-                .width(if placement == Placement::Inspector {
-                    Length::Fill
+            "save-organized-output",
+            button(
+                text(if album && placement != Placement::Preview {
+                    "Save…"
                 } else {
-                    Length::Shrink
+                    "Save"
                 })
-                .padding([9, 12])
-                .style(p.primary()),
-            app.can_export().then_some(Message::Save),
+                .size(13),
+            )
+            .width(if placement == Placement::Inspector {
+                Length::Fill
+            } else {
+                Length::Shrink
+            })
+            .padding([9, 12])
+            .style(p.primary()),
+            ready.then_some(Message::Save),
             p.colors.accent,
         );
         if placement == Placement::Inspector {
@@ -155,7 +186,7 @@ pub fn save_controls(app: &App, placement: Placement) -> Element<'_, Message> {
 pub fn settings(app: &App) -> Element<'_, Message> {
     let p = app.presentation();
     let status = app.music_folder.as_ref().map_or_else(
-        || "Choose a location each time you save an audio file.".into(),
+        || "Choose a library folder for songs and albums.".into(),
         |folder| folder.root.display().to_string(),
     );
     column![
@@ -214,7 +245,7 @@ pub fn editor(app: &App) -> Element<'_, Message> {
         text(root.map_or_else(|| "Choose where Jacket should save organized audio files.".into(), |path| path.display().to_string()))
             .size(13).color(p.colors.text_muted).wrapping(iced::widget::text::Wrapping::WordOrGlyph),
         text("Path rule").size(13).font(style::semibold()),
-        text_input("{{artist}}/{{album}}/{{song}}", &editor.rule)
+        text_input("{{album_artist}}/{{album}}/{{song}}", &editor.rule)
             .id("music-folder-rule")
             .on_input_maybe((!app.busy()).then_some(Message::MusicRule))
             .on_submit_maybe((!app.busy() && root.is_some() && parsed.is_ok()).then_some(Message::ApplyMusicFolder))

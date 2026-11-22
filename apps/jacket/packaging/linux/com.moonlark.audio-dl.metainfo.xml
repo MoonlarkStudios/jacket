@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.moonlark.audio-dl</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Jacket</name>
+  <summary>Prepare tagged audio for your music library</summary>
+  <developer id="com.moonlarkstudios">
+    <name>Moonlark Studios</name>
+  </developer>
+  <description>
+    <p>Review songs, albums, and playlists, edit their tags and cover artwork,
+    and save organized audio files to your music library.</p>
+    <p>Choose a music folder and a naming rule, or save a one-off export to
+    a location of your choice.</p>
+  </description>
+  <launchable type="desktop-id">com.moonlark.audio-dl.desktop</launchable>
+  <url type="homepage">https://github.com/MoonlarkStudios/jacket</url>
+  <url type="bugtracker">https://github.com/MoonlarkStudios/jacket/issues</url>
+  <provides><binary>jacket</binary></provides>
+  <content_rating type="oars-1.1"/>
+</component>

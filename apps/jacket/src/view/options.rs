@@ -27,8 +27,13 @@ pub fn view(app: &App, docked: bool) -> Element<'_, Message> {
         output(app, OutputChoice::Zip, "ZIP", Icon::Archive),
     ]
     .spacing(6);
-    fields = fields
-        .push(column![text("Save as").size(12).color(p.colors.text_muted), output].spacing(7));
+    fields = fields.push(
+        column![
+            text("Output type").size(12).color(p.colors.text_muted),
+            output
+        ]
+        .spacing(7),
+    );
     if review.preferences.output_kind == OutputKind::File && review.selected.len() != 1 {
         fields = fields.push(
             text("Select one track for an audio file, or choose Folder or ZIP.")
@@ -60,11 +65,13 @@ pub fn view(app: &App, docked: bool) -> Element<'_, Message> {
     fields = fields.push(rule::horizontal(1).style(p.line())).push(
         column![
             row![
-                text(if review.preferences.output_kind == OutputKind::File {
-                    "Save As filename"
-                } else {
-                    "Output name"
-                })
+                text(
+                    if review.preferences.output_kind == OutputKind::File || app.is_album_folder() {
+                        "Save As filename"
+                    } else {
+                        "Output name"
+                    }
+                )
                 .size(12)
                 .color(p.colors.text_muted),
                 space::horizontal(),
@@ -93,10 +100,15 @@ pub fn view(app: &App, docked: bool) -> Element<'_, Message> {
     if !docked {
         return content;
     }
+    let actions = if app.is_album_folder() {
+        super::destination::save_controls(app, super::destination::Placement::Inspector)
+    } else {
+        preview_button(app)
+    };
     column![
         content,
         rule::horizontal(1).style(p.line()),
-        preview_button(app),
+        actions,
         discard(app),
     ]
     .spacing(12)

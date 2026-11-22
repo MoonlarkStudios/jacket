@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0-rc.1]
+
+- Native Jacket for Linux, with the refined icon and installable DEB and RPM packages.
+- Review songs, albums, and playlists with editable tags, shared artwork, and track order.
+- Save to a music folder using a previewable naming rule, or use Save As for a one-off.
+- Open a native GTK chooser for changing the music folder and saving files on Linux, even if the desktop portal is unavailable.
+
 ## [0.1.0-beta.3](https://github.com/MoonlarkStudios/jacket/compare/v0.1.0-beta.2...v0.1.0-beta.3) (2026-10-17)
 
 

@@ -179,7 +179,15 @@ pub struct ExportResult {
     #[serde(default)]
     pub playlist_path: Option<String>,
     pub track_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub album_save: Option<AlbumSaveSummary>,
     pub warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct AlbumSaveSummary {
+    pub added: usize,
+    pub kept: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

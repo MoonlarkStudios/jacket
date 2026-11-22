@@ -157,7 +157,7 @@ def copy_notices(resources, dependencies):
 def write_sources(destination):
     """Snapshot the native build inputs, including local source changes."""
     roots = ('.gitattributes', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'rustfmt.toml',
-             'mise.toml', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md',
+             'mise.toml', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md', 'CHANGELOG.md',
              'CONTRIBUTING.md', 'AGENTS.md', 'apps/jacket', 'crates/audio-engine',
              'crates/jacket-core', 'crates/jacket-desktop', 'branding', 'scripts',
              'third-party', 'assets', 'docs', '.github')
@@ -232,15 +232,11 @@ def build_candidate(options):
             resources.mkdir(parents=True)
             binaries.mkdir(parents=True)
             shutil.copy2(ROOT / 'branding/jacket/png/jacket-icon-256.png', resources / f'{LINUX_DESKTOP_ID}.png')
-            (staged / f'{LINUX_DESKTOP_ID}.desktop').write_text(
-                '[Desktop Entry]\nType=Application\nName=Jacket\n'
-                'Comment=Prepare tagged audio for your music library\n'
-                f'Exec=jacket\nIcon={LINUX_DESKTOP_ID}\nCategories=AudioVideo;Audio;\nTerminal=false\n'
-            )
+            shutil.copy2(ROOT / 'apps/jacket/packaging/linux' / f'{LINUX_DESKTOP_ID}.desktop', staged)
             (staged / 'README.txt').write_text(
                 'Run bin/jacket in a graphical Linux session.\n'
                 'The audio runtime is bundled; system Python 3, CA certificates, '
-                'X11/Wayland, xdg-utils and GPU/display drivers remain system dependencies.\n'
+                'X11/Wayland, xdg-utils, Zenity and GPU/display drivers remain system dependencies.\n'
                 'This is a local qualification candidate, not an installer.\n'
                 'The .desktop file is a template: install bin/jacket and the icon '
                 'into your PATH/icon theme or set absolute Exec/Icon paths.\n'

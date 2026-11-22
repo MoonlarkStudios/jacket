@@ -82,10 +82,11 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
                 .align_y(Alignment::Center)
                 .style(move |_| p.surface(p.colors.panel))
                 .into()
-        } else if app
-            .review
-            .as_ref()
-            .is_some_and(|review| review.preferences.output_kind == OutputKind::File)
+        } else if app.is_album_folder()
+            || app
+                .review
+                .as_ref()
+                .is_some_and(|review| review.preferences.output_kind == OutputKind::File)
         {
             container(super::destination::save_controls(
                 app,

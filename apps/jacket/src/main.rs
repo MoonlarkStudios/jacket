@@ -17,6 +17,13 @@ use app::App;
 use iced::window;
 
 fn main() -> iced::Result {
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == "--version")
+    {
+        println!("Jacket {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init();

@@ -1,4 +1,5 @@
 use crate::{
+    album_output::{open_existing_track, preview_album_output, AlbumPreview, AlbumTrackState},
     models::*,
     process::{run, Cancellation, Toolchain},
     source::{downloader, valid_artwork_url, validate_source_url},
@@ -51,7 +52,10 @@ fn hash_bytes(bytes: &[u8]) -> String {
 }
 
 pub fn hash_file(path: &Path) -> Result<String> {
-    let mut file = fs::File::open(path)?;
+    hash_reader(fs::File::open(path)?)
+}
+
+fn hash_reader(mut file: impl Read) -> Result<String> {
     let mut digest = Sha256::new();
     let mut buffer = [0; 65536];
     loop {
@@ -816,6 +820,25 @@ pub fn write_audio_file(
         .parent()
         .filter(|path| !path.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
+    let mut temporary = stage_output_file(source, parent, cancel)?;
+    loop {
+        cancel.check()?;
+        let destination = available_archive_path(&output);
+        match temporary.persist_noclobber(&destination) {
+            Ok(_) => return Ok(destination),
+            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+                temporary = error.file;
+            }
+            Err(error) => return Err(error.error.into()),
+        }
+    }
+}
+
+fn stage_output_file(
+    source: &Path,
+    parent: &Path,
+    cancel: &Cancellation,
+) -> Result<tempfile::NamedTempFile> {
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
     let mut input = fs::File::open(source)?;
     let mut buffer = [0; 65536];
@@ -828,17 +851,8 @@ pub fn write_audio_file(
         temporary.write_all(&buffer[..count])?;
     }
     temporary.as_file_mut().sync_all()?;
-    loop {
-        cancel.check()?;
-        let destination = available_archive_path(&output);
-        match temporary.persist_noclobber(&destination) {
-            Ok(_) => return Ok(destination),
-            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
-                temporary = error.file;
-            }
-            Err(error) => return Err(error.error.into()),
-        }
-    }
+    cancel.check()?;
+    Ok(temporary)
 }
 
 pub fn export_archive(
@@ -882,12 +896,107 @@ pub fn export_organized_file(
     export(
         tools,
         plan,
-        output.stem(),
+        output.path(),
         Some(output),
         workdir,
         cancel,
         emit,
     )
+}
+
+pub fn export_organized_album(
+    tools: &Toolchain,
+    plan: &ExportPlan,
+    output: &OrganizedOutput,
+    workdir: &Path,
+    cancel: &Cancellation,
+    emit: impl FnMut(ProgressEvent),
+) -> Result<ExportResult> {
+    cancel.check()?;
+    validate_plan(plan)?;
+    let preview = preview_album_output(plan, output)?;
+    let kept = preview.kept();
+    let added = plan.tracks.len() - kept;
+    let mut result = ExportResult {
+        output_path: output.path().to_string_lossy().into_owned(),
+        output_kind: OutputKind::Folder,
+        playlist_path: None,
+        track_count: plan.tracks.len(),
+        album_save: Some(AlbumSaveSummary { added, kept }),
+        warnings: Vec::new(),
+    };
+    if added == 0 {
+        return Ok(result);
+    }
+
+    require_resolved_cover(plan)?;
+    let mut prepared =
+        prepare_bundle(tools, plan, workdir, cancel, emit, Some((output, &preview)))?;
+    result.warnings.append(&mut prepared.warnings);
+    // Publish all audio before sidecars so a failed save never publishes a
+    // playlist that points at tracks still waiting to be added.
+    prepared.files.sort_by_key(|(name, _)| album_sidecar(name));
+    for (relative, source) in prepared.files {
+        cancel.check()?;
+        validate_bundle_entry(&relative)?;
+        let destination = output.path().join(&relative);
+        let entry = OrganizedOutput::new(output.root().to_owned(), destination.clone())?;
+        let sidecar = album_sidecar(&relative);
+        if sidecar && destination.symlink_metadata().is_ok() {
+            if relative == "playlist.m3u" {
+                result
+                    .warnings
+                    .push("Kept the existing playlist unchanged.".into());
+            }
+            continue;
+        }
+        entry.prepare_parent()?;
+        let staged = stage_output_file(
+            &source,
+            destination
+                .parent()
+                .expect("organized album entry has a parent"),
+            cancel,
+        )?;
+        match staged.persist_noclobber(&destination) {
+            Ok(_) => {
+                if relative == "playlist.m3u" {
+                    result.playlist_path = Some(destination.to_string_lossy().into_owned());
+                }
+            }
+            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists && sidecar => {
+                if relative == "playlist.m3u" {
+                    result
+                        .warnings
+                        .push("Kept the existing playlist unchanged.".into());
+                }
+            }
+            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+                return Err(EngineError::Invalid(
+                    "The album folder changed during export. Save again to check which tracks are still missing."
+                        .into(),
+                ));
+            }
+            Err(error) => return Err(error.error.into()),
+        }
+    }
+    Ok(result)
+}
+
+fn album_sidecar(name: &str) -> bool {
+    matches!(name, "cover.jpg" | "manifest.json" | "playlist.m3u") || name.starts_with("artwork/")
+}
+
+fn require_resolved_cover(plan: &ExportPlan) -> Result<()> {
+    if matches!(plan.artwork_mode, ArtworkMode::Shared)
+        && plan.shared_artwork_asset.is_some()
+        && plan.shared_artwork_path.is_none()
+    {
+        return Err(EngineError::Invalid(
+            "The imported cover must be resolved by Jacket before export.".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn export(
@@ -900,15 +1009,8 @@ fn export(
     emit: impl FnMut(ProgressEvent),
 ) -> Result<ExportResult> {
     validate_plan(plan)?;
-    if matches!(plan.artwork_mode, ArtworkMode::Shared)
-        && plan.shared_artwork_asset.is_some()
-        && plan.shared_artwork_path.is_none()
-    {
-        return Err(EngineError::Invalid(
-            "The imported cover must be resolved by Jacket before export.".into(),
-        ));
-    }
-    let prepared = prepare_bundle(tools, plan, workdir, cancel, emit)?;
+    require_resolved_cover(plan)?;
+    let prepared = prepare_bundle(tools, plan, workdir, cancel, emit, None)?;
     if let Some(organized) = organized {
         cancel.check()?;
         organized.prepare_parent()?;
@@ -924,6 +1026,7 @@ fn export(
         output_path: output.to_string_lossy().into_owned(),
         output_kind: plan.output_kind,
         track_count: plan.tracks.len(),
+        album_save: None,
         warnings: prepared.warnings,
     })
 }
@@ -939,6 +1042,7 @@ fn prepare_bundle(
     workdir: &Path,
     cancel: &Cancellation,
     mut emit: impl FnMut(ProgressEvent),
+    album: Option<(&OrganizedOutput, &AlbumPreview)>,
 ) -> Result<PreparedBundle> {
     let total = plan.tracks.len();
     let bundle = workdir.join("bundle");
@@ -950,6 +1054,32 @@ fn prepare_bundle(
     let mut playlist = String::from("#EXTM3U\n");
     for (index, track) in plan.tracks.iter().enumerate() {
         cancel.check()?;
+        let album_track = album.map(|(_, preview)| &preview.tracks[index]);
+        if let (Some((output, _)), Some(planned)) = (album, album_track) {
+            if planned.state == AlbumTrackState::Keep {
+                let filename = &planned.name;
+                add_to_playlist(&mut playlist, track, filename);
+                let current = output.path().join(filename);
+                output.check()?;
+                let saved = open_existing_track(&current).map_err(|_| EngineError::Invalid(
+                    "An existing track changed during export. Save again to check which tracks are missing.".into(),
+                ))?;
+                tracks.push(ManifestTrack {
+                    source_id: track.id.clone(),
+                    source_url: track.source_url.clone(),
+                    source_metadata: track.source_metadata.clone(),
+                    metadata: track.metadata.clone(),
+                    embedded_metadata: None,
+                    embedded_artwork: None,
+                    relative_path: filename.clone(),
+                    artwork_path: None,
+                    source_codec: String::new(),
+                    output_codec: String::new(),
+                    sha256: hash_reader(saved)?,
+                });
+                continue;
+            }
+        }
         emit(ProgressEvent {
             stage: "downloading".into(),
             message: format!("Downloading {}", track.metadata.title),
@@ -969,7 +1099,15 @@ fn prepare_bundle(
         })?;
         let source_codec = codec(tools, &acquired, cancel)?;
         let (ext, _) = target(&source_codec, plan.format)?;
-        let filename = namer.filename(plan, index, ext);
+        let filename = if let Some(planned) = album_track {
+            let (stem, _) = planned
+                .name
+                .rsplit_once('.')
+                .expect("album track has an extension");
+            format!("{stem}.{ext}")
+        } else {
+            namer.filename(plan, index, ext)
+        };
         let chosen_artwork = match plan.artwork_mode {
             ArtworkMode::None => None,
             ArtworkMode::Shared => plan.shared_artwork_url.as_deref(),
@@ -1051,12 +1189,7 @@ fn prepare_bundle(
             warnings.extend(metadata_warnings(&track.metadata, ext));
         }
         if plan.output_kind != OutputKind::File {
-            playlist.push_str(&format!(
-                "#EXTINF:{},{}\n{}\n",
-                track.duration.unwrap_or(-1.0).round(),
-                track.metadata.title.replace(['\n', '\r'], " "),
-                filename
-            ));
+            add_to_playlist(&mut playlist, track, &filename);
             tracks.push(ManifestTrack {
                 source_id: track.id.clone(),
                 source_url: track.source_url.clone(),
@@ -1105,6 +1238,15 @@ fn prepare_bundle(
         total,
     });
     Ok(PreparedBundle { files, warnings })
+}
+
+fn add_to_playlist(playlist: &mut String, track: &Track, filename: &str) {
+    let prefix = if filename.starts_with('#') { "./" } else { "" };
+    playlist.push_str(&format!(
+        "#EXTINF:{},{}\n{prefix}{filename}\n",
+        track.duration.unwrap_or(-1.0).round(),
+        track.metadata.title.replace(['\n', '\r'], " "),
+    ));
 }
 
 #[cfg(test)]

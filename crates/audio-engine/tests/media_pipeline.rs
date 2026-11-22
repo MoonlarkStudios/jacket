@@ -892,6 +892,102 @@ fn organized_audio_creates_directories_at_publication_and_keeps_existing_files()
 }
 
 #[test]
+#[ignore = "Requires locally installed FFmpeg"]
+fn organized_album_fills_the_songs_folder_and_can_be_saved_again_without_downloads() {
+    let tools = tools();
+    let fixture = tempfile::tempdir().unwrap();
+    let root = fixture.path().canonicalize().unwrap();
+    let album = root.join("Album Artist/Compilation");
+    let song_work = root.join("song-work");
+    let (mut plan, source, _) = audio_file_fixture(&tools, &song_work, "m4a", "aac");
+    plan.format = AudioFormat::Compatible;
+    let song = OrganizedOutput::new(root.clone(), album.join("Dr. Song")).unwrap();
+    let cancel = Cancellation::default();
+    let result = export_organized_file(&tools, &plan, &song, &song_work, &cancel, |_| {}).unwrap();
+    let saved = album.join("01 - Dr. Song.m4a");
+    fs::rename(result.output_path, &saved).unwrap();
+    let original = fs::read(&saved).unwrap();
+    let cover = album.join("cover.jpg");
+    fs::write(&cover, b"keep this cover").unwrap();
+    let collision = album.join("Second song.mp3");
+    fs::write(&collision, b"keep this recording").unwrap();
+
+    let workdir = root.join("album-work");
+    let mut missing = plan.tracks[0].clone();
+    missing.id = "second-song".into();
+    missing.source_url = "https://www.youtube.com/watch?v=second-song".into();
+    missing.metadata.title = "Second song".into();
+    let source_dir = workdir
+        .join("sources")
+        .join(hex::encode(Sha256::digest(missing.source_url.as_bytes())));
+    fs::create_dir_all(&source_dir).unwrap();
+    let receipt_source = source_dir.join("source.m4a");
+    fs::copy(source, &receipt_source).unwrap();
+    fs::write(
+        source_dir.join("receipt.json"),
+        serde_json::to_vec(&receipt_source).unwrap(),
+    )
+    .unwrap();
+    plan.tracks[0].source_url = "https://music.youtube.com/watch?v=fixture".into();
+    plan.tracks.push(missing);
+    plan.output_kind = OutputKind::Folder;
+    plan.format = AudioFormat::Mp3;
+    let output = OrganizedOutput::album(
+        root.clone(),
+        album.clone(),
+        vec!["Dr. Song".into(), "Second song".into()],
+    )
+    .unwrap();
+    let preview = preview_album_output(&plan, &output).unwrap();
+    assert_eq!(preview.tracks[0].state, AlbumTrackState::Keep);
+    assert_eq!(preview.tracks[0].name, "01 - Dr. Song.m4a");
+    assert_eq!(preview.tracks[1].state, AlbumTrackState::AddCopy);
+    assert_eq!(preview.tracks[1].name, "Second song (2).mp3");
+    assert_eq!(fs::read_dir(&album).unwrap().count(), 3);
+
+    // Simulate another writer claiming the previewed name during preparation.
+    // The save must preserve that file, and a retry should choose the next name.
+    let occupied_after_scan = album.join("Second song (2).mp3");
+    let raced = export_organized_album(&tools, &plan, &output, &workdir, &cancel, |event| {
+        if event.stage == "packaging" {
+            fs::write(&occupied_after_scan, b"file added while exporting").unwrap();
+        }
+    });
+    assert!(raced.is_err());
+    assert!(!album.join("playlist.m3u").exists());
+    let result = export_organized_album(&tools, &plan, &output, &workdir, &cancel, |_| {}).unwrap();
+    assert_eq!(Path::new(&result.output_path), album);
+    let summary = result.album_save.unwrap();
+    assert_eq!((summary.added, summary.kept), (1, 1));
+    let playlist = fs::read_to_string(album.join("playlist.m3u")).unwrap();
+    assert!(
+        playlist.contains("\n01 - Dr. Song.m4a\n") && playlist.contains("\nSecond song (3).mp3\n")
+    );
+    assert_eq!(fs::read(&saved).unwrap(), original);
+    assert_eq!(fs::read(&collision).unwrap(), b"keep this recording");
+    assert_eq!(
+        fs::read(&occupied_after_scan).unwrap(),
+        b"file added while exporting"
+    );
+    assert_eq!(fs::read(&cover).unwrap(), b"keep this cover");
+    assert!(album.join("Second song (3).mp3").is_file());
+
+    let repeat = preview_album_output(&plan, &output).unwrap();
+    assert_eq!(repeat.kept(), 2);
+    let retry_work = root.join("no-download-cache");
+    let summary = export_organized_album(&tools, &plan, &output, &retry_work, &cancel, |_| {})
+        .unwrap()
+        .album_save
+        .unwrap();
+    assert_eq!((summary.added, summary.kept), (0, 2));
+    assert!(!retry_work.exists());
+    assert_eq!(
+        fs::read_to_string(album.join("playlist.m3u")).unwrap(),
+        playlist
+    );
+}
+
+#[test]
 #[ignore = "Requires FFmpeg and Python with Mutagen"]
 fn preserved_wav_file_warns_about_unembedded_artwork_and_tags_without_sidecars() {
     let tools = tools();

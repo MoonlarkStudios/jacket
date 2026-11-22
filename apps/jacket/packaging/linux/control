@@ -1,0 +1,12 @@
+Source: jacket
+Section: sound
+Priority: optional
+Maintainer: Moonlark Studios <MoonlarkStudios@users.noreply.github.com>
+Homepage: https://github.com/MoonlarkStudios/jacket
+
+Package: jacket
+Architecture: amd64
+Depends: ${shlibs:Depends}, ca-certificates, python3 (>= 3.10), xdg-utils, xdg-desktop-portal, zenity, libwayland-client0, libwayland-cursor0, libwayland-egl1, libx11-6, libx11-xcb1, libxcursor1, libxi6, libxrandr2, libxkbcommon0, libxkbcommon-x11-0, libgl1, libgles2, libgl1-mesa-dri
+Description: Prepare tagged audio for your music library
+ Review songs, albums and playlists, edit their tags and artwork, and save
+ organized audio files with the bundled media tools.

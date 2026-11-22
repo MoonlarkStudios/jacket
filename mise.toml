@@ -86,6 +86,8 @@ depends = ["check:ci"]
 description = "Verify native packaging, dependency boundaries and tool checks"
 run = [
   "python scripts/native_tests.py",
+  "python scripts/native_installers.py version",
+  "shellcheck scripts/sign-jacket-rpm.sh scripts/test-linux-installers.sh",
   "python scripts/sync-branding.py --check",
   "python scripts/test-tool-bundling.py",
   "node --test .github/scripts/pr-title.test.mjs",
@@ -138,6 +140,27 @@ run = "python scripts/native_package.py --platform macos"
 description = "Build a Linux native portable candidate with bundled audio tools"
 depends = ["build", "tools:stage:linux", "licenses:native"]
 run = "python scripts/native_package.py --platform linux"
+
+[tasks."installers:stage"]
+description = "Stage the shared DEB and RPM payload and matching sources"
+depends = ["build", "tools:stage:linux", "licenses:native"]
+run = "python scripts/native_installers.py stage"
+
+[tasks."installers:deb"]
+description = "Build the DEB from the staged payload on Ubuntu 24.04"
+run = "python scripts/native_installers.py deb"
+
+[tasks."installers:rpm"]
+description = "Build the RPM from the staged payload on Fedora"
+run = "python scripts/native_installers.py rpm"
+
+[tasks."installers:seal"]
+description = "Write final checksums for the complete Linux asset set"
+run = "python scripts/native_installers.py seal"
+
+[tasks."installers:verify"]
+description = "Verify the Linux asset set, build identity, and checksums"
+run = "python scripts/native_installers.py verify"
 
 [tasks."branding:sync"]
 description = "Regenerate the macOS bundle icon from the brand PNGs"

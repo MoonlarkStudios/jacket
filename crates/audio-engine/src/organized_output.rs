@@ -3,12 +3,13 @@ use std::fs;
 use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
 
-/// The exact extensionless destination admitted for an organized audio file.
+/// The exact destination admitted for an organized audio file or album.
 /// Its root must already exist and can never be created by the exporter.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OrganizedOutput {
     root: PathBuf,
-    stem: PathBuf,
+    path: PathBuf,
+    album_stems: Option<Vec<String>>,
 }
 
 impl OrganizedOutput {
@@ -26,15 +27,48 @@ impl OrganizedOutput {
                 "Choose a filename inside the music folder.".into(),
             ));
         }
-        Ok(Self { root, stem })
+        Ok(Self {
+            root,
+            path: stem,
+            album_stems: None,
+        })
+    }
+
+    pub fn album(root: PathBuf, directory: PathBuf, stems: Vec<String>) -> Result<Self> {
+        if !root.is_absolute()
+            || directory.strip_prefix(&root).ok().is_none_or(|relative| {
+                relative
+                    .components()
+                    .any(|part| !matches!(part, Component::Normal(_)))
+            })
+            || stems.is_empty()
+            || stems.iter().any(|stem| {
+                stem.is_empty()
+                    || matches!(stem.as_str(), "." | "..")
+                    || stem.contains(['/', '\\', '\0'])
+            })
+        {
+            return Err(EngineError::Invalid(
+                "Choose an album folder and filenames inside your music library.".into(),
+            ));
+        }
+        Ok(Self {
+            root,
+            path: directory,
+            album_stems: Some(stems),
+        })
     }
 
     pub fn root(&self) -> &Path {
         &self.root
     }
 
-    pub fn stem(&self) -> &Path {
-        &self.stem
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn album_stems(&self) -> Option<&[String]> {
+        self.album_stems.as_deref()
     }
 
     pub fn check(&self) -> Result<()> {
@@ -51,13 +85,16 @@ impl OrganizedOutput {
                 "The saved music folder is unavailable. Reconnect it, choose another folder, or use Save As…".into(),
             ));
         }
-        let relative = self
-            .stem
+        let directory = if self.album_stems.is_some() {
+            &self.path
+        } else {
+            self.path.parent().expect("validated organized filename")
+        };
+        let relative = directory
             .strip_prefix(&self.root)
             .expect("validated organized path");
-        let parent = relative.parent().expect("organized path has a filename");
         let mut current = self.root.clone();
-        for component in parent.components() {
+        for component in relative.components() {
             current.push(component);
             let metadata = match current.symlink_metadata() {
                 Err(error) if error.kind() == ErrorKind::NotFound => {
@@ -100,7 +137,7 @@ mod tests {
         assert!(!root.join("Artist").exists());
         output.prepare_parent().unwrap();
         assert!(root.join("Artist/Album").is_dir());
-        assert!(!output.stem().exists());
+        assert!(!output.path().exists());
     }
 
     #[test]

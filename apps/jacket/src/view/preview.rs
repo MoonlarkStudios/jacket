@@ -3,7 +3,9 @@ use super::components::{self, CoverContext};
 use crate::app::{App, Message};
 use crate::icons::{self, Icon};
 use crate::style::{self, Presentation};
-use audio_engine::{ArtworkMode, AudioFormat, ExportPlan, ExportPreview, Metadata, OutputKind};
+use audio_engine::{
+    AlbumTrackState, ArtworkMode, AudioFormat, ExportPlan, ExportPreview, Metadata, OutputKind,
+};
 use iced::widget::{button, column, container, row, rule, text, Column};
 use iced::{Alignment, Element, Length};
 use std::collections::HashSet;
@@ -128,8 +130,38 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
         // The footer already shows the whole organized path and its format.
         return with_warnings(body, preview, p).into();
     }
+    let organized = app.is_album_folder() && app.music_folder.is_some() && !app.example;
+    let album = if organized {
+        match &app.album_preview {
+            Some(Ok(album)) => Some(album),
+            Some(Err(error)) => {
+                return body
+                    .push(text(error).size(13).color(p.colors.warning))
+                    .push(
+                        button("Check folder again")
+                            .padding([7, 11])
+                            .style(p.secondary())
+                            .on_press_maybe((!app.busy()).then_some(Message::ScanAlbumFolder)),
+                    )
+                    .into();
+            }
+            None => {
+                return body
+                    .push(
+                        text("Checking your album folder…")
+                            .size(13)
+                            .color(p.colors.text_muted),
+                    )
+                    .into();
+            }
+        }
+    } else {
+        None
+    };
     body = body.push(rule::horizontal(1).style(p.line()));
-    let audio_heading = if plan.output_kind == OutputKind::File {
+    let audio_heading = if album.is_some() {
+        "Album tracks".to_owned()
+    } else if plan.output_kind == OutputKind::File {
         "Audio file".to_owned()
     } else {
         format!("{}/", preview.root_name)
@@ -140,14 +172,30 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
                 .size(13)
                 .font(style::semibold())
                 .width(Length::Fill),
-            text("Files to save").size(11).color(p.colors.text_muted)
+            text(album.map_or_else(
+                || "Files to save".to_owned(),
+                |album| {
+                    let kept = album.kept();
+                    format!(
+                        "{kept} already there · {} to add",
+                        album.tracks.len() - kept
+                    )
+                }
+            ))
+            .size(11)
+            .color(p.colors.text_muted)
         ]
         .spacing(12)
         .align_y(Alignment::Center),
     );
     let mut audio = Column::new().width(Length::Fill).spacing(0);
-    for track in preview.tracks.iter().take(MAX_AUDIO_ROWS) {
-        let (stem, extension) = display_filename(&track.relative_path, track.extension_provisional);
+    for (index, track) in preview.tracks.iter().take(MAX_AUDIO_ROWS).enumerate() {
+        let planned = album.and_then(|album| album.tracks.get(index));
+        let (name, provisional) = planned.map_or(
+            (track.relative_path.as_str(), track.extension_provisional),
+            |planned| (planned.name.as_str(), planned.extension_provisional),
+        );
+        let (stem, extension) = display_filename(name, provisional);
         let mut filename = row![text(stem).size(13).width(Length::Fill)]
             .spacing(10)
             .align_y(Alignment::Center);
@@ -159,6 +207,14 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
             );
         }
         let mut labels = column![filename].spacing(4).width(Length::Fill);
+        if let Some(planned) = planned {
+            let (label, color) = match planned.state {
+                AlbumTrackState::Keep => ("Already in folder", p.colors.text_muted),
+                AlbumTrackState::Add => ("Will add", p.colors.success),
+                AlbumTrackState::AddCopy => ("Will add with a new filename", p.colors.warning),
+            };
+            labels = labels.push(text(label).size(11).color(color));
+        }
         if plan.output_kind != OutputKind::File {
             let detail = summary.track_detail(&track.metadata);
             if !detail.is_empty() {
@@ -180,6 +236,20 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
             .size(12)
             .color(p.colors.text_muted),
         );
+    }
+    if let Some(album) = album {
+        let all_present = album.kept() == album.tracks.len();
+        return body
+            .push(
+                text(if all_present {
+                    "Every selected track is already in this folder."
+                } else {
+                    "Existing audio, artwork, and playlists will be kept."
+                })
+                .size(12)
+                .color(p.colors.text_muted),
+            )
+            .into();
     }
     let audio_paths = preview
         .tracks

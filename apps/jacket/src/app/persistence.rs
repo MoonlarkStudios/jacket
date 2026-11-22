@@ -83,8 +83,17 @@ pub(super) fn read_appearance(desktop: &Desktop) -> Result<Appearance, String> {
     Ok(appearance)
 }
 
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct SavedMusicFolder {
+    root: std::path::PathBuf,
+    rule: jacket_core::PathRule,
+    #[serde(default, rename = "schemaVersion")]
+    schema_version: u8,
+}
+
 pub(super) fn read_music_folder(desktop: &Desktop) -> Result<Option<MusicFolder>, String> {
-    let folder: Option<MusicFolder> = read_preferences(
+    let folder: Option<SavedMusicFolder> = read_preferences(
         desktop,
         "music-folder.json",
         8192,
@@ -102,7 +111,14 @@ pub(super) fn read_music_folder(desktop: &Desktop) -> Result<Option<MusicFolder>
                 .into(),
         );
     }
-    Ok(folder)
+    Ok(folder.map(|folder| MusicFolder {
+        root: folder.root,
+        rule: if folder.schema_version == 0 {
+            folder.rule.migrate_saved_default()
+        } else {
+            folder.rule
+        },
+    }))
 }
 
 fn read_preferences<T: serde::de::DeserializeOwned + Default>(
@@ -136,7 +152,12 @@ pub(super) fn write_music_folder(
     desktop: &Desktop,
     folder: &Option<MusicFolder>,
 ) -> Result<(), String> {
-    write_preferences(desktop, "music-folder.json", folder)
+    let saved = folder.as_ref().map(|folder| SavedMusicFolder {
+        root: folder.root.clone(),
+        rule: folder.rule.clone(),
+        schema_version: 1,
+    });
+    write_preferences(desktop, "music-folder.json", &saved)
 }
 
 fn write_preferences(
