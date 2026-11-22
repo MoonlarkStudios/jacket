@@ -179,7 +179,9 @@ def smoke(evidence):
             key(window('Save audio file', app), 'Escape')
             time.sleep(0.6)
             assert not list(selected.iterdir()) and not list(original.iterdir())
-            click(jacket, 525, 546)
+            key(jacket, 'ctrl+s')
+            time.sleep(0.4)
+            key(jacket, 'Return')
             destination = selected / 'The Paper Trails/Room to breathe/First light.mp3'
             verify_export(destination)
             wait_for('organized export completion', lambda: json.loads(review.read_text())['draft'] is None)
