@@ -40,7 +40,7 @@ pub fn finish(
     record.progress.completed = record.plan.tracks.len();
     record.output_path = result.output_path.clone();
     record.error = None;
-    let checkpoint = record.save(workdir);
+    let checkpoint = record.save_checkpoint(workdir);
     if clear_review(store, review_root, record).is_err() {
         result.warnings.push(REVIEW_CLEANUP_WARNING.into());
         if checkpoint.is_err() {
@@ -203,6 +203,7 @@ mod tests {
         // and job cache remain writable.
         fs::write(&review_root, b"unavailable directory").unwrap();
         let mut record = record(Some(identity()));
+        record.save(&job).unwrap();
         let mut result = result(&dir.path().join("Album.zip"));
         finish(&store, &review_root, &job, &mut record, &mut result);
 
@@ -231,6 +232,7 @@ mod tests {
         let mut record = record(Some(identity()));
         record.plan.output_kind = OutputKind::File;
         record.output_path = dir.path().join("Artist - Song.v2").to_str().unwrap().into();
+        record.save(&job).unwrap();
         let mut result = result(&dir.path().join("Artist - Song.v2 (2).m4a"));
         result.output_kind = OutputKind::File;
 
