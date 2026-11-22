@@ -57,7 +57,7 @@ fn validate_inspection_source_url(input: &str) -> Result<String> {
     Ok(validated)
 }
 
-fn video_id(url: &url::Url) -> Option<String> {
+pub(crate) fn video_id(url: &url::Url) -> Option<String> {
     let id = match url.host_str()? {
         "youtu.be" => url.path().strip_prefix('/')?.to_owned(),
         "youtube.com" | "www.youtube.com" | "music.youtube.com" | "m.youtube.com"

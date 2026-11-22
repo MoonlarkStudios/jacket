@@ -59,16 +59,20 @@ Existing destination files are preserved; name collisions produce numbered copie
 Unfinished reviews and interrupted exports are retained locally for restart.
 Successful exports clear their associated working state after publication.
 
-Choose **Set up a music folder…** to save individual audio files under a root you
-pick in the native folder dialog. The default rule is `{{artist}}/{{album}}/{{song}}`.
-Edit it in **Settings → Music folder**, or use **Save As…** for a one-off location.
+Choose **Set up a music folder…** to save songs and albums under a root you pick
+in the native folder dialog. The default rule is `{{album_artist}}/{{album}}/{{song}}`.
+**Save** puts songs and album folder exports in the same library directory when
+their album tags match. The album preview shows existing recordings, tracks to
+add, and any filenames that need a numbered copy. Jacket keeps existing audio
+and sidecar files. Edit the rule in **Settings → Music folder**, or use
+**Save As…** for a one-off location.
 Jacket shows the resolved path before saving and adds the extension for the
 output codec. A blank album skips its folder, and `{{album_artist}}` uses the
 track artist when the album artist is blank. A resumed export keeps its original
 destination.
 
 Use Ctrl/Cmd+L to focus the source, Ctrl/Cmd+S to preview files, and Ctrl/Cmd+,
-to open settings. Ctrl/Cmd+Shift+S opens Save As for an audio file. Escape closes
+to open settings. Ctrl/Cmd+Shift+S opens Save As for a song or album. Escape closes
 an editor or cancels the active operation.
 
 | Format | Behavior |
@@ -118,6 +122,12 @@ Download only content you own or have permission to download, and follow the
 source service's terms. Jacket does not bypass DRM or grant access to restricted
 content. It is not affiliated with YouTube or Google.
 
+## Install on Linux
+
+Use the x86-64 DEB for Ubuntu or Debian, or the x86-64 RPM for Fedora Workstation.
+The release notes list tested desktop versions and the RPM signing fingerprint.
+See the [Linux installation guide](docs/linux-preview.md).
+
 ## Build and verify
 
 ```sh
@@ -142,6 +152,8 @@ must be completed before public distribution. The manual candidate workflow
 uploads review artifacts; it does not publish a release.
 See the [macOS packaging guide](docs/packaging-macos.md) and
 [Linux packaging guide](docs/linux-preview.md) for platform prerequisites and validation.
+The [Linux release checklist](docs/releasing.md) covers testing, signing, and
+publishing the DEB and RPM.
 
 macOS Apple Silicon and Linux x86_64 are the development/CI targets. CI checks
 compilation and device-independent behavior; it does not establish interactive

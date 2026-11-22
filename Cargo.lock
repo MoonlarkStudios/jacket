@@ -299,7 +299,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "audio-engine"
-version = "0.1.0-beta.3"
+version = "0.2.0-rc.1"
 dependencies = [
  "hex",
  "libc",
@@ -1892,7 +1892,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jacket-core"
-version = "0.1.0-beta.3"
+version = "0.2.0-rc.1"
 dependencies = [
  "audio-engine",
  "serde",
@@ -1903,7 +1903,7 @@ dependencies = [
 
 [[package]]
 name = "jacket-desktop"
-version = "0.1.0-beta.3"
+version = "0.2.0-rc.1"
 dependencies = [
  "audio-engine",
  "directories",
@@ -1922,7 +1922,7 @@ dependencies = [
 
 [[package]]
 name = "jacket-iced"
-version = "0.1.0-beta.3"
+version = "0.2.0-rc.1"
 dependencies = [
  "audio-engine",
  "iced",

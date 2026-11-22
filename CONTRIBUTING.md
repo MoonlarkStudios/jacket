@@ -28,7 +28,8 @@ sudo apt-get install build-essential pkg-config libx11-dev libxkbcommon-dev \
 
 Install yt-dlp using your trusted package manager. mise supplies Node, which yt-dlp
 uses for JavaScript challenges. `mise run doctor` checks tool versions, windowing
-headers and availability. Native source builds do not need GTK, WebKit or npm.
+headers and availability. Install Zenity on Linux to use the native folder and
+save dialogs when running from source. The DEB and RPM install it automatically.
 A graphical X11/Wayland session and suitable display drivers are required to launch
 the app; the ordinary tests run without a display or live source account.
 

@@ -1,5 +1,6 @@
 pub mod access;
 mod album;
+mod album_output;
 mod error;
 pub mod export;
 pub mod models;
@@ -9,12 +10,16 @@ mod song_artwork;
 pub mod source;
 pub mod tagging;
 
+pub use album_output::{preview_album_output, AlbumPreview, AlbumTrackState};
 pub use error::{EngineError, Result};
-pub use export::{export_archive, export_collection, export_organized_file, preview_export};
+pub use export::{
+    export_archive, export_collection, export_organized_album, export_organized_file,
+    preview_export,
+};
 pub use models::{
-    ArtworkMode, AudioFormat, AuthOptions, Browser, CollectionMode, ExportPlan, ExportPreview,
-    ExportPreviewTrack, ExportResult, Inspection, InspectionUpdate, ManifestTrack, Metadata,
-    OutputKind, ProgressEvent, Track,
+    AlbumSaveSummary, ArtworkMode, AudioFormat, AuthOptions, Browser, CollectionMode, ExportPlan,
+    ExportPreview, ExportPreviewTrack, ExportResult, Inspection, InspectionUpdate, ManifestTrack,
+    Metadata, OutputKind, ProgressEvent, Track,
 };
 pub use organized_output::OrganizedOutput;
 pub use process::{Cancellation, Toolchain};

@@ -1,13 +1,12 @@
 //! Native destination selection and the review-to-export save boundary.
+use super::destination_dialog::{self, Selection};
 use super::{persistence, App, Message, Panel};
-use audio_engine::{ExportPlan, Metadata, OrganizedOutput, OutputKind};
+use audio_engine::{CollectionMode, ExportPlan, Metadata, OrganizedOutput, OutputKind};
 use iced::Task;
 use jacket_core::PathRule;
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MusicFolder {
     pub root: PathBuf,
     pub rule: PathRule,
@@ -16,6 +15,26 @@ pub struct MusicFolder {
 impl MusicFolder {
     fn resolve(&self, metadata: &Metadata) -> PathBuf {
         self.root.join(self.rule.resolve(metadata))
+    }
+
+    fn album(&self, plan: &ExportPlan) -> Result<OrganizedOutput, String> {
+        let mut paths = plan
+            .tracks
+            .iter()
+            .map(|track| self.resolve(&track.metadata));
+        let first = paths.next().ok_or("Select at least one track.")?;
+        let directory = first.parent().expect("library filenames have a parent");
+        let stems = std::iter::once(first.clone())
+            .chain(paths)
+            .map(|path| {
+                if path.parent() != Some(directory) {
+                    return Err("This rule puts album tracks in different folders. Use a shared rule such as {{album_artist}}/{{album}}/{{song}}, or choose Save As….");
+                }
+                Ok(path.file_name().expect("resolved filename").to_string_lossy().into_owned())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        OrganizedOutput::album(self.root.clone(), directory.to_owned(), stems)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -33,6 +52,53 @@ pub enum ExportDestination {
 }
 
 impl App {
+    pub fn is_album_folder(&self) -> bool {
+        self.review.as_ref().is_some_and(|review| {
+            review.preferences.mode == CollectionMode::Album
+                && review.preferences.output_kind == OutputKind::Folder
+        })
+    }
+
+    pub fn music_album_path(&self) -> Option<PathBuf> {
+        if !self.is_album_folder() {
+            return None;
+        }
+        let folder = self.music_folder.as_ref()?;
+        let review = self.review.as_ref()?;
+        let metadata = review.effective_metadata(*review.selected.iter().next()?)?;
+        Some(folder.resolve(&metadata).parent()?.to_owned())
+    }
+
+    pub(super) fn scan_album_folder(&mut self) -> Task<Message> {
+        self.album_scan = self.album_scan.wrapping_add(1);
+        self.album_preview = None;
+        let (Some(folder), Some(plan)) = (&self.music_folder, &self.pending_plan) else {
+            return Task::none();
+        };
+        if self.panel != Panel::Preview
+            || plan.mode != CollectionMode::Album
+            || plan.output_kind != OutputKind::Folder
+        {
+            return Task::none();
+        }
+        let output = match folder.album(plan) {
+            Ok(output) => output,
+            Err(error) => {
+                self.album_preview = Some(Err(error));
+                return Task::none();
+            }
+        };
+        let request = self.album_scan;
+        let plan = plan.clone();
+        persistence::background(
+            move || {
+                audio_engine::preview_album_output(&plan, &output)
+                    .map_err(|error| error.to_string())
+            },
+            move |result| Message::AlbumScanned(request, result),
+        )
+    }
+
     pub fn music_file_path(&self) -> Option<PathBuf> {
         let review = self.review.as_ref()?;
         if review.preferences.output_kind != OutputKind::File || review.selected.len() != 1 {
@@ -85,30 +151,24 @@ impl App {
             return Task::none();
         };
         self.panel = editor.return_to;
-        iced::widget::operation::focus(if self.panel == Panel::Settings {
+        let focus = iced::widget::operation::focus(if self.panel == Panel::Settings {
             "settings-music-folder"
         } else {
             "edit-music-folder"
-        })
+        });
+        Task::batch([focus, self.scan_album_folder()])
     }
 
     pub(super) fn pick_music_root(&mut self) -> Task<Message> {
-        let Some(editor) = &self.music_folder_editor else {
+        let Some(editor) = &mut self.music_folder_editor else {
             return Task::none();
         };
         let current = editor.root.clone();
+        editor.error = None;
         self.dialog_open = true;
+        self.notice = Some("Opening the system folder chooser…".into());
         Task::perform(
-            async move {
-                let mut dialog = rfd::AsyncFileDialog::new().set_title("Choose your music folder");
-                if let Some(current) = current {
-                    dialog = dialog.set_directory(current);
-                }
-                dialog
-                    .pick_folder()
-                    .await
-                    .map(|folder| folder.path().to_owned())
-            },
+            destination_dialog::pick("Choose your music folder", current, Selection::Folder),
             Message::MusicRootPicked,
         )
     }
@@ -143,6 +203,7 @@ impl App {
             return Task::none();
         };
         self.dialog_open = true;
+        self.notice = Some("Saving music folder settings…".into());
         persistence::background(
             move || {
                 let folder = folder
@@ -173,6 +234,13 @@ impl App {
     }
 
     pub(super) fn save_export(&mut self, save_as: bool) -> Task<Message> {
+        if !save_as
+            && self.is_album_folder()
+            && self.music_folder.is_some()
+            && self.panel != Panel::Preview
+        {
+            return self.update(Message::Preview);
+        }
         let Some(review) = &self.review else {
             return Task::none();
         };
@@ -191,6 +259,25 @@ impl App {
             }
         };
         self.error = None;
+        if !save_as && plan.output_kind == OutputKind::Folder && plan.mode == CollectionMode::Album
+        {
+            if let Some(folder) = &self.music_folder {
+                return match (&self.album_preview, folder.album(&plan)) {
+                    (Some(Ok(_)), Ok(output)) => {
+                        self.begin_export(plan, ExportDestination::Organized(output))
+                    }
+                    (Some(Err(error)), _) => {
+                        self.error = Some(error.clone());
+                        self.scan_album_folder()
+                    }
+                    (_, Err(error)) => {
+                        self.error = Some(error);
+                        Task::none()
+                    }
+                    _ => self.scan_album_folder(),
+                };
+            }
+        }
         if !save_as && plan.output_kind == OutputKind::File {
             if let Some(folder) = &self.music_folder {
                 let stem = folder.resolve(&plan.tracks[0].metadata);
@@ -206,33 +293,39 @@ impl App {
 
         let kind = plan.output_kind;
         let mut title = audio_engine::export::sanitize_component(&plan.title);
-        let start_in = if kind == OutputKind::File {
-            self.music_folder.as_ref().map(|folder| folder.root.clone())
-        } else {
-            None
-        };
+        let start_in = self
+            .music_folder
+            .as_ref()
+            .filter(|_| {
+                kind == OutputKind::File
+                    || (kind == OutputKind::Folder && plan.mode == CollectionMode::Album)
+            })
+            .map(|folder| folder.root.clone());
         if kind == OutputKind::Zip {
             title.push_str(".zip");
         }
         self.pending_plan = Some(plan);
         self.dialog_open = true;
+        let (title, selection, notice) = match kind {
+            OutputKind::Folder => (
+                "Choose a parent music folder",
+                Selection::Folder,
+                "Opening the system folder chooser…",
+            ),
+            OutputKind::Zip => (
+                "Save ZIP archive",
+                Selection::File(title),
+                "Opening the system save dialog…",
+            ),
+            OutputKind::File => (
+                "Save audio file",
+                Selection::File(title),
+                "Opening the system save dialog…",
+            ),
+        };
+        self.notice = Some(notice.into());
         Task::perform(
-            async move {
-                let mut dialog = rfd::AsyncFileDialog::new().set_title(match kind {
-                    OutputKind::Folder => "Choose a parent music folder",
-                    OutputKind::Zip => "Save ZIP archive",
-                    OutputKind::File => "Save audio file",
-                });
-                if let Some(start_in) = start_in {
-                    dialog = dialog.set_directory(start_in);
-                }
-                let selected = if kind == OutputKind::Folder {
-                    dialog.pick_folder().await
-                } else {
-                    dialog.set_file_name(title).save_file().await
-                };
-                selected.map(|file| file.path().to_path_buf())
-            },
+            destination_dialog::pick(title, start_in, selection),
             Message::Destination,
         )
     }
@@ -248,6 +341,7 @@ impl App {
         let draft = review.draft();
         let identity = review.identity();
         self.dialog_open = true;
+        self.notice = Some("Preparing your export…".into());
         persistence::background(
             move || persistence::persist_review(&desktop, draft),
             move |result| Message::ExportSaved(Box::new(plan), destination, identity, result),

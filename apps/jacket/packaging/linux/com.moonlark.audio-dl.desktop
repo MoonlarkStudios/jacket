@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Jacket
+Comment=Prepare tagged audio for your music library
+Exec=jacket
+Icon=com.moonlark.audio-dl
+Categories=AudioVideo;Audio;
+Keywords=Music;Tags;Artwork;Library;
+Terminal=false

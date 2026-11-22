@@ -333,19 +333,14 @@ impl Desktop {
         destination: &audio_engine::OrganizedOutput,
         identity: Option<CompletionIdentity>,
     ) -> Result<Job, String> {
-        self.start_export(
-            plan,
-            destination.stem(),
-            Some(destination.root().to_owned()),
-            identity,
-        )
+        self.start_export(plan, destination.path(), Some(destination), identity)
     }
 
     fn start_export(
         &self,
         plan: ExportPlan,
         destination: &Path,
-        music_root: Option<PathBuf>,
+        organized: Option<&audio_engine::OrganizedOutput>,
         identity: Option<CompletionIdentity>,
     ) -> Result<Job, String> {
         let destination = destination
@@ -353,7 +348,10 @@ impl Desktop {
             .ok_or("The destination needs a Unicode path.")?
             .to_owned();
         let mut record = Recovery::new(operation_id(), plan, destination);
-        record.music_root = music_root;
+        if let Some(organized) = organized {
+            record.music_root = Some(organized.root().to_owned());
+            record.music_album_stems = organized.album_stems().map(<[_]>::to_vec);
+        }
         record.review_identity = identity;
         self.export_record(record)
     }
@@ -377,13 +375,23 @@ impl Desktop {
         }
         let output = PathBuf::from(&record.output_path);
         let organized = if let Some(root) = &record.music_root {
-            if record.plan.output_kind != OutputKind::File || record.plan.tracks.len() != 1 {
-                return Err("Choose exactly one track to save in your music folder.".into());
-            }
-            Some(
-                audio_engine::OrganizedOutput::new(root.clone(), output.clone())
-                    .map_err(|error| error.to_string())?,
-            )
+            let destination = match (&record.music_album_stems, record.plan.output_kind) {
+                (Some(stems), OutputKind::Folder)
+                    if record.plan.mode == audio_engine::CollectionMode::Album
+                        && record.plan.tracks.len() == stems.len() =>
+                {
+                    audio_engine::OrganizedOutput::album(
+                        root.clone(),
+                        output.clone(),
+                        stems.clone(),
+                    )
+                }
+                (None, OutputKind::File) if record.plan.tracks.len() == 1 => {
+                    audio_engine::OrganizedOutput::new(root.clone(), output.clone())
+                }
+                _ => return Err("The saved music folder does not match this export.".into()),
+            };
+            Some(destination.map_err(|error| error.to_string())?)
         } else {
             validate_destination(&record.plan, &output)?;
             None
@@ -426,14 +434,18 @@ impl Desktop {
                         // Progress is replaceable; a slow UI must never block file publication.
                         let _ = events.try_send(Event::Progress(progress));
                     };
-                    let result = if let Some(organized) = &organized {
-                        audio_engine::export_organized_file(
+                    let result = match &organized {
+                        Some(organized) if organized.album_stems().is_some() => {
+                            audio_engine::export_organized_album(
+                                &tools, &plan, organized, &workdir, cancel, emit,
+                            )
+                        }
+                        Some(organized) => audio_engine::export_organized_file(
                             &tools, &plan, organized, &workdir, cancel, emit,
-                        )
-                    } else {
-                        audio_engine::export_collection(
+                        ),
+                        None => audio_engine::export_collection(
                             &tools, &plan, &output, &workdir, cancel, emit,
-                        )
+                        ),
                     };
                     if result.is_ok() {
                         if let Some(handoff) = handoff {
@@ -769,6 +781,7 @@ mod tests {
             output_kind: OutputKind::File,
             playlist_path: None,
             track_count: 1,
+            album_save: None,
             warnings: Vec::new(),
         };
         assert!(desktop.reveal_export(&result).is_err());
@@ -957,6 +970,7 @@ mod tests {
             output_kind: kind,
             playlist_path: None,
             track_count: 1,
+            album_save: None,
             warnings: Vec::new(),
         }
     }

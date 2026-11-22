@@ -116,6 +116,8 @@ fn view_at(app: &App, size: iced::Size) -> Element<'_, Message> {
             .spacing(16);
             if let Some(error) = &app.error {
                 modal = modal.push(text(error).size(12).color(p.colors.danger));
+            } else if let Some(note) = &app.notice {
+                modal = modal.push(text(note).size(12).color(p.colors.text_muted));
             }
             if let Some(actions) = actions(app) {
                 modal = modal
@@ -483,9 +485,10 @@ fn actions(app: &App) -> Option<Element<'_, Message>> {
         return Some(destination::editor_actions(app));
     }
     if app.panel == Panel::Preview
-        && app
-            .preview_plan()
-            .is_some_and(|plan| plan.output_kind == audio_engine::OutputKind::File)
+        && (app.is_album_folder()
+            || app
+                .preview_plan()
+                .is_some_and(|plan| plan.output_kind == audio_engine::OutputKind::File))
     {
         return Some(destination::save_controls(
             app,

@@ -6,11 +6,14 @@ import json
 import platform
 from pathlib import Path
 import plistlib
+import shutil
 import tarfile
 import tempfile
 import tomllib
 import unittest
 from unittest import mock
+
+import native_installers as installers
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -183,6 +186,9 @@ class CandidatePackaging(unittest.TestCase):
             icon = root / 'branding/jacket/png/jacket-icon-256.png'
             icon.parent.mkdir(parents=True)
             icon.write_bytes(b'synthetic icon')
+            desktop_file = root / 'apps/jacket/packaging/linux' / installers.DESKTOP_FILE
+            desktop_file.parent.mkdir(parents=True)
+            shutil.copy2(installers.PACKAGING / installers.DESKTOP_FILE, desktop_file)
             runtime = root / 'runtime'
             (runtime / 'bin').mkdir(parents=True)
             for name in packaging.REQUIRED_TOOLS:
@@ -248,6 +254,43 @@ class CandidatePackaging(unittest.TestCase):
             (runtime / 'build-info.json').write_text('{"inputs": {}, "changed": true}')
             with self.assertRaisesRegex(ValueError, 'different runtime'):
                 packaging.verify_linux_sources(companion, runtime)
+
+
+class LinuxReleaseAssets(unittest.TestCase):
+    def test_package_versions_preserve_prerelease_ordering_conventions(self):
+        self.assertEqual(installers.package_versions('0.2.0-rc.1'), ('0.2.0~rc.1-1', '0.2.0', '0.rc.1'))
+        self.assertEqual(installers.package_names('0.2.0-rc.1'),
+                         ('jacket_0.2.0-rc.1_amd64.deb', 'jacket-0.2.0-0.rc.1.x86_64.rpm'))
+        self.assertEqual(installers.package_versions('0.2.0'), ('0.2.0-1', '0.2.0', '1'))
+        for invalid in ('0.2.0-rc.0', 'v0.2.0', '0.02.0', '0.2.0+build'):
+            with self.assertRaises(ValueError):
+                installers.package_versions(invalid)
+
+    def test_exact_asset_inventory_rejects_a_modified_installer(self):
+        version = '0.2.0-rc.1'
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            names = (*installers.package_names(version), installers.RUNTIME_SOURCES,
+                     installers.CRATE_SOURCES, 'runtime-build-info.json')
+            for name in names:
+                (output / name).write_text('fixture')
+            lock = output / 'runtime-build-info.json'
+            with tarfile.open(output / f'jacket-{version}-source.tar.gz', 'w:gz',
+                              pax_headers={'comment': 'candidate'}) as source:
+                source.add(lock, 'jacket-source/Cargo.lock')
+            (output / 'build.json').write_text(json.dumps({
+                'version': version, 'commit': 'candidate', 'target': 'x86_64-unknown-linux-gnu',
+                'cargoLockSha256': packaging.digest(lock),
+            }))
+            installers.verify_assets(output, version, 'candidate', seal=True)
+            installers.verify_assets(output, version, 'candidate')
+            with self.assertRaisesRegex(ValueError, 'different build'):
+                installers.verify_assets(output, version, 'another commit')
+            with self.assertRaisesRegex(ValueError, 'Asset set'):
+                installers.verify_assets(output, version, 'candidate', signed=True)
+            (output / names[0]).write_text('changed fixture')
+            with self.assertRaisesRegex(ValueError, 'checksums'):
+                installers.verify_assets(output, version, 'candidate')
 
 
 class NativeLicenseCollection(unittest.TestCase):

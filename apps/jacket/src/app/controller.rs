@@ -572,32 +572,46 @@ impl App {
                 if let Err(error) = self.prepare_preview() {
                     self.error = Some(error);
                 } else {
-                    return self.preview_artwork();
+                    return Task::batch([self.preview_artwork(), self.scan_album_folder()]);
                 }
+            }
+            Message::AlbumScanned(request, result)
+                if self.panel == Panel::Preview && request == self.album_scan =>
+            {
+                self.album_preview = Some(result);
+            }
+            Message::ScanAlbumFolder if self.panel == Panel::Preview && !self.busy() => {
+                return self.scan_album_folder();
             }
             Message::Save | Message::SaveAs
                 if self.can_export()
                     && self.result.is_none()
                     && (self.panel == Panel::Preview
                         || (self.panel == Panel::Workspace
-                            && self.review.as_ref().is_some_and(|review| {
-                                review.preferences.output_kind == OutputKind::File
-                            }))) =>
+                            && (self.is_album_folder()
+                                || self.review.as_ref().is_some_and(|review| {
+                                    review.preferences.output_kind == OutputKind::File
+                                })))) =>
             {
                 return self.save_export(matches!(message, Message::SaveAs));
             }
-            Message::Destination(destination) => {
+            Message::Destination(result) => {
                 self.dialog_open = false;
+                self.notice = None;
                 if self.close_after_job {
                     self.pending_plan = None;
                     return self.close();
                 }
+                let destination = result.unwrap_or_else(|error| {
+                    self.error = Some(error);
+                    None
+                });
                 let Some(destination) = destination else {
-                    if self
-                        .pending_plan
-                        .as_ref()
-                        .is_some_and(|plan| plan.output_kind == OutputKind::File)
-                    {
+                    if self.pending_plan.as_ref().is_some_and(|plan| {
+                        plan.output_kind == OutputKind::File
+                            || (plan.mode == audio_engine::CollectionMode::Album
+                                && plan.output_kind == OutputKind::Folder)
+                    }) {
                         if self.panel == Panel::Workspace {
                             self.pending_plan = None;
                         }
@@ -616,6 +630,7 @@ impl App {
             }
             Message::ExportSaved(plan, destination, identity, result) => {
                 self.dialog_open = false;
+                self.notice = None;
                 if self.close_after_job {
                     return self.close();
                 }
@@ -673,15 +688,21 @@ impl App {
             Message::ChooseMusicRoot if !self.busy() && self.panel == Panel::MusicFolder => {
                 return self.pick_music_root();
             }
-            Message::MusicRootPicked(path) if self.panel == Panel::MusicFolder => {
+            Message::MusicRootPicked(result) if self.panel == Panel::MusicFolder => {
                 self.dialog_open = false;
+                self.notice = None;
                 if self.close_after_job {
                     return self.close();
                 }
-                if let (Some(path), Some(editor)) = (path, &mut self.music_folder_editor) {
-                    editor.root = Some(path);
-                    editor.error = None;
-                    return iced::widget::operation::focus("music-folder-rule");
+                if let Some(editor) = &mut self.music_folder_editor {
+                    match result {
+                        Ok(Some(path)) => {
+                            editor.root = Some(path);
+                            return iced::widget::operation::focus("music-folder-rule");
+                        }
+                        Ok(None) => {}
+                        Err(error) => editor.error = Some(error),
+                    }
                 }
                 return iced::widget::operation::focus("music-folder-root");
             }
@@ -703,6 +724,7 @@ impl App {
             }
             Message::MusicFolderSaved(result) if self.panel == Panel::MusicFolder => {
                 self.dialog_open = false;
+                self.notice = None;
                 match result {
                     Ok(folder) => {
                         self.music_folder = folder;

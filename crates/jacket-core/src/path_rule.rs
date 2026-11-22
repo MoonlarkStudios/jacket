@@ -2,7 +2,7 @@ use audio_engine::{export::sanitize_component, Metadata};
 use serde::{Deserialize, Serialize};
 use std::{fmt, path::PathBuf, str::FromStr};
 
-const DEFAULT_RULE: &str = "{{artist}}/{{album}}/{{song}}";
+const DEFAULT_RULE: &str = "{{album_artist}}/{{album}}/{{song}}";
 
 /// A relative layout for one audio file. The exporter determines the codec extension.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -56,6 +56,13 @@ impl Part {
 }
 
 impl PathRule {
+    pub fn migrate_saved_default(self) -> Self {
+        if self.source == "{{artist}}/{{album}}/{{song}}" {
+            return Self::default();
+        }
+        self
+    }
+
     pub fn resolve(&self, metadata: &Metadata) -> PathBuf {
         let mut path = PathBuf::new();
         for parts in &self.components {

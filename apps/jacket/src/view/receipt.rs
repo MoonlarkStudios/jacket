@@ -16,11 +16,18 @@ pub fn view<'a>(app: &'a App, receipt: &'a Receipt, compact: bool) -> Element<'a
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(&output.output_path);
-    let (status, destination_icon, reveal_label) = match output.output_kind {
+    let (mut status, destination_icon, reveal_label) = match output.output_kind {
         OutputKind::File => ("Audio file saved", Icon::Music, "Show in folder"),
         OutputKind::Folder => ("Music folder saved", Icon::Folder, "Open folder"),
         OutputKind::Zip => ("ZIP archive saved", Icon::Archive, "Show in folder"),
     };
+    if let Some(album) = &output.album_save {
+        status = if album.added == 0 {
+            "Album already in your library"
+        } else {
+            "Album folder updated"
+        };
+    }
     let title = receipt
         .recording
         .as_ref()
@@ -53,12 +60,11 @@ pub fn view<'a>(app: &'a App, receipt: &'a Receipt, compact: bool) -> Element<'a
     }
     if output.output_kind != OutputKind::File {
         let count = output.track_count;
-        let label = if count == 1 { "track" } else { "tracks" };
-        heading = heading.push(
-            text(format!("{count} {label}"))
-                .size(13)
-                .color(p.colors.text_muted),
+        let label = output.album_save.as_ref().map_or_else(
+            || format!("{count} {}", if count == 1 { "track" } else { "tracks" }),
+            |album| format!("{} added · {} already there", album.added, album.kept),
         );
+        heading = heading.push(text(label).size(13).color(p.colors.text_muted));
     }
     let mut hero = row![]
         .spacing(if compact { 16 } else { 22 })

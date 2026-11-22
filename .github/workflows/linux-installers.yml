@@ -1,0 +1,250 @@
+name: Linux installers
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    paths:
+      - '.github/workflows/linux-installers.yml'
+      - 'apps/jacket/packaging/linux/**'
+      - 'scripts/*linux*'
+      - 'scripts/native_installers.py'
+      - 'scripts/native_package.py'
+      - 'rust-toolchain.toml'
+      - '**/Cargo.toml'
+      - 'Cargo.lock'
+      - 'mise.toml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-installers-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  RPM_IMAGE: registry.fedoraproject.org/fedora:44
+
+jobs:
+  quality:
+    name: Native CI on the exact release commit
+    if: github.ref_type == 'tag'
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ github.sha }}
+
+  build:
+    name: Build DEB and RPM from the Ubuntu 24.04 payload
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    env:
+      CARGO_BUILD_JOBS: 2
+      CARGO_INCREMENTAL: 0
+      CARGO_NET_RETRY: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install the builder and desktop metadata validators
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config libx11-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev nasm autoconf automake libtool dpkg-dev desktop-file-utils appstream
+      - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+        with:
+          version: 2026.9.12
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+          key: jacket-linux-sources-ubuntu-24.04-${{ hashFiles('Cargo.lock') }}
+          restore-keys: jacket-linux-sources-ubuntu-24.04-
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            target/native-runtime/linux
+            target/linux-runtime-downloads
+          key: jacket-runtime-ubuntu-24.04-${{ hashFiles('scripts/linux-runtime.lock.json', 'scripts/stage-linux-tools.py') }}
+      - name: Verify release ref and workspace version
+        if: github.ref_type == 'tag'
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git merge-base --is-ancestor HEAD "refs/remotes/origin/$DEFAULT_BRANCH"
+          mise exec -- python scripts/native_installers.py version --tag "$GITHUB_REF_NAME"
+      - name: Stage the exact commit and verify desktop metadata
+        run: |
+          mise run installers:stage --commit "$(git rev-parse HEAD)"
+          desktop-file-validate target/linux-installers/root/usr/share/applications/*.desktop
+          appstreamcli validate --no-net target/linux-installers/root/usr/share/metainfo/*.xml
+      - name: Build the Debian package
+        run: mise run installers:deb
+      - name: Build the RPM with Fedora tooling
+        run: |
+          docker run --rm -v "$PWD:/workspace:ro" -v "$PWD/target/linux-installers:/output" "$RPM_IMAGE" bash -euc '
+            dnf install -y --setopt=install_weak_deps=False rpm-build python3
+            python3 -B /workspace/scripts/native_installers.py rpm --output /output
+          '
+      - name: Seal candidate artifacts
+        run: mise run installers:seal --commit "$(git rev-parse HEAD)"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: jacket-linux-candidate-${{ github.sha }}
+          path: target/linux-installers/assets/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  sign:
+    name: Sign packages from a release tag
+    if: github.ref_type == 'tag'
+    needs: [quality, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: rpm-signing
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: jacket-linux-candidate-${{ github.sha }}
+          path: target/linux-installers/assets
+      - name: Verify candidate before signing
+        run: python3 -B scripts/native_installers.py verify --tag "$GITHUB_REF_NAME" --commit "$(git rev-parse HEAD)"
+      - name: Prepare Fedora signing tools before accessing the key
+        run: |
+          docker build -t jacket-rpm-signer - <<EOF
+          FROM $RPM_IMAGE
+          RUN dnf install -y --setopt=install_weak_deps=False rpm-sign gnupg2
+          EOF
+      - name: Sign and verify the RPM with Jacket's key
+        env:
+          JACKET_RPM_PRIVATE_KEY: ${{ secrets.JACKET_RPM_PRIVATE_KEY }}
+          JACKET_RPM_FINGERPRINT: ${{ vars.JACKET_RPM_FINGERPRINT }}
+        run: |
+          docker run --rm --network none -e JACKET_RPM_PRIVATE_KEY -e JACKET_RPM_FINGERPRINT \
+            -v "$PWD/scripts:/workspace:ro" -v "$PWD/target/linux-installers/assets:/packages" \
+            jacket-rpm-signer bash /workspace/sign-jacket-rpm.sh /packages
+      - name: Generate the final release checksums
+        run: python3 -B scripts/native_installers.py seal --tag "$GITHUB_REF_NAME" --commit "$(git rev-parse HEAD)" --signed
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: jacket-linux-signed-${{ github.sha }}
+          path: target/linux-installers/assets/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  install:
+    name: Install and export (${{ matrix.target }})
+    needs: [build, sign]
+    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.sign.result == 'success' || github.ref_type != 'tag') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: ubuntu-24.04
+            image: docker.io/library/ubuntu:24.04
+            baseline: Jacket_0.1.0-beta.3_amd64.deb
+          - target: ubuntu-26.04
+            image: docker.io/library/ubuntu:26.04
+          - target: debian-13
+            image: docker.io/library/debian:13
+          - target: fedora-44
+            image: registry.fedoraproject.org/fedora:44
+            baseline: Jacket-0.1.0-0.beta.3.x86_64.rpm
+          - target: fedora-45
+            image: registry.fedoraproject.org/fedora:45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: jacket-linux-${{ github.ref_type == 'tag' && 'signed' || 'candidate' }}-${{ github.sha }}
+          path: target/linux-installers/assets
+      - name: Verify the candidate and fetch the published upgrade fixture
+        env:
+          BASELINE: ${{ matrix.baseline }}
+        run: |
+          args=(--commit "$(git rev-parse HEAD)")
+          if [[ $GITHUB_REF_TYPE == tag ]]; then args+=(--tag "$GITHUB_REF_NAME" --signed); fi
+          python3 -B scripts/native_installers.py verify "${args[@]}"
+          mkdir -p target/baseline target/installer-evidence
+          if [[ -n "$BASELINE" ]]; then
+            curl --fail --show-error --silent --location --retry 3 --max-time 180 \
+              -o "target/baseline/$BASELINE" "https://github.com/MoonlarkStudios/jacket/releases/download/v0.1.0-beta.3/$BASELINE"
+            awk -v name="$BASELINE" '$2 == name' apps/jacket/packaging/linux/upgrade-baseline.sha256 |
+              (cd target/baseline && sha256sum --strict --check -)
+          fi
+      - name: Install, export, remove, and verify upgrade
+        env:
+          DISTRO_IMAGE: ${{ matrix.image }}
+        run: |
+          docker run --rm \
+            -v "$PWD:/workspace:ro" -v "$PWD/target/linux-installers/assets:/packages:ro" \
+            -v "$PWD/target/baseline:/baseline:ro" -v "$PWD/target/installer-evidence:/evidence" \
+            "$DISTRO_IMAGE" bash /workspace/scripts/test-linux-installers.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: jacket-install-evidence-${{ matrix.target }}-${{ github.sha }}
+          path: target/installer-evidence/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  draft:
+    name: Stage accepted files in an unpublished GitHub release
+    if: github.ref_type == 'tag'
+    needs: [sign, install]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      attestations: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: jacket-linux-signed-${{ github.sha }}
+          path: target/linux-installers/assets
+      - name: Verify the exact accepted files
+        run: python3 -B scripts/native_installers.py verify --tag "$GITHUB_REF_NAME" --commit "$(git rev-parse HEAD)" --signed
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: target/linux-installers/assets/*
+      - name: Create a draft release that a maintainer can review and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(python3 -B scripts/native_installers.py version --tag "$GITHUB_REF_NAME")
+          notes="$RUNNER_TEMP/jacket-release-notes.md"
+          {
+            python3 -B scripts/native_installers.py notes --tag "$GITHUB_REF_NAME"
+            printf '\n## Install on x86-64 Linux\n\n'
+            printf 'Use the DEB for Ubuntu or Debian and the RPM for Fedora. See the installation guide for commands, signature verification, and the tested distributions.\n\n'
+            printf '[Linux installation guide](https://github.com/%s/blob/%s/docs/linux-preview.md)\n\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA"
+            gpg --batch --with-colons --show-keys target/linux-installers/assets/jacket-rpm-signing-key.asc |
+              awk -F: '$1 == "fpr" && !seen++ {print "Jacket RPM signing key fingerprint `" $10 "`."}'
+          } > "$notes"
+          flags=()
+          if [[ $version == *-* ]]; then flags+=(--prerelease --latest=false); fi
+          gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "Jacket $version" \
+            --notes-file "$notes" "${flags[@]}" target/linux-installers/assets/*
+          release="$RUNNER_TEMP/jacket-draft.json"
+          gh release view "$GITHUB_REF_NAME" --json isDraft,tagName,assets > "$release"
+          jq -e --arg tag "$GITHUB_REF_NAME" \
+            '.isDraft and .tagName == $tag and all(.assets[]; .state == "uploaded")' "$release"
+          jq -r '.assets[] | (.digest | ltrimstr("sha256:")) + "  " + .name' "$release" |
+            LC_ALL=C sort -k2 > "$RUNNER_TEMP/jacket-server-sha256"
+          (cd target/linux-installers/assets && sha256sum -- *) |
+            LC_ALL=C sort -k2 | diff - "$RUNNER_TEMP/jacket-server-sha256"

@@ -83,6 +83,8 @@ impl App {
             panel: Panel::Workspace,
             editor: None,
             preview: None,
+            album_preview: None,
+            album_scan: 0,
             progress: None,
             result: None,
             export_recording: None,
@@ -269,6 +271,7 @@ impl App {
                                 output_kind: plan.output_kind,
                                 playlist_path,
                                 track_count: plan.tracks.len(),
+                                album_save: None,
                                 warnings: Vec::new(),
                             });
                         }

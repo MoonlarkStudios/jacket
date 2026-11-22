@@ -372,6 +372,7 @@ fn a_saved_song_keeps_its_own_identity_and_dismissing_it_keeps_the_other_review(
         output_kind: OutputKind::File,
         playlist_path: None,
         track_count: 1,
+        album_save: None,
         warnings: Vec::new(),
     });
 
@@ -842,11 +843,11 @@ fn cancelling_a_destination_keeps_the_captured_preview_ready_to_retry() {
         let identity = app.review.as_ref().expect("review").identity();
         app.dialog_open = true;
 
-        let actions = app.update(Message::Destination(None)).units();
+        let actions = app.update(Message::Destination(Ok(None))).units();
         assert_eq!(
             actions > 0,
-            kind == OutputKind::File,
-            "file picker returns focus to Save As"
+            matches!(kind, OutputKind::File | OutputKind::Folder),
+            "song and album pickers return focus to Save As"
         );
 
         assert!(
@@ -869,7 +870,45 @@ fn cancelling_a_destination_keeps_the_captured_preview_ready_to_retry() {
             "Save can reopen the destination dialog"
         );
         assert!(app.dialog_open);
+        assert!(app.notice.is_some());
+        let _ = app.update(Message::Destination(Err("Chooser unavailable.".into())));
+        assert_eq!(app.error.as_deref(), Some("Chooser unavailable."));
+        assert!(app.notice.is_none());
+        assert!(app.pending_plan.is_some());
+        assert!(!app.busy());
+        assert!(app.update(Message::Save).units() > 0);
+        assert!(app.error.is_none());
     }
+}
+
+#[test]
+fn a_folder_picker_error_leaves_the_old_root_in_place_and_allows_retry() {
+    use super::destination::MusicFolder;
+    let (root, desktop) = desktop();
+    let mut app = app(desktop);
+    let old = root.path().join("old");
+    let replacement = root.path().join("new");
+    app.music_folder = Some(MusicFolder {
+        root: old.clone(),
+        rule: "{{song}}".parse().unwrap(),
+    });
+    let _ = app.update(Message::OpenMusicFolder);
+    let _ = app.update(Message::ChooseMusicRoot);
+    assert!(app.dialog_open && app.notice.is_some());
+
+    let _ = app.update(Message::MusicRootPicked(Err("Chooser unavailable.".into())));
+    assert!(!app.busy());
+    assert!(app.notice.is_none());
+    let editor = app.music_folder_editor.as_ref().unwrap();
+    assert_eq!(editor.root.as_ref(), Some(&old));
+    assert_eq!(editor.error.as_deref(), Some("Chooser unavailable."));
+
+    let _ = app.update(Message::ChooseMusicRoot);
+    let _ = app.update(Message::MusicRootPicked(Ok(Some(replacement.clone()))));
+    let editor = app.music_folder_editor.as_ref().unwrap();
+    assert_eq!(editor.root.as_ref(), Some(&replacement));
+    assert!(editor.error.is_none());
+    assert_eq!(app.music_folder.as_ref().unwrap().root, old);
 }
 
 #[test]
@@ -912,6 +951,43 @@ fn organized_preview_uses_the_selected_tracks_effective_tags_and_updates_after_e
 }
 
 #[test]
+fn songs_and_album_folders_share_the_library_path_and_save_as_remains_available() {
+    let (root, desktop) = desktop();
+    let mut app = app(desktop);
+    let root = root.path().canonicalize().unwrap();
+    app.music_folder = Some(super::destination::MusicFolder {
+        root: root.clone(),
+        rule: jacket_core::PathRule::default(),
+    });
+    let mut inspection = example::album();
+    for (index, track) in inspection.tracks.iter_mut().enumerate() {
+        track.metadata.artist = format!("Artist {index}");
+        track.metadata.album_artist = "Various Artists".into();
+        track.metadata.album = "Compilation".into();
+    }
+    app.review = Some(Review::new(inspection.clone(), AudioFormat::Mp3));
+    let album = app.music_album_path().unwrap();
+    assert_eq!(album, root.join("Various Artists/Compilation"));
+    let _ = app.update(Message::Save);
+    assert_eq!(app.panel, Panel::Preview);
+    assert!(app.pending_plan.is_some());
+    assert!(!app.dialog_open);
+    let _ = app.update(Message::SaveAs);
+    assert!(app.dialog_open);
+    let _ = app.update(Message::Destination(Ok(None)));
+    assert_eq!(app.panel, Panel::Preview);
+    assert_eq!(app.music_album_path().unwrap(), album);
+    let _ = app.update(Message::ClosePanel);
+    inspection.tracks.truncate(1);
+    inspection.suggested_mode = audio_engine::CollectionMode::Collection;
+    app.review = Some(Review::new(inspection, AudioFormat::Mp3));
+    assert_eq!(
+        app.music_file_path().unwrap().parent(),
+        Some(album.as_path())
+    );
+}
+
+#[test]
 fn changing_then_cancelling_music_folder_returns_to_the_same_preview() {
     use super::destination::MusicFolder;
     use audio_engine::OutputKind;
@@ -938,7 +1014,7 @@ fn changing_then_cancelling_music_folder_returns_to_the_same_preview() {
 
     assert!(app.update(Message::SaveAs).units() > 0);
     assert!(app.dialog_open);
-    let _ = app.update(Message::Destination(None));
+    let _ = app.update(Message::Destination(Ok(None)));
     assert!(app.pending_plan.is_some());
     assert!(app.music_folder.is_some());
 }
@@ -956,6 +1032,22 @@ fn music_folder_preference_round_trips_and_corrupt_rules_are_rejected() {
     write_music_folder(&desktop, &saved).unwrap();
     assert_eq!(read_music_folder(&desktop).unwrap(), saved);
     let file = desktop.data_root().join("music-folder.json");
+    let legacy = "{{artist}}/{{album}}/{{song}}";
+    std::fs::write(
+        &file,
+        serde_json::json!({ "root": root.path(), "rule": legacy }).to_string(),
+    )
+    .unwrap();
+    assert_eq!(
+        read_music_folder(&desktop).unwrap().unwrap().rule,
+        jacket_core::PathRule::default()
+    );
+    let explicit = Some(MusicFolder {
+        root: root.path().to_owned(),
+        rule: legacy.parse().unwrap(),
+    });
+    write_music_folder(&desktop, &explicit).unwrap();
+    assert_eq!(read_music_folder(&desktop).unwrap(), explicit);
     std::fs::write(
         &file,
         serde_json::json!({ "root": root.path(), "rule": "../{{song}}" }).to_string(),

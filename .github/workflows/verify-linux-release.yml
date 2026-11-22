@@ -1,0 +1,49 @@
+name: Verify published Linux release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published native release tag
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  attestations: read
+
+jobs:
+  verify:
+    name: Verify public downloads and provenance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5b805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Verify the release and its public asset bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: |
+          [[ $RELEASE_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]]
+          gh release verify "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY"
+          endpoint="repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG"
+          commit=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)
+          gh api "$endpoint" --jq '.assets[] | [.name, .browser_download_url] | @tsv' > "$RUNNER_TEMP/jacket-assets.tsv"
+          mkdir -p target/linux-installers/assets
+          while IFS=$'\t' read -r name url; do
+            [[ $name =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]
+            [[ $url == "https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/"* ]]
+            file="target/linux-installers/assets/$name"
+            curl --fail --show-error --silent --location --proto '=https' --proto-redir '=https' \
+              --retry 3 --retry-all-errors --max-time 180 -o "$file" "$url"
+            gh release verify-asset "$RELEASE_TAG" "$file" --repo "$GITHUB_REPOSITORY"
+          done < "$RUNNER_TEMP/jacket-assets.tsv"
+          python3 -B scripts/native_installers.py verify --tag "$RELEASE_TAG" --commit "$commit" --signed
+          gh attestation verify target/linux-installers/assets/SHA256SUMS --repo "$GITHUB_REPOSITORY" \
+            --source-ref "refs/tags/$RELEASE_TAG" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/linux-installers.yml"
