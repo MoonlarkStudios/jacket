@@ -8,7 +8,10 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 THEMES = ('dark', 'light', 'mocha')
-ALBUM_PANELS = (None, 'preview', 'settings', 'appearance', 'options', 'editor', 'bulk', 'crop')
+ALBUM_PANELS = (
+    None, 'preview', 'settings', 'appearance', 'options', 'editor', 'bulk', 'crop',
+    'shared-tags', 'track-order',
+)
 
 
 def capture_cases():
@@ -18,14 +21,21 @@ def capture_cases():
             for panel in ALBUM_PANELS:
                 yield compact, theme, panel or 'review', (['--panel', panel] if panel else [])
             for scenario, panels in (
-                ('song', (None, 'preview', 'editor', 'options')),
-                ('playlist', (None, 'preview')),
+                ('song', (None, 'preview', 'editor', 'options', 'crop')),
+                ('playlist', (None, 'preview', 'editor', 'shared-tags', 'track-order')),
             ):
                 for panel in panels:
                     name = f'{scenario}-{panel}' if panel else scenario
                     flags = [f'--{scenario}'] + (['--panel', panel] if panel else [])
                     yield compact, theme, name, flags
             yield compact, theme, 'long-song', ['--song', '--long']
+            yield compact, theme, 'organized-song', ['--song', '--organized']
+            yield compact, theme, 'organized-preview', ['--song', '--organized', '--panel', 'preview']
+            yield compact, theme, 'music-folder', ['--song', '--organized', '--panel', 'music-folder']
+            yield compact, theme, 'song-saved', ['--song', '--panel', 'saved']
+            yield compact, theme, 'album-saved', ['--panel', 'saved']
+            yield compact, theme, 'opening-song', ['--song', '--panel', 'opening']
+            yield compact, theme, 'opening-playlist', ['--playlist', '--panel', 'opening-tracks']
     for scenario in ('empty', 'stress'):
         for theme in THEMES:
             yield False, theme, scenario, [f'--{scenario}']

@@ -5,7 +5,7 @@ use crate::settings::BrowserChoice;
 use crate::{example, view};
 use audio_engine::{AuthOptions, OutputKind};
 use iced::{keyboard, window, Element, Subscription, Task, Theme};
-use jacket_core::{Review, SourceLink};
+use jacket_core::{Review, SourceIntent, SourceLink};
 use jacket_desktop::artwork_assets::Crop;
 use jacket_desktop::downloader_updates::{self, Channel};
 use std::time::Duration;
@@ -42,6 +42,7 @@ impl App {
 
     pub fn can_preview(&self) -> bool {
         !self.busy()
+            && !self.panel.review_tool()
             && self.review.as_ref().is_some_and(|review| {
                 let uses_shared_cover = matches!(
                     review.preferences.artwork_mode,
@@ -102,7 +103,8 @@ impl App {
                     return None;
                 };
                 if status == iced::event::Status::Captured {
-                    return None;
+                    return matches!(key, keyboard::Key::Named(keyboard::key::Named::Escape))
+                        .then_some(Message::CapturedEscape);
                 }
                 match key {
                     keyboard::Key::Character(ref value)
@@ -138,6 +140,13 @@ impl App {
                         Some(Message::FocusSource)
                     }
                     keyboard::Key::Character(ref value)
+                        if modifiers.command()
+                            && modifiers.shift()
+                            && value.eq_ignore_ascii_case("s") =>
+                    {
+                        Some(Message::SaveAs)
+                    }
+                    keyboard::Key::Character(ref value)
                         if modifiers.command() && value.eq_ignore_ascii_case("s") =>
                     {
                         Some(Message::Preview)
@@ -167,6 +176,7 @@ impl App {
                         self.recovery = boot.recovery;
                         self.appearance = boot.appearance;
                         self.appearance_valid = boot.appearance_valid;
+                        self.music_folder = boot.music_folder;
                         match self.appearance.theme.resolve(self.theme.revision + 1) {
                             Ok(theme) => self.theme = theme,
                             Err(error) => {
@@ -219,11 +229,13 @@ impl App {
             }
             Message::PrimaryAction => {
                 return match self.panel {
+                    Panel::Workspace if self.result.is_some() => self.update(Message::OpenOutput),
                     Panel::Workspace | Panel::Options if self.can_preview() => {
                         self.update(Message::Preview)
                     }
                     Panel::Preview if self.can_export() => self.update(Message::Save),
-                    Panel::Editor if !self.busy() => {
+                    Panel::MusicFolder if !self.busy() => self.update(Message::ApplyMusicFolder),
+                    Panel::Editor | Panel::SongEditor | Panel::CollectionEditor if !self.busy() => {
                         self.update(Message::Editor(editor::Action::Apply))
                     }
                     Panel::Crop if !self.busy() && !self.example => self.update(Message::ApplyCrop),
@@ -240,7 +252,11 @@ impl App {
                         .map(Message::DisplayScale),
                 ]);
             }
-            Message::DisplayScale(scale) => return self.display_scale_changed(scale),
+            Message::DisplayScale(scale) => {
+                let task = self.display_scale_changed(scale);
+                return Task::batch([task, self.refresh_receipt_cover()]);
+            }
+            Message::ReceiptCover(Ok(raster)) => self.update_receipt_cover(raster),
             Message::OwnedCoverRaster(id, scale, result) => {
                 return self.owned_artwork_ready(id, scale, result)
             }
@@ -256,15 +272,36 @@ impl App {
                     Message::Booted,
                 );
             }
-            Message::Url(url) if !self.busy() => self.url = url,
-            Message::Pasted(url) if !self.busy() => {
+            Message::Url(url) if !self.busy() && !self.panel.review_tool() => {
                 self.url = url;
-                if SourceLink::parse(&self.url).is_ok() {
-                    return self.update(Message::Find);
+                self.intent = SourceIntent::Song;
+                self.source_error = None;
+            }
+            Message::Pasted(url) if !self.busy() && !self.panel.review_tool() => {
+                self.url = url.trim().to_owned();
+                self.intent = SourceIntent::Song;
+                self.source_error = None;
+                match SourceLink::parse(&self.url) {
+                    Ok(link) if link.has_playlist_context() => {
+                        return self.update(Message::FocusSource)
+                    }
+                    Ok(_) => return self.update(Message::Find),
+                    Err(error) => {
+                        self.source_error = Some(error);
+                        return self.update(Message::FocusSource);
+                    }
                 }
             }
-            Message::Intent(intent) if !self.busy() => self.intent = intent,
-            Message::Find if !self.busy() => {
+            Message::Intent(intent) if !self.busy() && !self.panel.review_tool() => {
+                self.intent = intent;
+                self.source_error = None;
+            }
+            Message::Find if !self.busy() && !self.panel.review_tool() => {
+                if let Err(error) = SourceLink::parse(&self.url) {
+                    self.source_error = Some(error);
+                    return self.update(Message::FocusSource);
+                }
+                self.source_error = None;
                 if (!self.example && self.review.is_some())
                     || self
                         .example_previous
@@ -276,8 +313,10 @@ impl App {
                     return self.inspect();
                 }
             }
-            Message::ConfirmFind if !self.busy() => return self.inspect(),
-            Message::Example if !self.busy() => {
+            Message::ConfirmFind if !self.busy() && self.panel == Panel::Replace => {
+                return self.inspect()
+            }
+            Message::Example if !self.busy() && !self.panel.review_tool() => {
                 if !self.example {
                     self.example_previous = Some(self.suspend_review());
                 }
@@ -295,7 +334,21 @@ impl App {
                 self.initialize_example_cover();
             }
             Message::TrackScrolled(offset) if offset.is_finite() => {
-                self.track_scroll = offset.max(0.0)
+                self.track_scroll = offset.max(0.0);
+            }
+            Message::TrackListSized(height) if height.is_finite() => {
+                self.track_viewport_height = height;
+                if self.panel == Panel::CollectionEditor {
+                    if let Some(editor::Kind::Track(index)) =
+                        self.editor.as_ref().map(|editor| editor.kind)
+                    {
+                        let before = self.track_scroll;
+                        self.reveal_track(index);
+                        if self.track_scroll != before {
+                            return self.restore_scroll();
+                        }
+                    }
+                }
             }
             Message::Toggle(index, selected) if !self.busy() => {
                 return self.change_review(|review| review.select(index, selected))
@@ -303,9 +356,38 @@ impl App {
             Message::SelectAll(selected) if !self.busy() => {
                 return self.change_review(|review| review.select_all(selected))
             }
-            Message::OpenEditor(kind) if !self.busy() => {
+            Message::OpenEditor(kind) if !self.busy() && !self.panel.review_tool() => {
                 if let Some(review) = &self.review {
                     self.editor = Some(Editor::new(kind, review));
+                    if review.is_song() && matches!(kind, editor::Kind::Track(0)) {
+                        self.panel = Panel::SongEditor;
+                        return Task::batch([
+                            iced::widget::operation::scroll_to(
+                                "song-review",
+                                iced::widget::scrollable::AbsoluteOffset::<f32>::default(),
+                            ),
+                            iced::widget::operation::focus("metadata-title"),
+                        ]);
+                    }
+                    if !review.is_song()
+                        && matches!(
+                            kind,
+                            editor::Kind::Track(_)
+                                | editor::Kind::Album
+                                | editor::Kind::PlaylistName
+                        )
+                    {
+                        self.panel = Panel::CollectionEditor;
+                        self.collection_editor_anchor =
+                            matches!(kind, editor::Kind::Track(_)).then_some(self.track_scroll);
+                        return iced::widget::operation::focus(
+                            if matches!(kind, editor::Kind::Album) {
+                                "metadata-album"
+                            } else {
+                                "metadata-title"
+                            },
+                        );
+                    }
                     self.panel = Panel::Editor;
                     return iced::widget::operation::focus(if matches!(kind, editor::Kind::Bulk) {
                         "metadata-prefix"
@@ -314,13 +396,35 @@ impl App {
                     });
                 }
             }
-            Message::Editor(editor::Action::Apply) if !self.busy() => {
+            Message::Editor(editor::Action::Apply | editor::Action::ApplyNext) if !self.busy() => {
+                let focus = self.editor_return_focus();
                 if let (Some(editor), Some(review)) = (&mut self.editor, &mut self.review) {
                     match editor.apply(review) {
                         Ok(()) => {
+                            if matches!(message, Message::Editor(editor::Action::ApplyNext))
+                                && self.panel == Panel::CollectionEditor
+                            {
+                                if let editor::Kind::Track(index) = editor.kind {
+                                    let next = index + 1;
+                                    if next < review.inspection.tracks.len() {
+                                        self.editor =
+                                            Some(Editor::new(editor::Kind::Track(next), review));
+                                        self.collection_editor_anchor = None;
+                                        self.reveal_track(next);
+                                        return self.autosave().chain(
+                                            iced::widget::operation::focus("metadata-title"),
+                                        );
+                                    }
+                                }
+                            }
                             self.panel = Panel::Workspace;
+                            self.restore_collection_anchor();
                             self.editor = None;
-                            return self.autosave();
+                            let saved = self.autosave();
+                            return match focus {
+                                Some(id) => saved.chain(iced::widget::operation::focus(id)),
+                                None => saved,
+                            };
                         }
                         Err(error) => editor.error = Some(error),
                     }
@@ -329,6 +433,12 @@ impl App {
             Message::Editor(action) if !self.busy() => {
                 if let Some(editor) = &mut self.editor {
                     editor.input(action);
+                }
+            }
+            Message::RestoreSourceTags if !self.busy() && self.panel.inline_editor() => {
+                if let (Some(editor), Some(review)) = (&mut self.editor, &self.review) {
+                    editor.restore_source_tags(review);
+                    return iced::widget::operation::focus("metadata-title");
                 }
             }
             Message::Format(format) if !self.busy() => {
@@ -361,9 +471,65 @@ impl App {
             Message::UndoNumbering if !self.busy() => {
                 return self.change_review(|review| review.undo_numbering().map(|_| ()))
             }
+            Message::MoveTrack { from, to }
+                if !self.busy()
+                    && self.panel == Panel::TrackOrder
+                    && self.track_position.is_none() =>
+            {
+                return self.move_review_track(from, to);
+            }
+            Message::UndoTrackMove
+                if !self.busy()
+                    && self.panel == Panel::TrackOrder
+                    && self.track_position.is_none() =>
+            {
+                return self.undo_review_move();
+            }
+            Message::ChooseTrackPosition(index)
+                if !self.busy() && self.panel == Panel::TrackOrder =>
+            {
+                return self.choose_track_position(index);
+            }
+            Message::TrackPosition(value) if self.panel == Panel::TrackOrder => {
+                if let Some(edit) = &mut self.track_position {
+                    edit.position = value;
+                }
+            }
+            Message::ApplyTrackPosition if !self.busy() && self.panel == Panel::TrackOrder => {
+                if let Some(to) = self.track_position_target() {
+                    if let Some(edit) = &self.track_position {
+                        if edit.index == to {
+                            return self.cancel_track_position();
+                        }
+                    }
+                    if let Some(edit) = self.track_position.take() {
+                        return self.move_review_track(edit.index, to);
+                    }
+                }
+            }
+            Message::CancelTrackPosition if self.panel == Panel::TrackOrder => {
+                return self.cancel_track_position();
+            }
+            Message::OpenPanel(Panel::TrackOrder) => {
+                if !self.busy()
+                    && self.panel == Panel::Workspace
+                    && self
+                        .review
+                        .as_ref()
+                        .is_some_and(|review| review.inspection.tracks.len() > 1)
+                {
+                    self.panel = Panel::TrackOrder;
+                    self.arranged_track = None;
+                    return iced::widget::operation::focus("finish-track-order");
+                }
+            }
             Message::OpenPanel(panel)
                 if !self.dialog_open
-                    && (!matches!(self.panel, Panel::Editor | Panel::Crop)
+                    && ((!self.panel.review_tool()
+                        && !matches!(
+                            self.panel,
+                            Panel::Editor | Panel::Crop | Panel::MusicFolder
+                        ))
                         || panel == self.panel) =>
             {
                 self.panel = panel
@@ -372,17 +538,36 @@ impl App {
                 if self.dialog_open {
                     return Task::none();
                 }
+                if self.panel == Panel::MusicFolder {
+                    return self.close_music_folder();
+                }
+                let focus = self.editor_return_focus().or_else(|| match self.panel {
+                    Panel::Crop => Some("review-crop-cover".into()),
+                    Panel::TrackOrder => Some("open-track-order".into()),
+                    _ => None,
+                });
+                self.editor = None;
+                self.restore_collection_anchor();
+                self.arranged_track = None;
+                self.track_position = None;
                 self.crop_source = None;
                 self.crop_dragging = false;
                 self.panel = Panel::Workspace;
                 self.pending_plan = None;
-                return self.restore_scroll();
+                return Task::batch([
+                    self.restore_scroll(),
+                    focus.map_or_else(Task::none, iced::widget::operation::focus),
+                ]);
             }
-            Message::Preview if !self.busy() && self.panel == Panel::Editor => {
+            Message::Preview
+                if !self.busy() && (self.panel == Panel::Editor || self.panel.inline_editor()) =>
+            {
                 return self.update(Message::Editor(editor::Action::Apply));
             }
             Message::Preview
-                if !self.busy() && matches!(self.panel, Panel::Workspace | Panel::Options) =>
+                if !self.busy()
+                    && self.result.is_none()
+                    && matches!(self.panel, Panel::Workspace | Panel::Options) =>
             {
                 if let Err(error) = self.prepare_preview() {
                     self.error = Some(error);
@@ -390,41 +575,16 @@ impl App {
                     return self.preview_artwork();
                 }
             }
-            Message::Save if self.can_export() => {
-                let Some(plan) = self.pending_plan.clone() else {
-                    return Task::none();
-                };
-                self.dialog_open = true;
-                let kind = plan.output_kind;
-                let title = audio_engine::export::sanitize_component(&plan.title);
-                return Task::perform(
-                    async move {
-                        let dialog = rfd::AsyncFileDialog::new().set_title(match kind {
-                            OutputKind::Folder => "Choose a parent music folder",
-                            OutputKind::Zip => "Save ZIP archive",
-                            OutputKind::File => {
-                                "Save audio file (extension is chosen from the source codec)"
-                            }
-                        });
-                        if kind == OutputKind::Folder {
-                            dialog
-                                .pick_folder()
-                                .await
-                                .map(|file| file.path().to_path_buf())
-                        } else {
-                            dialog
-                                .set_file_name(if kind == OutputKind::Zip {
-                                    format!("{title}.zip")
-                                } else {
-                                    title
-                                })
-                                .save_file()
-                                .await
-                                .map(|file| file.path().to_path_buf())
-                        }
-                    },
-                    Message::Destination,
-                );
+            Message::Save | Message::SaveAs
+                if self.can_export()
+                    && self.result.is_none()
+                    && (self.panel == Panel::Preview
+                        || (self.panel == Panel::Workspace
+                            && self.review.as_ref().is_some_and(|review| {
+                                review.preferences.output_kind == OutputKind::File
+                            }))) =>
+            {
+                return self.save_export(matches!(message, Message::SaveAs));
             }
             Message::Destination(destination) => {
                 self.dialog_open = false;
@@ -433,24 +593,24 @@ impl App {
                     return self.close();
                 }
                 let Some(destination) = destination else {
+                    if self
+                        .pending_plan
+                        .as_ref()
+                        .is_some_and(|plan| plan.output_kind == OutputKind::File)
+                    {
+                        if self.panel == Panel::Workspace {
+                            self.pending_plan = None;
+                        }
+                        return iced::widget::operation::focus("save-as");
+                    }
                     return Task::none();
                 };
-                if let (Some(path), Some(plan), Some(desktop), Some(review)) = (
-                    Some(destination),
-                    self.pending_plan.take(),
-                    self.desktop.clone(),
-                    &self.review,
-                ) {
+                if let Some(plan) = self.pending_plan.clone() {
                     let destination =
-                        super::destination::resolve(plan.output_kind, &plan.title, path);
-                    let draft = review.draft();
-                    let identity = review.identity();
-                    self.dialog_open = true;
-                    return persistence::background(
-                        move || persistence::persist_review(&desktop, draft),
-                        move |result| {
-                            Message::ExportSaved(Box::new(plan), destination, identity, result)
-                        },
+                        super::destination::resolve(plan.output_kind, &plan.title, destination);
+                    return self.begin_export(
+                        plan,
+                        super::destination::ExportDestination::Picked(destination),
                     );
                 }
             }
@@ -468,8 +628,22 @@ impl App {
                     {
                         self.save_failed = false;
                         if let Some(desktop) = &self.desktop {
-                            self.admit(desktop.export(*plan, destination, Some(identity)));
-                            self.panel = Panel::Workspace;
+                            use super::destination::ExportDestination;
+                            let recording = super::receipt::Recording::from_plan(self, &plan);
+                            let job = match destination {
+                                ExportDestination::Picked(path) => {
+                                    desktop.export(*plan, path, Some(identity))
+                                }
+                                ExportDestination::Organized(output) => {
+                                    desktop.export_organized(*plan, &output, Some(identity))
+                                }
+                            };
+                            if job.is_ok() {
+                                self.export_recording = Some(recording);
+                                self.pending_plan = None;
+                                self.panel = Panel::Workspace;
+                            }
+                            self.admit(job);
                         }
                     }
                     Ok(_) => {
@@ -487,11 +661,74 @@ impl App {
                     }
                 }
             }
+            Message::OpenMusicFolder
+                if !self.busy()
+                    && matches!(
+                        self.panel,
+                        Panel::Workspace | Panel::Preview | Panel::Settings
+                    ) =>
+            {
+                return self.open_music_folder();
+            }
+            Message::ChooseMusicRoot if !self.busy() && self.panel == Panel::MusicFolder => {
+                return self.pick_music_root();
+            }
+            Message::MusicRootPicked(path) if self.panel == Panel::MusicFolder => {
+                self.dialog_open = false;
+                if self.close_after_job {
+                    return self.close();
+                }
+                if let (Some(path), Some(editor)) = (path, &mut self.music_folder_editor) {
+                    editor.root = Some(path);
+                    editor.error = None;
+                    return iced::widget::operation::focus("music-folder-rule");
+                }
+                return iced::widget::operation::focus("music-folder-root");
+            }
+            Message::MusicRule(rule) if !self.busy() && self.panel == Panel::MusicFolder => {
+                if let Some(editor) = &mut self.music_folder_editor {
+                    editor.rule = rule;
+                    editor.error = None;
+                }
+            }
+            Message::ApplyMusicFolder if !self.busy() && self.panel == Panel::MusicFolder => {
+                return self.apply_music_folder();
+            }
+            Message::ClearMusicFolder
+                if !self.busy()
+                    && self.panel == Panel::MusicFolder
+                    && self.music_folder.is_some() =>
+            {
+                return self.save_music_folder(None);
+            }
+            Message::MusicFolderSaved(result) if self.panel == Panel::MusicFolder => {
+                self.dialog_open = false;
+                match result {
+                    Ok(folder) => {
+                        self.music_folder = folder;
+                        if self.close_after_job {
+                            return self.close();
+                        }
+                        return self.close_music_folder();
+                    }
+                    Err(error) => {
+                        self.close_after_job = false;
+                        if let Some(editor) = &mut self.music_folder_editor {
+                            editor.error = Some(error);
+                        }
+                    }
+                }
+            }
             Message::Cancel => {
                 if let Some(job) = &self.job {
                     job.cancel();
-                    self.notice =
-                        Some("Cancelling… completed source downloads are kept for retry.".into());
+                    if let Some(intake) = &mut self.intake {
+                        intake.cancelling = true;
+                    } else {
+                        self.notice = Some(
+                            "Cancelling… completed source downloads are kept for retry.".into(),
+                        );
+                    }
                 }
             }
             Message::Saved(identity, result) => {
@@ -518,8 +755,10 @@ impl App {
                 self.error = None;
                 self.notice = None;
             }
-            Message::Reset if !self.busy() => self.panel = Panel::Discard,
-            Message::ConfirmReset if !self.busy() => {
+            Message::Reset if !self.busy() && !self.panel.review_tool() => {
+                self.panel = Panel::Discard
+            }
+            Message::ConfirmReset if !self.busy() && !self.panel.review_tool() => {
                 self.panel = Panel::Workspace;
                 if self.example {
                     self.example = false;
@@ -555,10 +794,12 @@ impl App {
                     return self.close();
                 }
             }
-            Message::Resume if !self.busy() => {
+            Message::Resume if !self.busy() && !self.panel.review_tool() => {
                 if let (Some(desktop), Some(record)) = (&self.desktop, self.recovery.clone()) {
                     match desktop.resume(record.clone()) {
                         Ok(job) => {
+                            self.export_recording =
+                                Some(super::receipt::Recording::from_plan(self, &record.plan));
                             let previous = if self.example {
                                 self.example_previous
                                     .take()
@@ -580,7 +821,7 @@ impl App {
                     }
                 }
             }
-            Message::DismissRecovery if !self.busy() => {
+            Message::DismissRecovery if !self.busy() && !self.panel.review_tool() => {
                 if let (Some(desktop), Some(record)) = (self.desktop.clone(), self.recovery.clone())
                 {
                     return persistence::background(
@@ -606,6 +847,9 @@ impl App {
                 self.panel = Panel::Workspace;
                 if let Some(job) = &self.job {
                     job.cancel();
+                    if let Some(intake) = &mut self.intake {
+                        intake.cancelling = true;
+                    }
                 } else {
                     return self.close();
                 }
@@ -730,7 +974,7 @@ impl App {
                     Err(error) => self.error = Some(format!("Theme could not be loaded: {error}")),
                 }
             }
-            Message::PasteLink if !self.busy() => {
+            Message::PasteLink if !self.busy() && !self.panel.review_tool() => {
                 return iced::clipboard::read()
                     .map(|value| Message::Pasted(value.unwrap_or_default()))
             }
@@ -843,6 +1087,9 @@ impl App {
                     }
                 }
             }
+            Message::IntakeCover(request, result) => {
+                return self.intake_cover_ready(request, result)
+            }
             Message::RetryArtwork if !self.busy() => {
                 return if self.panel == Panel::Preview {
                     self.preview_artwork()
@@ -850,7 +1097,12 @@ impl App {
                     self.cover_preview()
                 };
             }
-            Message::Dropped(path) if !self.busy() && !self.example && self.review.is_some() => {
+            Message::Dropped(path)
+                if !self.busy()
+                    && !self.example
+                    && self.review.is_some()
+                    && matches!(self.panel, Panel::Workspace | Panel::Options) =>
+            {
                 if path.extension().is_some_and(|extension| {
                     ["jpg", "jpeg", "png", "webp"]
                         .iter()
@@ -859,12 +1111,22 @@ impl App {
                     return self.update(Message::CoverFile(Some(path)));
                 }
             }
-            Message::ImportCover if !self.busy() => {
+            Message::UseSourceCover
+                if !self.busy() && !self.example && self.panel == Panel::Workspace =>
+            {
+                return self.use_source_cover();
+            }
+            Message::ImportCover
+                if !self.busy()
+                    && !self.example
+                    && self.review.is_some()
+                    && matches!(self.panel, Panel::Workspace | Panel::Options) =>
+            {
                 self.dialog_open = true;
                 return Task::perform(
                     async {
                         rfd::AsyncFileDialog::new()
-                            .set_title("Choose album artwork")
+                            .set_title("Choose cover artwork")
                             .add_filter("Cover images", &["jpg", "jpeg", "png", "webp"])
                             .pick_file()
                             .await
@@ -877,6 +1139,9 @@ impl App {
                 self.dialog_open = false;
                 if self.close_after_job {
                     return self.close();
+                }
+                if path.is_none() && self.panel == Panel::Workspace && self.review.is_some() {
+                    return iced::widget::operation::focus("review-choose-cover");
                 }
                 if let (Some(path), Some(desktop)) = (path, self.desktop.clone()) {
                     self.dialog_open = true;
@@ -897,19 +1162,29 @@ impl App {
                 }
                 match result {
                     Ok((asset, path)) => {
-                        if let Some(review) = &mut self.review {
-                            review.preferences.shared_artwork_asset = Some(asset.id.clone());
-                            review.preferences.artwork_mode = audio_engine::ArtworkMode::Shared;
-                            if let Err(error) = review.changed() {
-                                self.error = Some(error);
-                            }
+                        let Some(review) = &mut self.review else {
+                            return Task::none();
+                        };
+                        if let Err(error) = review.changed() {
+                            self.error = Some(error);
+                            return Task::none();
                         }
+                        review.preferences.shared_artwork_asset = Some(asset.id.clone());
+                        review.preferences.artwork_mode = audio_engine::ArtworkMode::Shared;
                         self.cover = Some((asset, path));
                         self.crop_source = None;
                         self.source_cover_error = None;
                         self.preview_cover_error = None;
+                        let focus = if self.panel == Panel::Crop {
+                            "review-crop-cover"
+                        } else {
+                            "review-choose-cover"
+                        };
                         self.panel = Panel::Workspace;
-                        return Task::batch([self.autosave(), self.load_owned_artwork()]);
+                        return Task::batch([
+                            self.autosave().chain(iced::widget::operation::focus(focus)),
+                            self.load_owned_artwork(),
+                        ]);
                     }
                     Err(error) => self.error = Some(error),
                 }
@@ -925,14 +1200,13 @@ impl App {
                 self.position_crop();
             }
             Message::CropUp => self.crop_dragging = false,
-            Message::CropCover if !self.busy() && !self.example => {
+            Message::CropCover
+                if !self.busy()
+                    && !self.example
+                    && matches!(self.panel, Panel::Workspace | Panel::Options) =>
+            {
                 if let Some((asset, path)) = &self.cover {
-                    self.crop_x = "0".into();
-                    self.crop_y = "0".into();
-                    self.crop_size = asset.width.min(asset.height).to_string();
-                    self.crop_source = Some((asset.clone(), path.clone()));
-                    self.panel = Panel::Crop;
-                    return self.load_owned_artwork();
+                    return self.edit_cover_crop(asset.clone(), path.clone());
                 } else if let (Some(desktop), Some(review), Some(url)) = (
                     self.desktop.clone(),
                     self.review.as_ref(),
@@ -964,12 +1238,7 @@ impl App {
                 {
                     match result {
                         Ok((asset, path)) => {
-                            self.crop_x = "0".into();
-                            self.crop_y = "0".into();
-                            self.crop_size = asset.width.min(asset.height).to_string();
-                            self.crop_source = Some((asset, path));
-                            self.panel = Panel::Crop;
-                            return self.load_owned_artwork();
+                            return self.edit_cover_crop(asset, path);
                         }
                         Err(error) => {
                             self.error = Some(format!(
@@ -979,10 +1248,18 @@ impl App {
                     }
                 }
             }
-            Message::CropX(value) => self.crop_x = value,
-            Message::CropY(value) => self.crop_y = value,
-            Message::CropSize(value) => self.crop_size = value,
-            Message::ApplyCrop if !self.busy() => {
+            Message::CropX(value) if self.panel == Panel::Crop && !self.busy() => {
+                self.crop_x = value;
+                self.error = None;
+            }
+            Message::CropY(value) if self.panel == Panel::Crop && !self.busy() => {
+                self.crop_y = value;
+                self.error = None;
+            }
+            Message::CropSize(value) if self.panel == Panel::Crop && !self.busy() => {
+                self.resize_cover_crop(value)
+            }
+            Message::ApplyCrop if !self.busy() && !self.example && self.panel == Panel::Crop => {
                 if let (Some((asset, _)), Some(desktop)) = (self.crop_asset(), self.desktop.clone())
                 {
                     match self
@@ -1015,7 +1292,8 @@ impl App {
                 }
             }
             Message::OpenOutput => {
-                if let (Some(desktop), Some(result)) = (self.desktop.clone(), self.result.clone()) {
+                if let (Some(desktop), Some(receipt)) = (self.desktop.clone(), &self.result) {
+                    let result = receipt.output.clone();
                     return persistence::background(
                         move || desktop.reveal_export(&result),
                         Message::Opened,
@@ -1023,22 +1301,39 @@ impl App {
                 }
             }
             Message::OpenPlaylist => {
-                if let (Some(desktop), Some(result)) = (self.desktop.clone(), self.result.clone()) {
+                if let (Some(desktop), Some(receipt)) = (self.desktop.clone(), &self.result) {
+                    let result = receipt.output.clone();
                     return persistence::background(
                         move || desktop.open_playlist(&result),
                         Message::Opened,
                     );
                 }
             }
+            Message::DismissReceipt if !self.busy() && self.result.is_some() => {
+                self.result = None;
+                self.error = None;
+                return if self.review.is_some() {
+                    self.restore_scroll()
+                } else {
+                    self.update(Message::FocusSource)
+                };
+            }
             Message::Opened(Err(error)) => self.error = Some(error),
             Message::FocusSource if !self.busy() && self.panel == Panel::Workspace => {
                 return iced::widget::operation::focus("source-url")
             }
-            Message::Escape => {
+            Message::Escape | Message::CapturedEscape
+                if matches!(message, Message::Escape)
+                    || self.panel.review_tool()
+                    || self.panel == Panel::Crop =>
+            {
+                if self.panel == Panel::TrackOrder && self.track_position.is_some() {
+                    return self.cancel_track_position();
+                }
                 if self.panel != Panel::Workspace {
                     return self.update(Message::ClosePanel);
-                } else if let Some(job) = &self.job {
-                    job.cancel();
+                } else if self.job.is_some() {
+                    return self.update(Message::Cancel);
                 }
             }
             Message::Screenshot(screenshot) => {

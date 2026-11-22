@@ -5,21 +5,20 @@ use iced::{Element, Point};
 pub const WIDTH: f32 = 360.0;
 pub const HEIGHT: f32 = 260.0;
 
-pub fn view(app: &App) -> Element<'_, Message> {
+pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
+    let scale = if compact { 0.8 } else { 1.0 };
+    let width = WIDTH * scale;
+    let height = HEIGHT * scale;
     let Some((asset, _)) = app.crop_asset() else {
         return container("").into();
     };
     let Some(raster) = app.owned_raster(&asset.id) else {
         return container("Preparing crop preview…")
-            .width(WIDTH)
-            .height(HEIGHT)
+            .width(width)
+            .height(height)
             .into();
     };
-    let size = app
-        .crop_size
-        .parse::<u32>()
-        .unwrap_or(asset.width.min(asset.height))
-        .min(asset.width.min(asset.height));
+    let size = app.crop_preview_size.min(asset.width.min(asset.height));
     let x = app
         .crop_x
         .parse::<u32>()
@@ -30,7 +29,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
         .parse::<u32>()
         .unwrap_or(0)
         .min(asset.height - size);
-    let stroke = asset.width as f32 / WIDTH * 2.0;
+    let stroke = asset.width as f32 / width * 2.0;
     let overlay = format!(
         r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}"><path d="M0 0H{width}V{height}H0Z M{x} {y}h{size}v{size}h-{size}Z" fill="#000" fill-opacity=".48" fill-rule="evenodd"/><rect x="{x}" y="{y}" width="{size}" height="{size}" fill="none" stroke="#F4EFE5" stroke-width="{stroke}"/></svg>"##,
         width = asset.width,
@@ -39,15 +38,16 @@ pub fn view(app: &App) -> Element<'_, Message> {
     mouse_area(stack![
         image(raster.crop_handle())
             .filter_method(iced::widget::image::FilterMethod::Linear)
-            .width(WIDTH)
-            .height(HEIGHT)
+            .width(width)
+            .height(height)
             .content_fit(iced::ContentFit::Contain),
         svg(svg::Handle::from_memory(overlay.into_bytes()))
-            .width(WIDTH)
-            .height(HEIGHT)
+            .width(width)
+            .height(height)
             .content_fit(iced::ContentFit::Contain),
     ])
-    .on_move(Message::CropPointer)
+    // Keep the pointer in the reference canvas used by the crop geometry.
+    .on_move(move |point| Message::CropPointer(Point::new(point.x / scale, point.y / scale)))
     .on_press(Message::CropDown)
     .on_release(Message::CropUp)
     .on_exit(Message::CropUp)

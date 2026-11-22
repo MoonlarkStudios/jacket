@@ -72,17 +72,18 @@ The older native `dark` preference migrates to the corresponding Dark or Light
 preset. New settings default to Dark. See [themes](themes.md) and the
 [UI redesign record](ui-redesign.md).
 
-`mise run qualify:ui` defines 96 views across the three presets: 48 album panel
-views, 24 song views (review, preview, tags and options), 12 playlist views
-(review and preview), six long-metadata song reviews and six normal-size welcome
-or 10,000-occurrence list views. Album, song, playlist and long-metadata cases
+`mise run qualify:ui` defines 174 views across the three presets, including 60
+album and 30 playlist views with track editing, shared tags and track order.
+It also covers 30 song views, six long-metadata song reviews, 18 organized save
+views, 12 completion views, 12 lookup views and six normal-size welcome or
+10,000-occurrence list views. Album, song, playlist and long-metadata cases
 use both window sizes. Outputs go under `target/native-snapshots`. A graphical session or
 an explicitly configured virtual display is required. Inspect the rendered
 images; a written PNG alone does not establish layout or accessibility acceptance.
 
 For one capture, use `mise run snapshot`. The binary accepts
 `--screenshot /absolute/path.png`,
-`--panel preview|settings|appearance|options|editor|bulk|crop`, `--compact`,
+`--panel preview|settings|appearance|options|editor|bulk|crop|shared-tags|track-order`, `--compact`,
 `--light` and `--mocha`. `--dark` is also accepted for an explicit Dark preset.
 `--song`, `--playlist`, `--empty` and `--stress` provide isolated scenario fixtures.
 Combine `--song --long` to inspect long title, artist and album metadata.

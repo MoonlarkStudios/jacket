@@ -124,6 +124,10 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
             }
         }
     }
+    if app.music_file_path().is_some() {
+        // The footer already shows the whole organized path and its format.
+        return with_warnings(body, preview, p).into();
+    }
     body = body.push(rule::horizontal(1).style(p.line()));
     let audio_heading = if plan.output_kind == OutputKind::File {
         "Audio file".to_owned()
@@ -244,6 +248,14 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
             .push(rule::horizontal(1).style(p.line()))
             .push(text(note).size(12).color(p.colors.text_muted));
     }
+    with_warnings(body, preview, p).into()
+}
+
+fn with_warnings<'a>(
+    mut body: Column<'a, Message>,
+    preview: &'a ExportPreview,
+    p: Presentation,
+) -> Column<'a, Message> {
     for warning in preview
         .warnings
         .iter()
@@ -251,7 +263,7 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
     {
         body = body.push(text(warning).size(12).color(p.colors.warning));
     }
-    body.into()
+    body
 }
 
 struct Summary {

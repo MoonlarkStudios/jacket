@@ -324,11 +324,36 @@ impl Desktop {
         destination: PathBuf,
         identity: Option<CompletionIdentity>,
     ) -> Result<Job, String> {
+        self.start_export(plan, &destination, None, identity)
+    }
+
+    pub fn export_organized(
+        &self,
+        plan: ExportPlan,
+        destination: &audio_engine::OrganizedOutput,
+        identity: Option<CompletionIdentity>,
+    ) -> Result<Job, String> {
+        self.start_export(
+            plan,
+            destination.stem(),
+            Some(destination.root().to_owned()),
+            identity,
+        )
+    }
+
+    fn start_export(
+        &self,
+        plan: ExportPlan,
+        destination: &Path,
+        music_root: Option<PathBuf>,
+        identity: Option<CompletionIdentity>,
+    ) -> Result<Job, String> {
         let destination = destination
             .to_str()
             .ok_or("The destination needs a Unicode path.")?
             .to_owned();
         let mut record = Recovery::new(operation_id(), plan, destination);
+        record.music_root = music_root;
         record.review_identity = identity;
         self.export_record(record)
     }
@@ -350,7 +375,19 @@ impl Desktop {
         if let Some(identity) = &record.review_identity {
             identity.validate()?;
         }
-        validate_destination(&record.plan, Path::new(&record.output_path))?;
+        let output = PathBuf::from(&record.output_path);
+        let organized = if let Some(root) = &record.music_root {
+            if record.plan.output_kind != OutputKind::File || record.plan.tracks.len() != 1 {
+                return Err("Choose exactly one track to save in your music folder.".into());
+            }
+            Some(
+                audio_engine::OrganizedOutput::new(root.clone(), output.clone())
+                    .map_err(|error| error.to_string())?,
+            )
+        } else {
+            validate_destination(&record.plan, &output)?;
+            None
+        };
         let desktop = self.clone();
         Job::spawn(
             record.job_id.clone(),
@@ -375,7 +412,6 @@ impl Desktop {
                 let workdir = recovery::job_directory(&desktop.jobs_root(), &record.job_id)
                     .map_err(|error| error.to_string())?;
                 record.save(&workdir).map_err(|error| error.to_string())?;
-                let output = PathBuf::from(&record.output_path);
                 let outcome = (|| {
                     cancel.check()?;
                     let handoff =
@@ -384,19 +420,21 @@ impl Desktop {
                     if let Some(handoff) = &handoff {
                         plan.auth = handoff.auth.clone();
                     }
-                    let result = audio_engine::export_collection(
-                        &tools,
-                        &plan,
-                        &output,
-                        &workdir,
-                        cancel,
-                        |progress| {
-                            record.progress = progress.clone();
-                            let _ = record.save(&workdir);
-                            // Progress is replaceable; a slow UI must never block file publication.
-                            let _ = events.try_send(Event::Progress(progress));
-                        },
-                    );
+                    let emit = |progress: audio_engine::ProgressEvent| {
+                        record.progress = progress.clone();
+                        let _ = record.save(&workdir);
+                        // Progress is replaceable; a slow UI must never block file publication.
+                        let _ = events.try_send(Event::Progress(progress));
+                    };
+                    let result = if let Some(organized) = &organized {
+                        audio_engine::export_organized_file(
+                            &tools, &plan, organized, &workdir, cancel, emit,
+                        )
+                    } else {
+                        audio_engine::export_collection(
+                            &tools, &plan, &output, &workdir, cancel, emit,
+                        )
+                    };
                     if result.is_ok() {
                         if let Some(handoff) = handoff {
                             let _ = handoff.persist(&desktop.session_root(), &Keychain);

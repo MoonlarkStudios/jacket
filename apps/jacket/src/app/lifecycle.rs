@@ -9,6 +9,9 @@ impl App {
         &mut self,
         change: impl FnOnce(&mut Review) -> Result<(), String>,
     ) -> Task<Message> {
+        if self.panel.inline_editor() {
+            return Task::none();
+        }
         if let Some(review) = &mut self.review {
             if let Err(error) = change(review) {
                 self.error = Some(error);
@@ -93,6 +96,7 @@ impl App {
     pub(super) fn restore_review(&mut self, previous: SuspendedReview) {
         self.review = previous.review;
         self.url = previous.url;
+        self.source_error = None;
         self.cover = previous.cover;
         self.source_cover = previous.source_cover;
         self.raster_refresh_pending = true;
@@ -111,15 +115,21 @@ impl App {
     }
 
     pub(super) fn clear_review(&mut self) {
+        self.editor = None;
+        self.collection_editor_anchor = None;
+        self.arranged_track = None;
+        self.track_position = None;
         self.raster_refresh_pending = false;
         self.review = None;
         self.url.clear();
+        self.source_error = None;
         self.cover = None;
         self.source_cover = None;
         self.source_cover_error = None;
         self.preview_cover_error = None;
         self.crop_source = None;
         self.track_scroll = 0.0;
+        self.track_viewport_height = 0.0;
         self.result = None;
         self.preview = None;
         self.preview_cover = None;

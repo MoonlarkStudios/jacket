@@ -107,10 +107,12 @@ album. Keep each item's source, metadata, artwork, access context, progress, and
 retry state explicit. A failed or unavailable item should have a clear resolution
 while preserving completed work.
 
-Add destination preferences around actual use: a remembered parent folder,
-readable per-recording filenames, and an optional organization rule. Preview the
-resolved paths before saving. Do not silently merge unrelated sources, deduplicate
-repeated recordings, or change an existing collection's numbering.
+Individual audio files can use a saved music folder and an editable organization
+rule built from effective music tags. Review shows the resolved path. The native
+folder picker chooses the root, and Save As handles one-off locations. A resumed
+export keeps the original destination. Folder and ZIP delivery retain their
+existing packaging workflow. A future queue must preserve repeated recordings,
+collection numbering and the boundaries between sources.
 
 The queue needs a documented ownership and persistence model before shipping:
 stable item identities, bounded concurrency, cancellation scope, destination

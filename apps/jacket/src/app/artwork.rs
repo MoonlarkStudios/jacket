@@ -1,10 +1,74 @@
 //! Background preparation of artwork at the window's physical pixel density.
 use super::persistence;
-use super::{App, Message};
+use super::{App, Message, Panel};
 use crate::artwork::{normalized_scale, Raster};
 use iced::Task;
+use jacket_desktop::artwork_assets::Asset;
+use std::path::PathBuf;
 
 impl App {
+    pub(super) fn edit_cover_crop(&mut self, asset: Asset, path: PathBuf) -> Task<Message> {
+        let size = asset.width.min(asset.height);
+        self.crop_x = ((asset.width - size) / 2).to_string();
+        self.crop_y = ((asset.height - size) / 2).to_string();
+        self.crop_size = size.to_string();
+        self.crop_preview_size = size;
+        self.crop_source = Some((asset, path));
+        self.crop_dragging = false;
+        self.panel = Panel::Crop;
+        self.error = None;
+        self.load_owned_artwork()
+    }
+
+    pub(super) fn resize_cover_crop(&mut self, value: String) {
+        self.crop_size = value;
+        self.error = None;
+        let Some((asset, _)) = self.crop_asset() else {
+            return;
+        };
+        let Ok(size) = self.crop_size.parse::<u32>() else {
+            return;
+        };
+        if size == 0 || size > asset.width.min(asset.height) {
+            return;
+        }
+        let shift = i64::from(self.crop_preview_size / 2) - i64::from(size / 2);
+        let position = |coordinate: &str, edge: u32| {
+            let value = coordinate.parse::<u32>().unwrap_or(0);
+            (i64::from(value) + shift)
+                .clamp(0, i64::from(edge - size))
+                .to_string()
+        };
+        let x = position(&self.crop_x, asset.width);
+        let y = position(&self.crop_y, asset.height);
+        self.crop_x = x;
+        self.crop_y = y;
+        self.crop_preview_size = size;
+    }
+
+    pub(super) fn use_source_cover(&mut self) -> Task<Message> {
+        let Some(review) = self.review.as_mut() else {
+            return Task::none();
+        };
+        if review.preferences.shared_artwork_asset.is_none() {
+            return Task::none();
+        }
+        if let Err(error) = review.changed() {
+            self.error = Some(error);
+            return Task::none();
+        }
+        review.preferences.shared_artwork_asset = None;
+        self.cover = None;
+        self.preview_cover = None;
+        self.preview_cover_error = None;
+        self.error = None;
+        Task::batch([
+            self.autosave()
+                .chain(iced::widget::operation::focus("review-choose-cover")),
+            self.cover_preview(),
+        ])
+    }
+
     pub fn owned_raster(&self, id: &str) -> Option<&Raster> {
         self.owned_rasters.get(id)
     }

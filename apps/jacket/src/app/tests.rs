@@ -26,6 +26,204 @@ fn app(desktop: Desktop) -> App {
     app
 }
 
+fn song_review() -> Review {
+    let mut inspection = example::album();
+    inspection.tracks.truncate(1);
+    inspection.suggested_mode = audio_engine::CollectionMode::Collection;
+    Review::new(inspection, AudioFormat::Compatible)
+}
+
+#[test]
+fn inline_song_edits_are_staged_until_apply_and_source_tags_can_be_restored() {
+    use crate::editor::{Action, Field, Kind};
+    let (root, desktop) = desktop();
+    let mut app = app(desktop);
+    app.review = Some(song_review());
+    app.music_folder = Some(super::destination::MusicFolder {
+        root: root.path().to_path_buf(),
+        rule: jacket_core::PathRule::default(),
+    });
+    let before = app.music_file_path().unwrap();
+    let identity = app.review.as_ref().unwrap().identity();
+
+    let _ = app.update(Message::OpenEditor(Kind::Track(0)));
+    assert_eq!(app.panel, Panel::SongEditor);
+    let _ = app.update(Message::Editor(Action::Input(
+        Field::Title,
+        "Changed title".into(),
+    )));
+    assert_eq!(app.music_file_path().as_ref(), Some(&before));
+    let _ = app.update(Message::OpenPanel(Panel::Settings));
+    let _ = app.update(Message::Pasted("https://youtu.be/fixture0001".into()));
+    assert_eq!(app.panel, Panel::SongEditor);
+    assert!(!app.can_export());
+    let _ = app.update(Message::ClosePanel);
+    assert!(app.editor.is_none());
+    assert_eq!(app.review.as_ref().unwrap().identity(), identity);
+
+    let _ = app.update(Message::OpenEditor(Kind::Track(0)));
+    let _ = app.update(Message::Editor(Action::Input(Field::Year, "20xx".into())));
+    let _ = app.update(Message::Editor(Action::Apply));
+    assert_eq!(app.panel, Panel::SongEditor);
+    assert!(app.editor.as_ref().unwrap().error.is_some());
+    let _ = app.update(Message::RestoreSourceTags);
+    let _ = app.update(Message::Editor(Action::Input(
+        Field::Title,
+        "Changed title".into(),
+    )));
+    let _ = app.update(Message::Editor(Action::Apply));
+    assert_eq!(app.panel, Panel::Workspace);
+    assert_eq!(
+        app.music_file_path().unwrap().file_name().unwrap(),
+        "Changed title"
+    );
+    let applied = app.review.as_ref().unwrap().identity();
+    let _ = app.update(Message::Saved(applied, Ok(true)));
+
+    let _ = app.update(Message::OpenEditor(Kind::Track(0)));
+    let _ = app.update(Message::RestoreSourceTags);
+    assert_eq!(
+        app.music_file_path().unwrap().file_name().unwrap(),
+        "Changed title"
+    );
+    let _ = app.update(Message::Editor(Action::Apply));
+    assert_eq!(app.music_file_path().unwrap(), before);
+}
+
+#[test]
+fn reverting_a_song_cover_retains_its_inclusion_setting_and_the_owned_file() {
+    use audio_engine::ArtworkMode;
+    let (_root, desktop) = desktop();
+    let mut app = app(desktop);
+    let mut review = song_review();
+    let (asset, file) = example::cover().expect("cover fixture");
+    let source = "https://i.ytimg.com/vi/fixture0001/hqdefault.jpg";
+    review.preferences.shared_artwork = Some(source.into());
+    review.preferences.shared_artwork_asset = Some(asset.id.clone());
+    review.preferences.artwork_mode = ArtworkMode::None;
+    app.review = Some(review);
+    app.cover = Some((asset, file.path().to_path_buf()));
+
+    let _ = app.update(Message::UseSourceCover);
+
+    let review = app.review.as_ref().unwrap();
+    assert!(review.preferences.shared_artwork_asset.is_none());
+    assert!(matches!(review.preferences.artwork_mode, ArtworkMode::None));
+    assert_eq!(app.cover_url(), Some(source));
+    assert!(app.cover.is_none());
+    assert!(file.path().is_file());
+}
+
+#[test]
+fn crop_starts_centered_and_resizes_within_the_original_artwork() {
+    let (_root, desktop) = desktop();
+    let mut app = app(desktop);
+    let (mut asset, file) = example::cover().expect("cover fixture");
+    asset.width = 800;
+    asset.height = 480;
+    app.cover = Some((asset, file.path().to_path_buf()));
+
+    let _ = app.update(Message::CropCover);
+    assert_eq!(
+        (&*app.crop_x, &*app.crop_y, &*app.crop_size),
+        ("160", "0", "480")
+    );
+    let _ = app.update(Message::CropSize(String::new()));
+    assert_eq!(app.crop_preview_size, 480);
+    let _ = app.update(Message::CropSize("3".into()));
+    let _ = app.update(Message::CropSize("32".into()));
+    let _ = app.update(Message::CropSize("320".into()));
+    assert_eq!((&*app.crop_x, &*app.crop_y), ("240", "80"));
+    let _ = app.update(Message::CropX("470".into()));
+    let _ = app.update(Message::CropY("154".into()));
+    let _ = app.update(Message::CropSize("480".into()));
+    assert_eq!((&*app.crop_x, &*app.crop_y), ("320", "0"));
+    assert_eq!(app.save_pending, 0);
+}
+
+#[test]
+fn shared_tags_and_apply_next_keep_the_collection_review_in_place() {
+    use crate::editor::{Action, Field, Kind};
+    let (_root, desktop) = desktop();
+    let mut app = app(desktop);
+    app.track_scroll = 52.0;
+    app.track_viewport_height = 180.0;
+    let _ = app.update(Message::OpenEditor(Kind::Album));
+    assert_eq!(app.panel, Panel::CollectionEditor);
+    let _ = app.update(Message::Editor(Action::Input(
+        Field::Album,
+        "Deluxe edition".into(),
+    )));
+    let _ = app.update(Message::Editor(Action::Apply));
+    let review = app.review.as_ref().unwrap();
+    assert_eq!(
+        review.effective_metadata(1).unwrap().album,
+        "Deluxe edition"
+    );
+    let identity = review.identity();
+    let _ = app.update(Message::Saved(identity, Ok(true)));
+    let _ = app.update(Message::OpenEditor(Kind::Track(1)));
+    let _ = app.update(Message::Editor(Action::Input(
+        Field::Title,
+        "New title".into(),
+    )));
+    let _ = app.update(Message::Editor(Action::ApplyNext));
+    assert_eq!(app.panel, Panel::CollectionEditor);
+    assert!(matches!(app.editor.as_ref().unwrap().kind, Kind::Track(2)));
+    assert_eq!(app.track_scroll, 52.0);
+    let _ = app.update(Message::CapturedEscape);
+    assert_eq!(app.panel, Panel::Workspace);
+    assert_eq!(
+        app.review.as_ref().unwrap().inspection.tracks[1]
+            .metadata
+            .title,
+        "New title"
+    );
+}
+
+#[test]
+fn compact_editor_reveals_the_active_track_then_restores_the_list_anchor() {
+    let (_root, desktop) = desktop();
+    let mut app = app(desktop);
+    app.track_scroll = 34.0;
+    let _ = app.update(Message::OpenEditor(crate::editor::Kind::Track(2)));
+    let _ = app.update(Message::TrackListSized(60.0));
+    assert_eq!(app.track_scroll, 96.0);
+    let _ = app.update(Message::CapturedEscape);
+    assert_eq!(app.track_scroll, 34.0);
+}
+
+#[test]
+fn moving_to_a_position_rejects_invalid_input_and_can_be_undone() {
+    let (_root, desktop) = desktop();
+    let mut app = app(desktop);
+    let original = app.review.as_ref().unwrap().inspection.tracks[0]
+        .metadata
+        .title
+        .clone();
+    let _ = app.update(Message::OpenPanel(Panel::TrackOrder));
+    let _ = app.update(Message::ChooseTrackPosition(0));
+    let _ = app.update(Message::TrackPosition("0".into()));
+    let _ = app.update(Message::ApplyTrackPosition);
+    assert!(app.track_position.is_some());
+    assert_eq!(app.save_pending, 0);
+    let _ = app.update(Message::TrackPosition("3".into()));
+    let _ = app.update(Message::ApplyTrackPosition);
+    assert!(app.track_position.is_none());
+    assert_eq!(app.arranged_track, Some(2));
+    let review = app.review.as_ref().unwrap();
+    assert_eq!(review.inspection.tracks[2].metadata.title, original);
+    let identity = review.identity();
+    let _ = app.update(Message::Saved(identity, Ok(true)));
+    let _ = app.update(Message::UndoTrackMove);
+    assert_eq!(
+        app.review.as_ref().unwrap().inspection.tracks[0]
+            .metadata
+            .title,
+        original
+    );
+}
+
 #[test]
 fn export_barrier_accepts_identical_saved_revision_and_rejects_a_tombstone() {
     let (_root, desktop) = desktop();
@@ -144,6 +342,50 @@ fn resumed_success_retires_only_its_matching_review_and_failure_restores_it() {
     app.finish_resumed_review(true);
     assert!(app.review.is_none());
     assert_eq!(app.save_pending, 0);
+}
+
+#[test]
+fn a_saved_song_keeps_its_own_identity_and_dismissing_it_keeps_the_other_review() {
+    use super::receipt::Recording;
+    use audio_engine::{ExportResult, OutputKind};
+
+    let (root, desktop) = desktop();
+    let mut app = app(desktop);
+    let original = app.review.as_ref().unwrap().identity();
+    let previous = app.suspend_review();
+    let _ = app.update(Message::Example);
+    let review = app.review.as_mut().expect("isolated export review");
+    review.selected = [0].into_iter().collect();
+    review.preferences.output_kind = OutputKind::File;
+    review.preferences.title = "One-off filename".into();
+    let plan = review.plan(app.auth.clone()).unwrap();
+    app.export_recording = Some(Recording::from_plan(&app, &plan));
+    app.example = false;
+    app.resumed_previous = Some((previous, None));
+    let output_path = root
+        .path()
+        .join("First light (2).m4a")
+        .display()
+        .to_string();
+    let _ = app.finish_export(ExportResult {
+        output_path: output_path.clone(),
+        output_kind: OutputKind::File,
+        playlist_path: None,
+        track_count: 1,
+        warnings: Vec::new(),
+    });
+
+    let receipt = app.result.as_ref().unwrap();
+    assert_eq!(receipt.output.output_path, output_path);
+    let recording = receipt.recording.as_ref().unwrap();
+    assert_eq!(recording.title, "First light");
+    assert_eq!(recording.artist.as_deref(), Some("The Paper Trails"));
+    assert!(recording.cover.is_some());
+    assert_eq!(app.review.as_ref().unwrap().identity(), original);
+
+    let _ = app.update(Message::DismissReceipt);
+    assert!(app.result.is_none());
+    assert_eq!(app.review.as_ref().unwrap().identity(), original);
 }
 
 #[test]
@@ -517,7 +759,7 @@ fn invalid_metadata_stays_open_and_preserves_the_review_when_the_save_shortcut_i
     let _ = app.update(Message::OpenEditor(Kind::Track(0)));
     let _ = app.update(Message::Editor(Action::Input(Field::Track, "1.5".into())));
     let _ = app.update(Message::Preview);
-    assert_eq!(app.panel, Panel::Editor);
+    assert_eq!(app.panel, Panel::CollectionEditor);
     assert!(app.editor.as_ref().expect("form preserved").error.is_some());
     assert_eq!(
         serde_json::to_value(app.review.as_ref().expect("review preserved").draft())
@@ -539,14 +781,14 @@ fn navigation_shortcuts_keep_an_unsaved_editor_and_theme_changes_keep_its_values
         "Keep this edit".into(),
     )));
     let _ = app.update(Message::OpenPanel(Panel::Settings));
-    assert_eq!(app.panel, Panel::Editor);
+    assert_eq!(app.panel, Panel::CollectionEditor);
     assert_eq!(
         app.update(Message::FocusSource).units(),
         0,
         "a hidden source field must not receive focus"
     );
     let _ = app.update(Message::ThemePreset(crate::theme::Preset::CatppuccinMocha));
-    assert_eq!(app.panel, Panel::Editor);
+    assert_eq!(app.panel, Panel::CollectionEditor);
     let _ = app.update(Message::Preview);
     assert_eq!(
         app.review.as_ref().expect("review").inspection.tracks[0]
@@ -600,7 +842,12 @@ fn cancelling_a_destination_keeps_the_captured_preview_ready_to_retry() {
         let identity = app.review.as_ref().expect("review").identity();
         app.dialog_open = true;
 
-        assert_eq!(app.update(Message::Destination(None)).units(), 0);
+        let actions = app.update(Message::Destination(None)).units();
+        assert_eq!(
+            actions > 0,
+            kind == OutputKind::File,
+            "file picker returns focus to Save As"
+        );
 
         assert!(
             !app.dialog_open,
@@ -623,6 +870,101 @@ fn cancelling_a_destination_keeps_the_captured_preview_ready_to_retry() {
         );
         assert!(app.dialog_open);
     }
+}
+
+#[test]
+fn organized_preview_uses_the_selected_tracks_effective_tags_and_updates_after_edits() {
+    use super::destination::MusicFolder;
+    use audio_engine::OutputKind;
+    let (root, desktop) = desktop();
+    let mut app = app(desktop);
+    app.music_folder = Some(MusicFolder {
+        root: root.path().to_owned(),
+        rule: "{{album_artist}}/{{album}}/{{song}}".parse().unwrap(),
+    });
+    let review = app.review.as_mut().unwrap();
+    review.selected = [1].into_iter().collect();
+    assert!(
+        app.music_file_path().is_none(),
+        "folder exports use their own location"
+    );
+    let review = app.review.as_mut().unwrap();
+    review.preferences.output_kind = OutputKind::File;
+    review.preferences.album_artist = "The Album Artist".into();
+    review.preferences.album_title = "Remastered".into();
+    review.inspection.tracks[1].metadata.title = "Dr. Song".into();
+    review.preferences.title = "Manual Save As name".into();
+    assert_eq!(
+        app.music_file_path().unwrap(),
+        root.path().join("The Album Artist/Remastered/Dr. Song")
+    );
+    let _ = app.update(Message::OpenEditor(crate::editor::Kind::Track(1)));
+    let _ = app.update(Message::Editor(crate::editor::Action::Input(
+        crate::editor::Field::Title,
+        "Dr. Song (Live)".into(),
+    )));
+    let _ = app.update(Message::Editor(crate::editor::Action::Apply));
+    assert_eq!(
+        app.music_file_path().unwrap(),
+        root.path()
+            .join("The Album Artist/Remastered/Dr. Song (Live)")
+    );
+}
+
+#[test]
+fn changing_then_cancelling_music_folder_returns_to_the_same_preview() {
+    use super::destination::MusicFolder;
+    use audio_engine::OutputKind;
+    let (root, desktop) = desktop();
+    let mut app = app(desktop);
+    let saved = MusicFolder {
+        root: root.path().to_owned(),
+        rule: "{{song}}".parse().unwrap(),
+    };
+    app.music_folder = Some(saved.clone());
+    let review = app.review.as_mut().unwrap();
+    review.selected = [0].into_iter().collect();
+    review.preferences.output_kind = OutputKind::File;
+    app.prepare_preview().unwrap();
+
+    let _ = app.update(Message::OpenMusicFolder);
+    let _ = app.update(Message::MusicRule("../{{song}}".into()));
+    let _ = app.update(Message::ApplyMusicFolder);
+    assert!(app.music_folder_editor.as_ref().unwrap().error.is_some());
+    let _ = app.update(Message::ClosePanel);
+    assert_eq!(app.panel, Panel::Preview);
+    assert!(app.pending_plan.is_some());
+    assert_eq!(app.music_folder, Some(saved));
+
+    assert!(app.update(Message::SaveAs).units() > 0);
+    assert!(app.dialog_open);
+    let _ = app.update(Message::Destination(None));
+    assert!(app.pending_plan.is_some());
+    assert!(app.music_folder.is_some());
+}
+
+#[test]
+fn music_folder_preference_round_trips_and_corrupt_rules_are_rejected() {
+    use super::destination::MusicFolder;
+    use super::persistence::{read_music_folder, write_music_folder};
+    let (root, desktop) = desktop();
+    assert_eq!(read_music_folder(&desktop).unwrap(), None);
+    let saved = Some(MusicFolder {
+        root: root.path().join("Disconnected drive"),
+        rule: "Collection/{{album_artist}}/{{song}}".parse().unwrap(),
+    });
+    write_music_folder(&desktop, &saved).unwrap();
+    assert_eq!(read_music_folder(&desktop).unwrap(), saved);
+    let file = desktop.data_root().join("music-folder.json");
+    std::fs::write(
+        &file,
+        serde_json::json!({ "root": root.path(), "rule": "../{{song}}" }).to_string(),
+    )
+    .unwrap();
+    assert!(read_music_folder(&desktop).is_err());
+    assert!(file.is_file());
+    write_music_folder(&desktop, &None).unwrap();
+    assert_eq!(read_music_folder(&desktop).unwrap(), None);
 }
 
 #[test]

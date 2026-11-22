@@ -1,3 +1,4 @@
+use super::destination::MusicFolder;
 use super::state::Boot;
 use super::Message;
 use crate::settings::Appearance;
@@ -52,6 +53,13 @@ pub(super) fn load() -> Result<Boot, String> {
             (Appearance::default(), false)
         }
     };
+    let music_folder = match read_music_folder(&desktop) {
+        Ok(folder) => folder,
+        Err(error) => {
+            warning = Some(warning.map_or(error.clone(), |warning| format!("{warning} {error}")));
+            None
+        }
+    };
     Ok(Boot {
         recovery: desktop.pending_export(),
         downloader_preferences: desktop.downloader_preferences()?,
@@ -59,34 +67,83 @@ pub(super) fn load() -> Result<Boot, String> {
         draft,
         appearance,
         appearance_valid,
+        music_folder,
         warning,
     })
 }
 
 pub(super) fn read_appearance(desktop: &Desktop) -> Result<Appearance, String> {
-    use std::io::Read;
-    let path = desktop.data_root().join("native-preferences.json");
-    let file = match std::fs::File::open(&path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(Appearance::default())
-        }
-        Err(error) => return Err(error.to_string()),
-    };
-    let mut bytes = Vec::new();
-    file.take(524289)
-        .read_to_end(&mut bytes)
-        .map_err(|error| error.to_string())?;
-    if bytes.len() > 524288 {
-        return Err("Jacket’s appearance preferences are too large.".into());
-    }
-    let appearance: Appearance = serde_json::from_slice(&bytes)
-        .map_err(|_| "Jacket’s appearance preferences could not be read.".to_string())?;
+    let appearance: Appearance = read_preferences(
+        desktop,
+        "native-preferences.json",
+        524288,
+        "appearance preferences",
+    )?;
     appearance.theme.resolve(0)?;
     Ok(appearance)
 }
 
+pub(super) fn read_music_folder(desktop: &Desktop) -> Result<Option<MusicFolder>, String> {
+    let folder: Option<MusicFolder> = read_preferences(
+        desktop,
+        "music-folder.json",
+        8192,
+        "music folder preferences",
+    )
+    .map_err(|_| {
+        "Jacket’s music folder setting could not be read. Choose a music folder or use Save As…"
+    })?;
+    if folder
+        .as_ref()
+        .is_some_and(|folder| !folder.root.is_absolute())
+    {
+        return Err(
+            "Jacket’s saved music folder needs an absolute path. Choose a music folder again."
+                .into(),
+        );
+    }
+    Ok(folder)
+}
+
+fn read_preferences<T: serde::de::DeserializeOwned + Default>(
+    desktop: &Desktop,
+    name: &str,
+    max_bytes: u64,
+    label: &str,
+) -> Result<T, String> {
+    use std::io::Read;
+    let path = desktop.data_root().join(name);
+    let file = match std::fs::File::open(&path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(T::default()),
+        Err(error) => return Err(error.to_string()),
+    };
+    let mut bytes = Vec::new();
+    file.take(max_bytes + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(format!("Jacket’s {label} are too large."));
+    }
+    serde_json::from_slice(&bytes).map_err(|_| format!("Jacket’s {label} could not be read."))
+}
+
 pub(super) fn write_appearance(desktop: &Desktop, prefs: &Appearance) -> Result<(), String> {
+    write_preferences(desktop, "native-preferences.json", prefs)
+}
+
+pub(super) fn write_music_folder(
+    desktop: &Desktop,
+    folder: &Option<MusicFolder>,
+) -> Result<(), String> {
+    write_preferences(desktop, "music-folder.json", folder)
+}
+
+fn write_preferences(
+    desktop: &Desktop,
+    name: &str,
+    prefs: &impl serde::Serialize,
+) -> Result<(), String> {
     use std::io::Write;
     let root = desktop.data_root();
     std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
@@ -94,8 +151,7 @@ pub(super) fn write_appearance(desktop: &Desktop, prefs: &Appearance) -> Result<
     file.write_all(&serde_json::to_vec(prefs).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
     file.as_file().sync_all().map_err(|e| e.to_string())?;
-    file.persist(root.join("native-preferences.json"))
-        .map_err(|e| e.to_string())?;
+    file.persist(root.join(name)).map_err(|e| e.to_string())?;
     Ok(())
 }
 

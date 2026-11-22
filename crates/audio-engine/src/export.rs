@@ -3,7 +3,7 @@ use crate::{
     process::{run, Cancellation, Toolchain},
     source::{downloader, valid_artwork_url, validate_source_url},
     tagging::{embedded_metadata, finish_tags, metadata_warnings, supports_embedded_artwork},
-    EngineError, Result,
+    EngineError, OrganizedOutput, Result,
 };
 use sha2::{Digest, Sha256};
 use std::{
@@ -862,6 +862,43 @@ pub fn export_collection(
     cancel: &Cancellation,
     emit: impl FnMut(ProgressEvent),
 ) -> Result<ExportResult> {
+    export(tools, plan, output, None, workdir, cancel, emit)
+}
+
+pub fn export_organized_file(
+    tools: &Toolchain,
+    plan: &ExportPlan,
+    output: &OrganizedOutput,
+    workdir: &Path,
+    cancel: &Cancellation,
+    emit: impl FnMut(ProgressEvent),
+) -> Result<ExportResult> {
+    if plan.output_kind != OutputKind::File {
+        return Err(EngineError::Invalid(
+            "Music folder rules apply to individual audio files.".into(),
+        ));
+    }
+    output.check()?;
+    export(
+        tools,
+        plan,
+        output.stem(),
+        Some(output),
+        workdir,
+        cancel,
+        emit,
+    )
+}
+
+fn export(
+    tools: &Toolchain,
+    plan: &ExportPlan,
+    output: &Path,
+    organized: Option<&OrganizedOutput>,
+    workdir: &Path,
+    cancel: &Cancellation,
+    emit: impl FnMut(ProgressEvent),
+) -> Result<ExportResult> {
     validate_plan(plan)?;
     if matches!(plan.artwork_mode, ArtworkMode::Shared)
         && plan.shared_artwork_asset.is_some()
@@ -872,6 +909,10 @@ pub fn export_collection(
         ));
     }
     let prepared = prepare_bundle(tools, plan, workdir, cancel, emit)?;
+    if let Some(organized) = organized {
+        cancel.check()?;
+        organized.prepare_parent()?;
+    }
     let output = match plan.output_kind {
         OutputKind::Zip => write_archive(&plan.title, &prepared.files, output, cancel)?,
         OutputKind::Folder => write_folder(&prepared.files, output, cancel)?,

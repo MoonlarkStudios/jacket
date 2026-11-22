@@ -174,7 +174,8 @@ fn usable_artwork_candidate(input: &str) -> bool {
         && url.query().is_none())
 }
 
-fn collection_mode(input: &str) -> CollectionMode {
+/// Classify a collection link before contacting the provider.
+pub fn collection_mode(input: &str) -> CollectionMode {
     let Ok(url) = url::Url::parse(input) else {
         return CollectionMode::Collection;
     };

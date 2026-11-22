@@ -50,7 +50,7 @@ review; real downloads require an inspected source.
    follows each playlist occurrence, so repeated songs remain distinct.
 3. Choose the format, output type and artwork behavior. Preview the effective tags
    and filenames before saving.
-4. Choose a destination in the native file dialog and start the export. Progress
+4. Save to your music folder or choose a location in the native dialog. Progress
    and Cancel remain available while audio tools run in a background worker.
 
 A single song can be saved as an audio file. Folder and ZIP outputs include tagged
@@ -58,8 +58,18 @@ tracks, optional artwork, a relative M3U playlist and a provenance manifest.
 Existing destination files are preserved; name collisions produce numbered copies.
 Unfinished reviews and interrupted exports are retained locally for restart.
 Successful exports clear their associated working state after publication.
+
+Choose **Set up a music folder…** to save individual audio files under a root you
+pick in the native folder dialog. The default rule is `{{artist}}/{{album}}/{{song}}`.
+Edit it in **Settings → Music folder**, or use **Save As…** for a one-off location.
+Jacket shows the resolved path before saving and adds the extension for the
+output codec. A blank album skips its folder, and `{{album_artist}}` uses the
+track artist when the album artist is blank. A resumed export keeps its original
+destination.
+
 Use Ctrl/Cmd+L to focus the source, Ctrl/Cmd+S to preview files, and Ctrl/Cmd+,
-to open settings. Escape closes an editor or cancels the active operation.
+to open settings. Ctrl/Cmd+Shift+S opens Save As for an audio file. Escape closes
+an editor or cancels the active operation.
 
 | Format | Behavior |
 | --- | --- |
@@ -114,7 +124,7 @@ content. It is not affiliated with YouTube or Google.
 mise run check       # Native formatting, Clippy, unit tests, scripts and workflows
 mise run test:media  # Offline FFmpeg exports, archives and independent tag checks
 mise run build       # target/release/jacket
-mise run qualify:ui  # Capture 96 native workflow views; needs a display
+mise run qualify:ui  # Capture native workflow views; needs a display
 ```
 
 Build output honors `CARGO_TARGET_DIR` when set. Local app candidates with a complete bundled audio runtime:

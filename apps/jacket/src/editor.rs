@@ -1,5 +1,6 @@
 use crate::app::Message;
 use crate::settings::EditAction;
+use crate::style::Presentation;
 use audio_engine::{CollectionMode, Metadata};
 use iced::widget::{column, container, pick_list, row, text, text_input, Column};
 use iced::{Element, Length};
@@ -10,6 +11,7 @@ pub enum Kind {
     Track(usize),
     Album,
     OutputName,
+    PlaylistName,
     Bulk,
 }
 
@@ -39,6 +41,14 @@ pub enum Action {
     Input(Field, String),
     Choose(BulkField, EditAction),
     Apply,
+    ApplyNext,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TrackFields {
+    Modal,
+    Song,
+    Collection,
 }
 
 #[derive(Clone, Debug)]
@@ -76,34 +86,7 @@ impl Editor {
         match kind {
             Kind::Track(index) => {
                 if let Some(track) = review.inspection.tracks.get(index) {
-                    let metadata = &track.metadata;
-                    result.title.clone_from(&metadata.title);
-                    result.artist.clone_from(&metadata.artist);
-                    result.album = if inherited(review, Field::Album) {
-                        review.preferences.album_title.trim().into()
-                    } else {
-                        metadata.album.clone()
-                    };
-                    result.album_artist = if inherited(review, Field::AlbumArtist) {
-                        review.preferences.album_artist.trim().into()
-                    } else {
-                        metadata.album_artist.clone()
-                    };
-                    result.year = if inherited(review, Field::Year) {
-                        review.preferences.year
-                    } else {
-                        metadata.release_year
-                    }
-                    .map(|number| number.to_string())
-                    .unwrap_or_default();
-                    result.track = metadata
-                        .track_number
-                        .map(|number| number.to_string())
-                        .unwrap_or_default();
-                    result.disc = metadata
-                        .disc_number
-                        .map(|number| number.to_string())
-                        .unwrap_or_default();
+                    result.load_track(review, &track.metadata);
                 }
             }
             Kind::Album => {
@@ -118,10 +101,51 @@ impl Editor {
                     .map(|number| number.to_string())
                     .unwrap_or_default();
             }
-            Kind::OutputName => result.title.clone_from(&review.preferences.title),
+            Kind::OutputName | Kind::PlaylistName => {
+                result.title.clone_from(&review.preferences.title)
+            }
             Kind::Bulk => {}
         }
         result
+    }
+
+    pub fn restore_source_tags(&mut self, review: &Review) {
+        if let Kind::Track(index) = self.kind {
+            if let Some(track) = review.inspection.tracks.get(index) {
+                self.load_track(review, &track.source_metadata);
+                self.error = None;
+            }
+        }
+    }
+
+    fn load_track(&mut self, review: &Review, metadata: &Metadata) {
+        self.title.clone_from(&metadata.title);
+        self.artist.clone_from(&metadata.artist);
+        self.album = if inherited(review, Field::Album) {
+            review.preferences.album_title.trim().into()
+        } else {
+            metadata.album.clone()
+        };
+        self.album_artist = if inherited(review, Field::AlbumArtist) {
+            review.preferences.album_artist.trim().into()
+        } else {
+            metadata.album_artist.clone()
+        };
+        self.year = if inherited(review, Field::Year) {
+            review.preferences.year
+        } else {
+            metadata.release_year
+        }
+        .map(|number| number.to_string())
+        .unwrap_or_default();
+        self.track = metadata
+            .track_number
+            .map(|number| number.to_string())
+            .unwrap_or_default();
+        self.disc = metadata
+            .disc_number
+            .map(|number| number.to_string())
+            .unwrap_or_default();
     }
 
     pub fn input(&mut self, action: Action) {
@@ -148,7 +172,7 @@ impl Editor {
                     BulkField::Year => 3,
                 }] = action;
             }
-            Action::Apply => {}
+            Action::Apply | Action::ApplyNext => {}
         }
     }
 
@@ -244,7 +268,7 @@ impl Editor {
                     review.preferences.title = title;
                 }
             }
-            Kind::OutputName => {
+            Kind::OutputName | Kind::PlaylistName => {
                 if self.title.trim().is_empty() {
                     return Err("Enter an output name.".into());
                 }
@@ -261,6 +285,129 @@ impl Editor {
         Ok(())
     }
 
+    pub fn song_fields<'a>(&'a self, review: &'a Review, p: Presentation) -> Element<'a, Message> {
+        let mut body = Column::new().spacing(12).width(Length::Fill);
+        if let Some(notice) = inheritance_notice(review) {
+            body = body.push(text(notice).size(12).color(p.colors.text_muted));
+        }
+        body.push(self.track_fields(review, p, TrackFields::Song))
+            .into()
+    }
+
+    pub fn quick_fields<'a>(&'a self, review: &'a Review, p: Presentation) -> Element<'a, Message> {
+        match self.kind {
+            Kind::Track(_) => {
+                let mut body =
+                    column![self.track_fields(review, p, TrackFields::Collection)].spacing(8);
+                if inherited(review, Field::Album)
+                    || inherited(review, Field::AlbumArtist)
+                    || inherited(review, Field::Year)
+                {
+                    body = body.push(
+                        text("Shared fields are set in Edit shared tags.")
+                            .size(12)
+                            .color(p.colors.text_muted),
+                    );
+                }
+                body.into()
+            }
+            Kind::Album => column![
+                field(p, "Album title", &self.album, Field::Album, true),
+                row![
+                    field(
+                        p,
+                        "Album artist",
+                        &self.album_artist,
+                        Field::AlbumArtist,
+                        true
+                    ),
+                    field(p, "Release year", &self.year, Field::Year, true),
+                ]
+                .spacing(10),
+                text("Blank fields keep each track’s own tags.")
+                    .size(12)
+                    .color(p.colors.text_muted),
+            ]
+            .spacing(10)
+            .into(),
+            Kind::PlaylistName => column![
+                field(p, "Name", &self.title, Field::Title, true),
+                text("Also used for the export name.")
+                    .size(12)
+                    .color(p.colors.text_muted),
+            ]
+            .spacing(10)
+            .into(),
+            _ => self.view(review, p),
+        }
+    }
+
+    pub fn has_individual_album_fields(review: &Review) -> bool {
+        !inherited(review, Field::Album) || !inherited(review, Field::AlbumArtist)
+    }
+
+    fn track_fields<'a>(
+        &'a self,
+        review: &'a Review,
+        p: Presentation,
+        layout: TrackFields,
+    ) -> Element<'a, Message> {
+        let title = field(p, "Title", &self.title, Field::Title, true);
+        let artist = field(p, "Artist", &self.artist, Field::Artist, true);
+        let shared = |label, shared_label, value, which| {
+            let inherited = inherited(review, which);
+            (layout != TrackFields::Collection || !inherited).then(|| {
+                field(
+                    p,
+                    if inherited { shared_label } else { label },
+                    value,
+                    which,
+                    !inherited,
+                )
+            })
+        };
+        let album_fields = [
+            shared("Album", "Album · shared", &self.album, Field::Album),
+            shared(
+                "Album artist",
+                "Album artist · shared",
+                &self.album_artist,
+                Field::AlbumArtist,
+            ),
+        ];
+        let gap = if layout == TrackFields::Collection {
+            9
+        } else {
+            12
+        };
+        let mut body = Column::new().spacing(gap).width(Length::Fill);
+        if layout == TrackFields::Modal {
+            body = body
+                .push(title)
+                .push(artist)
+                .extend(album_fields.into_iter().flatten());
+        } else {
+            body = body.push(row![title, artist].spacing(gap));
+            if album_fields.iter().any(Option::is_some) {
+                body = body.push(
+                    iced::widget::Row::new()
+                        .extend(album_fields.into_iter().flatten())
+                        .spacing(gap),
+                );
+            }
+        }
+        let mut numbers = row![].spacing(gap);
+        if let Some(year) = shared("Year", "Year · shared", &self.year, Field::Year) {
+            numbers = numbers.push(year);
+        };
+        body.push(
+            numbers
+                .push(field(p, "Track number", &self.track, Field::Track, true))
+                .push(field(p, "Disc number", &self.disc, Field::Disc, true)),
+        )
+        .into()
+    }
+
     pub fn view<'a>(
         &'a self,
         review: &'a Review,
@@ -270,44 +417,10 @@ impl Editor {
             Kind::Track(_) => "Edit track tags",
             Kind::Album => "Album details",
             Kind::OutputName => "Output name",
+            Kind::PlaylistName => "Playlist name",
             Kind::Bulk => "Edit selected tracks",
         };
-        let field = |label: &'static str,
-                     value: &'a str,
-                     which: Field,
-                     enabled: bool|
-         -> Element<'a, Message> {
-            column![
-                text(label).size(12).color(p.colors.text_muted),
-                text_input(
-                    if matches!(which, Field::Year) {
-                        "YYYY"
-                    } else {
-                        ""
-                    },
-                    value
-                )
-                .id(match which {
-                    Field::Title => "metadata-title",
-                    Field::Artist => "metadata-artist",
-                    Field::Album => "metadata-album",
-                    Field::AlbumArtist => "metadata-album-artist",
-                    Field::Year => "metadata-year",
-                    Field::Track => "metadata-track",
-                    Field::Disc => "metadata-disc",
-                    Field::Prefix => "metadata-prefix",
-                    Field::Suffix => "metadata-suffix",
-                })
-                .on_input_maybe(
-                    enabled.then_some(move |value| Message::Editor(Action::Input(which, value)))
-                )
-                .padding([8, 10])
-                .size(14)
-                .style(p.input())
-            ]
-            .spacing(5)
-            .into()
-        };
+        let field = |label, value, which, enabled| field(p, label, value, which, enabled);
         let mut body = Column::new().spacing(12).push(text(heading).size(18));
         if matches!(self.kind, Kind::Track(_) | Kind::Bulk) {
             if let Some(notice) = inheritance_notice(review) {
@@ -315,48 +428,7 @@ impl Editor {
             }
         }
         match self.kind {
-            Kind::Track(_) => {
-                body = body
-                    .push(field("Title", &self.title, Field::Title, true))
-                    .push(field("Artist", &self.artist, Field::Artist, true))
-                    .push(field(
-                        if inherited(review, Field::Album) {
-                            "Album · shared"
-                        } else {
-                            "Album"
-                        },
-                        &self.album,
-                        Field::Album,
-                        !inherited(review, Field::Album),
-                    ))
-                    .push(field(
-                        if inherited(review, Field::AlbumArtist) {
-                            "Album artist · shared"
-                        } else {
-                            "Album artist"
-                        },
-                        &self.album_artist,
-                        Field::AlbumArtist,
-                        !inherited(review, Field::AlbumArtist),
-                    ))
-                    .push(
-                        row![
-                            field(
-                                if inherited(review, Field::Year) {
-                                    "Year · shared"
-                                } else {
-                                    "Year"
-                                },
-                                &self.year,
-                                Field::Year,
-                                !inherited(review, Field::Year)
-                            ),
-                            field("Track number", &self.track, Field::Track, true),
-                            field("Disc number", &self.disc, Field::Disc, true)
-                        ]
-                        .spacing(12),
-                    );
-            }
+            Kind::Track(_) => body = body.push(self.track_fields(review, p, TrackFields::Modal)),
             Kind::Album => {
                 body=body.push(field("Output name",&self.title,Field::Title,true))
                     .push(text("Used for the exported file, folder or ZIP.").size(12).color(p.colors.text_muted))
@@ -365,7 +437,7 @@ impl Editor {
                     .push(field("Release year",&self.year,Field::Year,true))
                     .push(text(if review.preferences.mode==CollectionMode::Album{"These album tags apply to every selected track. Leave a field empty to keep each track’s own value."}else{"Individual tags are active. Switch to shared album tags in Export options to apply these details to every track."}).size(12).color(p.colors.text_muted));
             }
-            Kind::OutputName => {
+            Kind::OutputName | Kind::PlaylistName => {
                 body = body
                     .push(field("Name", &self.title, Field::Title, true))
                     .push(text("Used for the exported file, folder or ZIP. Audio extensions are added automatically.").size(12).color(p.colors.text_muted));
@@ -601,6 +673,45 @@ fn display_value(value: &str) -> &str {
     } else {
         value
     }
+}
+
+fn field<'a>(
+    p: Presentation,
+    label: &'static str,
+    value: &'a str,
+    which: Field,
+    enabled: bool,
+) -> Element<'a, Message> {
+    column![
+        text(label).size(12).color(p.colors.text_muted),
+        text_input(
+            if matches!(which, Field::Year) {
+                "YYYY"
+            } else {
+                ""
+            },
+            value
+        )
+        .id(match which {
+            Field::Title => "metadata-title",
+            Field::Artist => "metadata-artist",
+            Field::Album => "metadata-album",
+            Field::AlbumArtist => "metadata-album-artist",
+            Field::Year => "metadata-year",
+            Field::Track => "metadata-track",
+            Field::Disc => "metadata-disc",
+            Field::Prefix => "metadata-prefix",
+            Field::Suffix => "metadata-suffix",
+        })
+        .on_input_maybe(
+            enabled.then_some(move |value| Message::Editor(Action::Input(which, value)))
+        )
+        .padding([8, 10])
+        .size(14)
+        .style(p.input())
+    ]
+    .spacing(5)
+    .into()
 }
 
 fn year(value: &str) -> Result<Option<u32>, String> {

@@ -84,7 +84,12 @@ depends = ["check:ci"]
 
 [tasks."check:scripts"]
 description = "Verify native packaging, dependency boundaries and tool checks"
-run = ["python scripts/native_tests.py", "python scripts/test-tool-bundling.py", "node --test .github/scripts/pr-title.test.mjs"]
+run = [
+  "python scripts/native_tests.py",
+  "python scripts/sync-branding.py --check",
+  "python scripts/test-tool-bundling.py",
+  "node --test .github/scripts/pr-title.test.mjs",
+]
 
 [tasks.lint]
 description = "Lint all native workspace targets with warnings denied"
@@ -135,7 +140,7 @@ depends = ["build", "tools:stage:linux", "licenses:native"]
 run = "python scripts/native_package.py --platform linux"
 
 [tasks."branding:sync"]
-description = "Regenerate the macOS bundle icon from the brand PNGs (macOS only)"
+description = "Regenerate the macOS bundle icon from the brand PNGs"
 run = "python scripts/sync-branding.py"
 
 [tasks.snapshot]
@@ -143,7 +148,7 @@ description = "Capture the fictional native review and quit (requires a display)
 run = "cargo run --locked -p jacket-iced --bin jacket -- --screenshot '{{ config_root }}/target/native-preview.png'"
 
 [tasks."qualify:ui"]
-description = "Capture 96 album, song, playlist, theme, size and edge-case views"
+description = "Capture native workflows across themes and window sizes"
 run = ["cargo build --locked -p jacket-iced --bin jacket", "python scripts/native_snapshots.py"]
 
 [tasks."licenses:native"]
