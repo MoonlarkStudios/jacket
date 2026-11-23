@@ -85,6 +85,7 @@ impl App {
             preview: None,
             album_preview: None,
             album_scan: 0,
+            album_scan_key: None,
             progress: None,
             result: None,
             export_recording: None,
@@ -120,6 +121,7 @@ impl App {
             source_cover_error: None,
             preview_cover_error: None,
             crop_source: None,
+            crop_return_to_cover: false,
             track_scroll: 0.0,
             track_viewport_height: 0.0,
             collection_editor_anchor: None,
@@ -203,8 +205,9 @@ impl App {
                     Some("settings") => app.panel = Panel::Settings,
                     Some("appearance") => app.panel = Panel::Appearance,
                     Some("options") => app.panel = Panel::Options,
+                    Some("cover") => app.panel = Panel::Cover,
                     Some("music-folder") => {
-                        let _ = app.open_music_folder();
+                        let _ = app.open_music_folder(false);
                     }
                     Some("preview") => {
                         let _ = app.prepare_preview();

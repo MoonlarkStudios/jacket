@@ -48,7 +48,7 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
         );
     }
     if !editing {
-        heading = heading.push(super::cover_controls::view(app, review));
+        heading = heading.push(super::cover_controls::edit_button(app));
     }
     let edge = match (compact, editing) {
         (true, true) => 96.0,

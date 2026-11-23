@@ -1,11 +1,11 @@
 use super::components::{self, CoverContext};
-use super::{collection_tools, cover_controls, focus_button, options};
+use super::{collection_tools, cover_controls, focus_button};
 use crate::app::{App, Message, Panel};
 use crate::editor::Kind;
 use crate::icons::{self, Icon};
 use crate::settings::ModeChoice;
 use crate::style;
-use audio_engine::{CollectionMode, OutputKind};
+use audio_engine::CollectionMode;
 use iced::widget::{button, column, container, row, rule, space, text};
 use iced::{Alignment, Element, Length};
 
@@ -41,24 +41,16 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
             collection(app, compact)
         };
         let mut split = row![left].height(Length::Fill);
-        if !compact {
-            let inspector = match app.panel {
-                Panel::CollectionEditor => collection_tools::editor(app, false),
-                Panel::TrackOrder => collection_tools::order(app, false),
-                _ => options::view(app, true),
+        if !compact && app.panel.review_tool() {
+            let (inspector, width, padding) = match app.panel {
+                Panel::CollectionEditor => (collection_tools::editor(app, false), 384, 0),
+                Panel::TrackOrder => (collection_tools::order(app, false), 284, 20),
+                _ => unreachable!("song editor has its own workspace"),
             };
             split = split.push(rule::vertical(1).style(p.line())).push(
                 container(inspector)
-                    .width(if app.panel == Panel::CollectionEditor {
-                        384
-                    } else {
-                        284
-                    })
-                    .padding(if app.panel == Panel::CollectionEditor {
-                        0
-                    } else {
-                        20
-                    })
+                    .width(width)
+                    .padding(padding)
                     .height(Length::Fill)
                     .style(move |_| p.surface(p.colors.panel)),
             );
@@ -67,83 +59,30 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
     } else {
         empty_workspace(app)
     };
-    if compact {
-        let footer: Element<'_, Message> = if app.panel == Panel::CollectionEditor {
-            column![
-                rule::horizontal(1).style(p.line()),
-                collection_tools::editor(app, true)
-            ]
-            .into()
-        } else if app.panel == Panel::TrackOrder {
-            container(collection_tools::order(app, true))
-                .padding([10, 16])
-                .width(Length::Fill)
-                .height(76)
-                .align_y(Alignment::Center)
-                .style(move |_| p.surface(p.colors.panel))
-                .into()
-        } else if app.is_album_folder()
-            || app
-                .review
-                .as_ref()
-                .is_some_and(|review| review.preferences.output_kind == OutputKind::File)
-        {
-            container(super::destination::save_controls(
-                app,
-                super::destination::Placement::Compact,
-            ))
+    let footer: Element<'_, Message> = match app.panel {
+        Panel::CollectionEditor if compact => column![
+            rule::horizontal(1).style(p.line()),
+            collection_tools::editor(app, true)
+        ]
+        .into(),
+        Panel::TrackOrder if compact => container(collection_tools::order(app, true))
             .padding([10, 16])
             .width(Length::Fill)
+            .height(76)
+            .align_y(Alignment::Center)
             .style(move |_| p.surface(p.colors.panel))
-            .into()
-        } else if app.review.is_some() {
-            container(
-                row![
-                    button(
-                        row![
-                            icons::view(Icon::Settings, p.colors.text_muted, 15.0),
-                            text("Export options").size(12)
-                        ]
-                        .spacing(7)
-                        .align_y(Alignment::Center)
-                    )
-                    .padding([10, 12])
-                    .on_press(Message::OpenPanel(Panel::Options))
-                    .style(p.secondary()),
-                    space::horizontal(),
-                    button(
-                        row![
-                            text("Preview files").size(13),
-                            icons::view(
-                                Icon::ArrowRight,
-                                if app.can_preview() {
-                                    p.colors.accent_text
-                                } else {
-                                    p.derived.disabled
-                                },
-                                15.0
-                            )
-                        ]
-                        .spacing(9)
-                        .align_y(Alignment::Center)
-                    )
-                    .padding([11, 14])
-                    .on_press_maybe(app.can_preview().then_some(Message::Preview))
-                    .style(p.primary()),
-                ]
-                .align_y(Alignment::Center),
-            )
-            .padding([12, 16])
-            .width(Length::Fill)
-            .style(move |_| p.surface(p.colors.panel))
-            .into()
-        } else {
-            space().into()
-        };
-        column![content, footer].height(Length::Fill).into()
-    } else {
-        column![content].height(Length::Fill).into()
-    }
+            .into(),
+        Panel::Workspace if app.review.is_some() => column![
+            rule::horizontal(1).style(p.line()),
+            container(super::destination::save_bar(app, compact))
+                .padding(if compact { [8, 16] } else { [10, 20] })
+                .width(Length::Fill)
+                .style(move |_| p.surface(p.colors.panel))
+        ]
+        .into(),
+        _ => space().into(),
+    };
+    column![content, footer].height(Length::Fill).into()
 }
 
 fn collection(app: &App, compact: bool) -> Element<'_, Message> {
@@ -218,7 +157,7 @@ fn collection(app: &App, compact: bool) -> Element<'_, Message> {
         .height(18)
         .clip(true),
     ]
-    .spacing(8)
+    .spacing(if compact { 6 } else { 8 })
     .width(Length::Fill);
     let idle = !app.busy() && app.panel == Panel::Workspace;
     let action = |id, label, message| {
@@ -288,13 +227,17 @@ fn collection(app: &App, compact: bool) -> Element<'_, Message> {
         );
     }
     if !app.panel.review_tool() {
-        details = details.push(actions.wrap().vertical_spacing(4));
-        details = details.push(cover_controls::view(app, review));
+        details = details.push(
+            actions
+                .push(cover_controls::edit_button(app))
+                .wrap()
+                .vertical_spacing(4),
+        );
     }
     let hero = row![
         components::cover(
             app,
-            if compact { 86.0 } else { 104.0 },
+            if compact { 76.0 } else { 104.0 },
             CoverContext::Source
         ),
         details
@@ -315,7 +258,7 @@ fn collection(app: &App, compact: bool) -> Element<'_, Message> {
         .clip(true)
     } else {
         container(hero)
-            .padding(if compact { 16 } else { 22 })
+            .padding(if compact { [12, 16] } else { [22, 22] })
             .width(Length::Fill)
     };
     let collection = column![

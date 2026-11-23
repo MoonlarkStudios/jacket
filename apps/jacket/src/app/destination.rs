@@ -42,6 +42,8 @@ pub struct MusicFolderEditor {
     pub root: Option<PathBuf>,
     pub rule: String,
     pub error: Option<String>,
+    pub customize: bool,
+    pub(super) direct: bool,
     pub(super) return_to: Panel,
 }
 
@@ -52,9 +54,18 @@ pub enum ExportDestination {
 }
 
 impl App {
+    pub fn uses_music_folder(&self) -> bool {
+        self.is_album_folder()
+            || self
+                .review
+                .as_ref()
+                .is_some_and(|review| review.preferences.output_kind == OutputKind::File)
+    }
+
     pub fn is_album_folder(&self) -> bool {
         self.review.as_ref().is_some_and(|review| {
-            review.preferences.mode == CollectionMode::Album
+            review.inspection.suggested_mode == CollectionMode::Album
+                && review.preferences.mode == CollectionMode::Album
                 && review.preferences.output_kind == OutputKind::Folder
         })
     }
@@ -69,27 +80,59 @@ impl App {
         Some(folder.resolve(&metadata).parent()?.to_owned())
     }
 
-    pub(super) fn scan_album_folder(&mut self) -> Task<Message> {
+    fn album_scan_is_current(&self) -> bool {
+        self.is_album_folder()
+            && self
+                .album_scan_key
+                .as_ref()
+                .is_some_and(|(identity, folder)| {
+                    self.music_folder.as_ref() == Some(folder)
+                        && self
+                            .review
+                            .as_ref()
+                            .is_some_and(|review| &review.identity() == identity)
+                })
+    }
+
+    pub fn album_folder_preview(&self) -> Option<&Result<audio_engine::AlbumPreview, String>> {
+        self.album_preview
+            .as_ref()
+            .filter(|_| self.album_scan_is_current())
+    }
+
+    pub(super) fn invalidate_album_scan(&mut self) {
         self.album_scan = self.album_scan.wrapping_add(1);
+        self.album_scan_key = None;
         self.album_preview = None;
-        let (Some(folder), Some(plan)) = (&self.music_folder, &self.pending_plan) else {
-            return Task::none();
-        };
-        if self.panel != Panel::Preview
-            || plan.mode != CollectionMode::Album
-            || plan.output_kind != OutputKind::Folder
+    }
+
+    pub(super) fn sync_album_scan(&mut self) -> Task<Message> {
+        if self.example
+            || self.result.is_some()
+            || !matches!(self.panel, Panel::Workspace | Panel::Preview)
+            || !self.is_album_folder()
+            || !self.can_preview()
+            || self.album_scan_is_current()
+            || (self.album_scan_key.is_some() && self.album_preview.is_none())
         {
             return Task::none();
         }
-        let output = match folder.album(plan) {
-            Ok(output) => output,
+        let (Some(folder), Some(review)) = (self.music_folder.clone(), &self.review) else {
+            return Task::none();
+        };
+        let identity = review.identity();
+        let plan = review.plan(self.auth.clone());
+        self.invalidate_album_scan();
+        let album = plan.and_then(|plan| folder.album(&plan).map(|output| (plan, output)));
+        self.album_scan_key = Some((identity, folder));
+        let (plan, output) = match album {
+            Ok(album) => album,
             Err(error) => {
                 self.album_preview = Some(Err(error));
                 return Task::none();
             }
         };
         let request = self.album_scan;
-        let plan = plan.clone();
         persistence::background(
             move || {
                 audio_engine::preview_album_output(&plan, &output)
@@ -110,22 +153,19 @@ impl App {
     }
 
     pub fn music_folder_sample(&self) -> Metadata {
-        if let Some(review) = &self.review {
-            if review.selected.len() == 1 {
-                if let Some(metadata) = review
+        self.review
+            .as_ref()
+            .and_then(|review| {
+                review
                     .selected
                     .iter()
                     .next()
                     .and_then(|index| review.effective_metadata(*index))
-                {
-                    return metadata;
-                }
-            }
-        }
-        crate::example::album().tracks.remove(0).metadata
+            })
+            .unwrap_or_else(|| crate::example::album().tracks.remove(0).metadata)
     }
 
-    pub(super) fn open_music_folder(&mut self) -> Task<Message> {
+    pub(super) fn open_music_folder(&mut self, direct: bool) -> Task<Message> {
         let editor = MusicFolderEditor {
             root: self.music_folder.as_ref().map(|folder| folder.root.clone()),
             rule: self.music_folder.as_ref().map_or_else(
@@ -133,17 +173,18 @@ impl App {
                 |folder| folder.rule.to_string(),
             ),
             error: None,
+            customize: false,
+            direct,
             return_to: self.panel,
         };
         self.error = None;
-        let focus = if editor.root.is_some() {
-            "music-folder-rule"
-        } else {
-            "music-folder-root"
-        };
         self.music_folder_editor = Some(editor);
-        self.panel = Panel::MusicFolder;
-        iced::widget::operation::focus(focus)
+        if direct {
+            self.pick_music_root()
+        } else {
+            self.panel = Panel::MusicFolder;
+            iced::widget::operation::focus("music-folder-root")
+        }
     }
 
     pub(super) fn close_music_folder(&mut self) -> Task<Message> {
@@ -151,12 +192,13 @@ impl App {
             return Task::none();
         };
         self.panel = editor.return_to;
-        let focus = iced::widget::operation::focus(if self.panel == Panel::Settings {
-            "settings-music-folder"
-        } else {
-            "edit-music-folder"
+        let focus = iced::widget::operation::focus(match self.panel {
+            Panel::Settings => "settings-music-folder",
+            Panel::Options => "export-music-folder",
+            _ if editor.direct || self.music_folder.is_none() => "save-output",
+            _ => "edit-music-folder",
         });
-        Task::batch([focus, self.scan_album_folder()])
+        Task::batch([self.restore_scroll(), focus])
     }
 
     pub(super) fn pick_music_root(&mut self) -> Task<Message> {
@@ -185,6 +227,7 @@ impl App {
             Ok(rule) => rule,
             Err(error) => {
                 editor.error = Some(error);
+                editor.customize = true;
                 return iced::widget::operation::focus("music-folder-rule");
             }
         };
@@ -234,12 +277,12 @@ impl App {
     }
 
     pub(super) fn save_export(&mut self, save_as: bool) -> Task<Message> {
-        if !save_as
-            && self.is_album_folder()
-            && self.music_folder.is_some()
-            && self.panel != Panel::Preview
+        if !save_as && self.uses_music_folder() && self.music_folder.is_none() {
+            return self.open_music_folder(true);
+        }
+        if !save_as && self.is_album_folder() && !matches!(self.album_folder_preview(), Some(Ok(_)))
         {
-            return self.update(Message::Preview);
+            return self.sync_album_scan();
         }
         let Some(review) = &self.review else {
             return Task::none();
@@ -259,48 +302,29 @@ impl App {
             }
         };
         self.error = None;
-        if !save_as && plan.output_kind == OutputKind::Folder && plan.mode == CollectionMode::Album
-        {
-            if let Some(folder) = &self.music_folder {
-                return match (&self.album_preview, folder.album(&plan)) {
-                    (Some(Ok(_)), Ok(output)) => {
-                        self.begin_export(plan, ExportDestination::Organized(output))
-                    }
-                    (Some(Err(error)), _) => {
-                        self.error = Some(error.clone());
-                        self.scan_album_folder()
-                    }
-                    (_, Err(error)) => {
-                        self.error = Some(error);
-                        Task::none()
-                    }
-                    _ => self.scan_album_folder(),
-                };
-            }
-        }
-        if !save_as && plan.output_kind == OutputKind::File {
-            if let Some(folder) = &self.music_folder {
+        let library = self
+            .music_folder
+            .as_ref()
+            .filter(|_| self.uses_music_folder());
+        if let Some(folder) = library.filter(|_| !save_as) {
+            let output = if self.is_album_folder() {
+                folder.album(&plan)
+            } else {
                 let stem = folder.resolve(&plan.tracks[0].metadata);
-                return match OrganizedOutput::new(folder.root.clone(), stem) {
-                    Ok(output) => self.begin_export(plan, ExportDestination::Organized(output)),
-                    Err(error) => {
-                        self.error = Some(error.to_string());
-                        Task::none()
-                    }
-                };
-            }
+                OrganizedOutput::new(folder.root.clone(), stem).map_err(|error| error.to_string())
+            };
+            return match output {
+                Ok(output) => self.begin_export(plan, ExportDestination::Organized(output)),
+                Err(error) => {
+                    self.error = Some(error);
+                    Task::none()
+                }
+            };
         }
 
         let kind = plan.output_kind;
         let mut title = audio_engine::export::sanitize_component(&plan.title);
-        let start_in = self
-            .music_folder
-            .as_ref()
-            .filter(|_| {
-                kind == OutputKind::File
-                    || (kind == OutputKind::Folder && plan.mode == CollectionMode::Album)
-            })
-            .map(|folder| folder.root.clone());
+        let start_in = library.map(|folder| folder.root.clone());
         if kind == OutputKind::Zip {
             title.push_str(".zip");
         }
@@ -340,6 +364,7 @@ impl App {
         };
         let draft = review.draft();
         let identity = review.identity();
+        self.invalidate_album_scan();
         self.dialog_open = true;
         self.notice = Some("Preparing your export…".into());
         persistence::background(
