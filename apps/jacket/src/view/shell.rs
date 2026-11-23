@@ -203,6 +203,13 @@ fn panel_body(app: &App, compact: bool) -> Element<'_, Message> {
             "Discard review",
             Message::ConfirmReset,
         ),
+        Panel::Close if app.catalog.pending.is_some() => confirmation(
+            app,
+            "Stop this lookup and close?",
+            "Any saved review will be available when you reopen Jacket.",
+            "Stop and close",
+            Message::ConfirmClose,
+        ),
         Panel::Close if app.intake.is_some() => confirmation(
             app,
             "Stop looking up this link and close?",

@@ -337,30 +337,6 @@ pub fn inspect(
     inspect_streaming(tools, input, auth, cancel, |_| {})
 }
 
-/// Read the ordered metadata for a known catalog-linked album with one listing
-/// request. Individual media URLs are resolved by the downloader during save.
-pub fn list_linked_album(
-    tools: &Toolchain,
-    input: &str,
-    auth: &AuthOptions,
-    cancel: &Cancellation,
-) -> Result<Inspection> {
-    let input = validate_inspection_source_url(input)?;
-    if collection_mode(&input) != CollectionMode::Album {
-        return Err(EngineError::Invalid(
-            "Use a YouTube Music album link.".into(),
-        ));
-    }
-    let mut cmd = inspection_command(tools, &input, auth, true)?;
-    let mut inspection = StreamingInspection::new(input);
-    run_lines(&mut cmd, cancel, Duration::from_secs(45), |line| {
-        inspection.read_line(line)?;
-        Ok(())
-    })?;
-    cancel.check()?;
-    inspection.finish()
-}
-
 struct StreamingInspection {
     input: String,
     title: String,
@@ -484,7 +460,7 @@ pub fn inspect_streaming(
     let song_artwork = is_video_source(&input).then(|| {
         std::thread::spawn(move || crate::song_artwork::lookup(&song_source, &song_cancel))
     });
-    let mut cmd = inspection_command(tools, &input, auth, false)?;
+    let mut cmd = inspection_command(tools, &input, auth)?;
     let mut inspection = StreamingInspection::new(input);
     run_lines(&mut cmd, cancel, Duration::from_secs(600), |line| {
         if let Some(update) = inspection.read_line(line)? {
@@ -503,12 +479,7 @@ pub fn inspect_streaming(
     Ok(result)
 }
 
-fn inspection_command(
-    tools: &Toolchain,
-    input: &str,
-    auth: &AuthOptions,
-    flat: bool,
-) -> Result<Command> {
+fn inspection_command(tools: &Toolchain, input: &str, auth: &AuthOptions) -> Result<Command> {
     let mut source =
         url::Url::parse(&validate_inspection_source_url(input)?).expect("validated source URL");
     let mut cmd = downloader(tools, auth)?;
@@ -519,9 +490,6 @@ fn inspection_command(
         source = url::Url::parse("https://www.youtube.com/watch").expect("static YouTube URL");
         source.query_pairs_mut().append_pair("v", &id);
         cmd.arg("--no-playlist");
-    }
-    if flat {
-        cmd.args(["--flat-playlist", "--playlist-end", "501"]);
     }
     cmd.args([
         "--dump-json",
@@ -619,53 +587,6 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn linked_album_listing_inspects_playlist_metadata_with_one_process() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let root = tempfile::tempdir().unwrap();
-        let downloader = root.path().join("yt-dlp");
-        std::fs::write(
-            &downloader,
-            r#"#!/bin/sh
-case " $* " in
-  *" --flat-playlist --playlist-end 501 --dump-json "*) ;;
-  *) exit 1 ;;
-esac
-printf '%s\n' \
-  '{"id":"fixture0001","title":"First track","duration":180}' \
-  '{"id":"fixture0002","title":"Second track","duration":190}' \
-  'PLAYLIST {"title":"An album","playlist_count":2}'
-"#,
-        )
-        .unwrap();
-        std::fs::set_permissions(&downloader, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let tools = Toolchain {
-            yt_dlp: downloader,
-            ffmpeg: "ffmpeg".into(),
-            ffprobe: "ffprobe".into(),
-            node: None,
-        };
-        let result = list_linked_album(
-            &tools,
-            "https://music.youtube.com/playlist?list=OLAK5uy_fixture123",
-            &AuthOptions::default(),
-            &Cancellation::default(),
-        )
-        .unwrap();
-        assert_eq!(result.title, "An album");
-        assert_eq!(result.tracks.len(), 2);
-        assert_eq!(result.tracks[0].duration, Some(180.0));
-        assert!(list_linked_album(
-            &tools,
-            "https://www.youtube.com/watch?v=fixture0001",
-            &AuthOptions::default(),
-            &Cancellation::default(),
-        )
-        .is_err());
-    }
-
     #[test]
     fn song_inspection_discards_playlist_context_only_for_the_downloader() {
         let tools = Toolchain {
@@ -679,8 +600,7 @@ printf '%s\n' \
             "https://www.youtube.com/watch?v=eQVkkG8Oz8c&list=PLmix&start_radio=1",
             "https://youtu.be/eQVkkG8Oz8c?si=share&list=OLAK5uy_example&t=30",
         ] {
-            let command =
-                inspection_command(&tools, input, &AuthOptions::default(), false).unwrap();
+            let command = inspection_command(&tools, input, &AuthOptions::default()).unwrap();
             let args: Vec<_> = command.get_args().collect();
             assert!(args.contains(&std::ffi::OsStr::new("--no-playlist")));
             assert_eq!(
@@ -695,8 +615,7 @@ printf '%s\n' \
             "https://www.youtube.com/playlist?list=PLmix",
             "https://music.youtube.com/browse/MPexample",
         ] {
-            let command =
-                inspection_command(&tools, input, &AuthOptions::default(), false).unwrap();
+            let command = inspection_command(&tools, input, &AuthOptions::default()).unwrap();
             let args: Vec<_> = command.get_args().collect();
             assert!(!args.contains(&std::ffi::OsStr::new("--no-playlist")));
             assert_eq!(*args.last().unwrap(), input);
@@ -724,7 +643,7 @@ printf '%s\n' \
             "https://youtu.be/",
         ] {
             assert!(
-                inspection_command(&tools, input, &AuthOptions::default(), false).is_err(),
+                inspection_command(&tools, input, &AuthOptions::default()).is_err(),
                 "{input}"
             );
             assert!(
@@ -736,7 +655,6 @@ printf '%s\n' \
             &tools,
             "https://www.youtube.com/watch?list=OLAK5uy_example",
             &AuthOptions::default(),
-            false,
         )
         .is_ok());
     }

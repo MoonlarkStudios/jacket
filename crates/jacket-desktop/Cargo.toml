@@ -17,8 +17,6 @@ thiserror.workspace = true
 hex.workspace = true
 directories = "6"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
-httpdate = "1"
-percent-encoding = "2"
 sha2 = "0.11"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 
