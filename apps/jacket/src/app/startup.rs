@@ -204,8 +204,15 @@ impl App {
                         Err(error) => app.error = Some(error.to_string()),
                     },
                     Some(
-                        scenario @ ("catalog" | "catalog-results" | "catalog-editions"
-                        | "catalog-album" | "catalog-match" | "catalog-variant"),
+                        scenario @ ("catalog"
+                        | "catalog-results"
+                        | "catalog-editions"
+                        | "catalog-album"
+                        | "catalog-match"
+                        | "catalog-variant"
+                        | "catalog-artist"
+                        | "catalog-song"
+                        | "catalog-song-matched"),
                     ) => {
                         app.catalog_snapshot(scenario);
                     }

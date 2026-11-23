@@ -2,7 +2,7 @@
 use crate::auth_session;
 use crate::browser_sessions::AccessCheck;
 use crate::downloader_updates::Status;
-use crate::musicbrainz::{Edition, Release, SearchResults};
+use crate::musicbrainz::{Edition, Release, SearchKind, SearchPage, SongDetails};
 use audio_engine::{Cancellation, ExportResult, Inspection, InspectionUpdate, ProgressEvent};
 use jacket_core::AlbumMatch;
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
@@ -11,7 +11,14 @@ use std::thread::{self, JoinHandle};
 
 #[derive(Clone, Debug)]
 pub enum CatalogEvent {
-    Searched(SearchResults),
+    SearchPage {
+        kind: SearchKind,
+        append: bool,
+        result: Result<SearchPage, String>,
+    },
+    SearchFinished,
+    SongDetails(Box<SongDetails>),
+    SongMatched(Box<Inspection>),
     Editions(Vec<Edition>),
     Released(Box<Release>),
     Matched(Box<AlbumMatch>),

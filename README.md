@@ -42,13 +42,16 @@ Explore fictional tracks with `mise run example` (the binary's `--example` flag)
 The ordinary app has no example entry point. Example content is for interface
 review; real downloads require an inspected source.
 
-## Find an album
+## Find music
 
-Search for an album or an artist. Jacket shows one result per MusicBrainz album,
-with a track list and an edition picker. Check the linked YouTube Music album or
-paste a playlist link to match its audio to the edition. Review the matched tracks
-before saving. Jacket shows which tracks are missing or uncertain, and offers
-purchase links when MusicBrainz lists a supported store.
+Search MusicBrainz for artists, albums, or songs. Filter the results or open an
+artist to browse their releases and recordings. Song results show the credited
+artist, release context, and recording details when available.
+
+Choose an album edition or a specific recording, then check a linked YouTube
+source or paste a link. Review the matched audio before saving. For albums, Jacket
+shows which tracks are missing or uncertain and offers purchase links when
+MusicBrainz lists a supported store.
 
 ## Prepare your audio
 

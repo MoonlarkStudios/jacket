@@ -288,9 +288,57 @@ impl Desktop {
         }
         artwork_assets::prune(&self.artwork_root(), &retained)
     }
-    pub fn search_albums(&self, query: String, offset: usize) -> Result<Job, String> {
+    pub fn search_catalog(
+        &self,
+        scope: crate::musicbrainz::SearchScope,
+        pages: Vec<(crate::musicbrainz::SearchKind, usize)>,
+    ) -> Result<Job, String> {
+        Job::spawn(operation_id(), &self.0.admission, move |cancel, events| {
+            for (kind, offset) in pages {
+                if cancel.check().is_err() {
+                    break;
+                }
+                let result = crate::musicbrainz::search(&scope, kind, offset, cancel);
+                if cancel.check().is_err() {
+                    break;
+                }
+                if events
+                    .send(Event::Catalog(crate::CatalogEvent::SearchPage {
+                        kind,
+                        append: offset > 0,
+                        result,
+                    }))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            Ok(Event::Catalog(crate::CatalogEvent::SearchFinished))
+        })
+    }
+
+    pub fn catalog_song(&self, song: crate::musicbrainz::Song) -> Result<Job, String> {
         self.catalog_job(move |cancel| {
-            crate::musicbrainz::search(&query, offset, cancel).map(crate::CatalogEvent::Searched)
+            crate::musicbrainz::recording_details(song, cancel)
+                .map(|details| crate::CatalogEvent::SongDetails(Box::new(details)))
+        })
+    }
+
+    pub fn match_catalog_song(
+        &self,
+        song: crate::musicbrainz::SongDetails,
+        url: String,
+        auth: AuthOptions,
+    ) -> Result<Job, String> {
+        let url = jacket_core::SourceLink::parse(&url)?
+            .song_url
+            .ok_or("Paste a YouTube link for a single song.")?;
+        self.inspection_job(auth, move |tools, auth, cancel, _| {
+            let inspection = audio_engine::inspect(tools, &url, auth, cancel)
+                .map_err(|error| error.to_string())?;
+            song.match_source(inspection).map(|inspection| {
+                Event::Catalog(crate::CatalogEvent::SongMatched(Box::new(inspection)))
+            })
         })
     }
 

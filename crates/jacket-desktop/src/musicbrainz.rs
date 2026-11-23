@@ -1,13 +1,19 @@
-//! Public release search and edition lookup from MusicBrainz.
+//! Public catalog search and edition lookup from MusicBrainz.
+mod discovery;
+mod recording;
+
 use audio_engine::Cancellation;
+pub(crate) use discovery::search;
+pub use discovery::{Artist, SearchHit, SearchKind, SearchPage, SearchScope, Song};
 use jacket_core::{AlbumRelease, ReleaseTrack, SourceLink};
+pub(crate) use recording::recording_details;
+pub use recording::SongDetails;
 use reqwest::blocking::Client;
 use serde::{de::DeserializeOwned, Deserialize};
 use std::io::Read;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-const PAGE: usize = 24;
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 static NEXT_REQUEST: Mutex<Option<Instant>> = Mutex::new(None);
 
@@ -31,12 +37,6 @@ impl Album {
     pub fn artist(&self) -> String {
         artist(&self.artist_credit)
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct SearchResults {
-    pub albums: Vec<Album>,
-    pub next_offset: Option<usize>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -182,13 +182,6 @@ struct Resource {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case")]
-struct SearchResponse {
-    count: usize,
-    release_groups: Vec<Album>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "kebab-case")]
 struct EditionsResponse {
     release_count: usize,
     releases: Vec<Edition>,
@@ -209,64 +202,6 @@ struct EditionResponse {
 #[derive(Deserialize)]
 struct Archive {
     front: bool,
-}
-
-pub(crate) fn search(
-    query: &str,
-    offset: usize,
-    cancel: &Cancellation,
-) -> Result<SearchResults, String> {
-    let query = query.trim();
-    if query.is_empty() || query.chars().count() > 200 {
-        return Err("Enter an album or artist name up to 200 characters.".into());
-    }
-    let quote = |text: &str| text.replace('\\', "\\\\").replace('"', "\\\"");
-    let phrase = quote(query);
-    let terms = query
-        .split_whitespace()
-        .take(24)
-        .map(|word| {
-            let word = quote(word);
-            format!("(releasegroup:\"{word}\" OR artist:\"{word}\")")
-        })
-        .collect::<Vec<_>>()
-        .join(" AND ");
-    let expression = format!("(releasegroup:\"{phrase}\"^6 OR artist:\"{phrase}\"^4 OR ({terms})) AND (primarytype:album OR primarytype:ep)");
-    let mut response: SearchResponse = request(
-        "release-group",
-        &[
-            ("query", &expression),
-            ("limit", &PAGE.to_string()),
-            ("offset", &offset.to_string()),
-        ],
-        cancel,
-    )?;
-    prioritize_exact_search_matches(query, &mut response.release_groups);
-    let next = offset + response.release_groups.len();
-    Ok(SearchResults {
-        next_offset: (next > offset && next < response.count).then_some(next),
-        albums: response.release_groups,
-    })
-}
-
-fn prioritize_exact_search_matches(query: &str, albums: &mut [Album]) {
-    let requested = search_key(query);
-    albums.sort_by_cached_key(|album| {
-        let title = search_key(&album.title);
-        let artist = search_key(&album.artist());
-        // A longer result can include every search term, such as a tribute.
-        requested != title
-            && requested != format!("{artist}{title}")
-            && requested != format!("{title}{artist}")
-    });
-}
-
-fn search_key(value: &str) -> String {
-    value
-        .chars()
-        .filter(|character| character.is_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect()
 }
 
 pub(crate) fn editions(
@@ -565,25 +500,8 @@ fn wait_for_request(cancel: &Cancellation) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        download_store, linked_album, prioritize_exact_search_matches, release_from_response, Album,
-    };
+    use super::{download_store, linked_album, release_from_response};
     use serde_json::json;
-
-    #[test]
-    fn the_exact_artist_and_title_rank_ahead_of_a_tribute_album() {
-        let albums: Vec<Album> = serde_json::from_value(json!([
-            {"id":"tribute","title":"String Quartet Performs the Band's An Album",
-             "artist-credit":[{"name":"String Quartet"}]},
-            {"id":"original","title":"An Album","artist-credit":[{"name":"The Band"}]},
-        ]))
-        .unwrap();
-        for query in ["The Band An Album", "An Album The Band"] {
-            let mut albums = albums.clone();
-            prioritize_exact_search_matches(query, &mut albums);
-            assert_eq!(albums[0].id, "original");
-        }
-    }
 
     #[test]
     fn a_release_preserves_track_credit_and_only_exposes_eligible_source_links() {

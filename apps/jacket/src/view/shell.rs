@@ -334,9 +334,7 @@ fn source(app: &App, _compact: bool) -> Element<'_, Message> {
     .align_y(Alignment::Center)
     .push(super::focus_button::wrap(
         "browse-albums",
-        button("Browse albums")
-            .padding([8, 10])
-            .style(p.secondary()),
+        button("Find music").padding([8, 10]).style(p.secondary()),
         (enabled && !app.example).then_some(Message::Catalog(crate::app::CatalogAction::Browse)),
         p.colors.accent,
     ))]

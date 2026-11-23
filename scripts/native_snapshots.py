@@ -20,7 +20,8 @@ def capture_cases():
         for theme in THEMES:
             for panel in ALBUM_PANELS:
                 yield compact, theme, panel or 'review', (['--panel', panel] if panel else [])
-            for page in ('catalog', 'catalog-results', 'catalog-editions', 'catalog-album', 'catalog-match', 'catalog-variant'):
+            for page in ('catalog', 'catalog-results', 'catalog-editions', 'catalog-album', 'catalog-match', 'catalog-variant',
+                         'catalog-artist', 'catalog-song', 'catalog-song-matched'):
                 yield compact, theme, page, ['--panel', page]
             for scenario, panels in (
                 ('song', (None, 'preview', 'editor', 'options', 'crop')),

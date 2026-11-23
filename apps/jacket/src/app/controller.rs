@@ -264,7 +264,7 @@ impl App {
                 crate::platform::window_ready();
                 return Task::batch([
                     self.load_owned_artwork(),
-                    if self.catalog.visible && self.catalog.group.is_none() {
+                    if self.catalog.visible && self.catalog.search_home() {
                         iced::widget::operation::focus("album-search")
                     } else {
                         Task::none()

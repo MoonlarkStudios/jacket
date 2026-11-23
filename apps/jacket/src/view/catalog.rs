@@ -1,3 +1,4 @@
+use super::catalog_search;
 use crate::app::{App, CatalogAction as Action, CatalogPending, Message};
 use crate::icons::{self, Icon};
 use crate::style;
@@ -12,22 +13,20 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
     let p = app.presentation();
     let catalog = &app.catalog;
     let enabled = !app.busy();
-    let can_search = enabled && app.desktop.is_some() && !catalog.query.trim().is_empty();
-    let search = text_input("Album or artist", &catalog.query)
+    let can_replace_query = matches!(catalog.pending, Some(CatalogPending::Search))
+        && catalog.query.trim() != catalog.searched;
+    let can_search =
+        (enabled || can_replace_query) && app.desktop.is_some() && !catalog.query.trim().is_empty();
+    let search = text_input("Artist, album, or song", &catalog.query)
         .id("album-search")
-        .on_input_maybe(
-            catalog
-                .pending
-                .is_none()
-                .then_some(|query| Message::Catalog(Action::Query(query))),
-        )
+        .on_input(|query| Message::Catalog(Action::Query(query)))
         .on_submit_maybe(can_search.then_some(Message::Catalog(Action::Search)))
         .size(16)
         .padding([11, 13])
         .style(p.input());
     let top = column![
         row![
-            text("Find an album")
+            text("Find music")
                 .size(27)
                 .font(style::semibold())
                 .width(Length::Fill),
@@ -66,6 +65,7 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
         ]
         .spacing(8)
         .align_y(Alignment::Center),
+        catalog_search::filters(app, false),
     ]
     .spacing(14);
     let body = if catalog.choosing_edition {
@@ -81,7 +81,7 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
             _ => "Looking up editions…",
         };
         let mut content = column![
-            toolbar(app, "Back to results", false),
+            toolbar(app, album_back(app), false),
             text(&group.title).size(25).font(style::semibold()),
             text(detail).size(14).color(p.colors.text_muted),
         ]
@@ -112,8 +112,12 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
             }
         }
         content.into()
+    } else if catalog.song.is_some() {
+        catalog_search::song(app)
+    } else if let Some(artist) = &catalog.artist {
+        catalog_search::artist(app, &artist.artist)
     } else {
-        results(app)
+        catalog_search::results(app)
     };
     let edge = if compact { 18 } else { 32 };
     let mut footer = column![].spacing(9);
@@ -130,7 +134,9 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
             "Cancelling…"
         } else {
             match pending {
-                CatalogPending::Search { .. } => "Searching MusicBrainz…",
+                CatalogPending::Search => "Searching MusicBrainz…",
+                CatalogPending::Song => "Loading recording…",
+                CatalogPending::SongMatch => "Checking the recording…",
                 CatalogPending::Editions => "Looking up editions…",
                 CatalogPending::Release => "Loading the track list…",
                 CatalogPending::Match => "Checking the source track by track…",
@@ -153,6 +159,11 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
             .align_y(Alignment::Center),
         );
     }
+    let matched_song = catalog.group.is_none()
+        && catalog
+            .song
+            .as_ref()
+            .is_some_and(|song| song.matched.is_some());
     if catalog.confirm_replace {
         footer = footer.push(
             text("Replace the current review?")
@@ -179,6 +190,25 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
                 ),
             ]
             .spacing(8),
+        );
+    } else if catalog.pending.is_none() && matched_song {
+        footer = footer.push(
+            row![
+                text("Recording matched")
+                    .size(13)
+                    .color(p.colors.text_muted),
+                space::horizontal(),
+                action(
+                    app,
+                    "review-matched-song",
+                    "Review song",
+                    Action::Review,
+                    enabled,
+                    true
+                ),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
         );
     } else if catalog.pending.is_none() && !catalog.choosing_edition {
         if let Some(matched) = catalog
@@ -218,13 +248,14 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
     let show_footer = catalog.error.is_some()
         || catalog.pending.is_some()
         || catalog.confirm_replace
+        || matched_song
         || (!catalog.choosing_edition
             && catalog
                 .matched
                 .as_ref()
                 .is_some_and(|matched| !matched.inspection.tracks.is_empty()));
     let mut layout = column![].height(Length::Fill);
-    if catalog.group.is_none() {
+    if catalog.search_home() {
         layout = layout
             .push(
                 container(
@@ -264,86 +295,6 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
     layout.into()
 }
 
-fn results(app: &App) -> Element<'_, Message> {
-    let p = app.presentation();
-    let enabled = !app.busy();
-    let catalog = &app.catalog;
-    let Some(albums) = &catalog.results else {
-        let description = if catalog.pending.is_some() {
-            "Looking for albums…"
-        } else {
-            "Search by album title or artist name to find editions and available audio."
-        };
-        let mut start = column![text(description).size(14).color(p.colors.text_muted)].spacing(12);
-        if app.desktop.is_none() && !app.loading && !app.example {
-            start = start.push(super::focus_button::wrap(
-                "retry-catalog-startup",
-                button("Retry startup")
-                    .padding([8, 12])
-                    .style(p.secondary()),
-                Some(Message::RetryStartup),
-                p.colors.accent,
-            ));
-        }
-        return start.into();
-    };
-    if albums.is_empty() {
-        return column![
-            text("No albums found").size(18).font(style::semibold()),
-            text("Try a shorter album title or the artist’s name.")
-                .size(14)
-                .color(p.colors.text_muted),
-        ]
-        .spacing(6)
-        .into();
-    }
-    let mut body = column![].spacing(7);
-    for album in albums {
-        let description = [
-            album.artist(),
-            album
-                .first_release_date
-                .as_deref()
-                .and_then(|date| date.get(..4))
-                .unwrap_or("")
-                .to_owned(),
-            album
-                .disambiguation
-                .clone()
-                .filter(|note| !note.is_empty())
-                .unwrap_or_else(|| {
-                    if album.secondary_types.is_empty() {
-                        album.primary_type.clone().unwrap_or_default()
-                    } else {
-                        album.secondary_types.join(", ")
-                    }
-                }),
-        ]
-        .into_iter()
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join(" · ");
-        body = body.push(card(
-            app,
-            format!("album-{}", album.id),
-            album.title.clone(),
-            description,
-            Action::Album(album.clone()),
-        ));
-    }
-    if catalog.can_search_more() {
-        body = body.push(action(
-            app,
-            "more-albums",
-            "Show more albums",
-            Action::More,
-            enabled,
-            false,
-        ));
-    }
-    body.into()
-}
-
 fn editions(app: &App) -> Element<'_, Message> {
     let p = app.presentation();
     let mut body = column![
@@ -352,7 +303,7 @@ fn editions(app: &App) -> Element<'_, Message> {
             if app.catalog.release.is_some() {
                 "Back to album"
             } else {
-                "Back to results"
+                album_back(app)
             },
             false
         ),
@@ -406,7 +357,7 @@ fn release_detail<'a>(app: &'a App, release: &'a Release, compact: bool) -> Elem
             .into()
     };
     let mut content = column![
-        toolbar(app, "Back to results", true),
+        toolbar(app, album_back(app), true),
         row![
             art,
             column![
@@ -594,6 +545,16 @@ fn release_detail<'a>(app: &'a App, release: &'a Release, compact: bool) -> Elem
     content.into()
 }
 
+fn album_back(app: &App) -> &'static str {
+    if app.catalog.song.is_some() {
+        "Back to song"
+    } else if app.catalog.artist.is_some() {
+        "Back to artist"
+    } else {
+        "Back to results"
+    }
+}
+
 fn toolbar<'a>(app: &'a App, back: &'static str, show_editions: bool) -> Element<'a, Message> {
     let enabled = !app.busy();
     let mut bar = row![
@@ -620,7 +581,7 @@ fn toolbar<'a>(app: &'a App, back: &'static str, show_editions: bool) -> Element
     bar.into()
 }
 
-fn card<'a>(
+pub(super) fn card<'a>(
     app: &'a App,
     id: String,
     title: String,
@@ -634,6 +595,11 @@ fn card<'a>(
     ]
     .spacing(4)
     .width(Length::Fill);
+    let may_open_result = matches!(
+        select,
+        Action::Artist(_) | Action::Album(_) | Action::Song(_)
+    ) && matches!(app.catalog.pending, Some(CatalogPending::Search))
+        && !app.catalog.cancelling;
     super::focus_button::wrap(
         id,
         button(
@@ -647,12 +613,12 @@ fn card<'a>(
         .width(Length::Fill)
         .padding([9, 12])
         .style(p.secondary()),
-        (!app.busy()).then_some(Message::Catalog(select)),
+        (!app.busy() || may_open_result).then_some(Message::Catalog(select)),
         p.colors.accent,
     )
 }
 
-fn action<'a>(
+pub(super) fn action<'a>(
     app: &App,
     id: impl Into<iced::advanced::widget::Id>,
     label: impl Into<String>,
