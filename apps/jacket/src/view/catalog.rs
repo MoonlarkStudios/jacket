@@ -1,10 +1,11 @@
 use super::{catalog_search, components};
-use crate::app::{App, CatalogAction as Action, CatalogPending, Message};
+use crate::app::{artist_credit_id, App, CatalogAction as Action, CatalogPending, Message};
 use crate::icons::{self, Icon};
 use crate::style;
 use audio_engine::Inspection;
 use iced::widget::{button, column, container, row, rule, scrollable, space, text, text_input};
 use iced::{Alignment, Element, Length};
+use jacket_desktop::youtube_music::AlbumPage;
 
 const CONTENT_WIDTH: f32 = 910.0;
 
@@ -15,12 +16,12 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
     let mut layout = column![].height(Length::Fill);
     if catalog.search_home() {
         layout = layout.push(page_header(app, search_header(app), edge));
-    } else if let Some(album) = &catalog.album {
+    } else if let Some(album) = catalog.album() {
         layout = layout.push(page_header(app, album_header(app, album, compact), edge));
     }
 
-    let body = if let Some(album) = &catalog.album {
-        album_tracks(app, album)
+    let body = if let Some(album) = catalog.album() {
+        album_tracks(app, &album.inspection)
     } else {
         catalog_search::view(app, compact)
     };
@@ -139,12 +140,9 @@ fn search_header(app: &App) -> Element<'_, Message> {
     .into()
 }
 
-fn album_header<'a>(app: &'a App, album: &'a Inspection, compact: bool) -> Element<'a, Message> {
+fn album_header<'a>(app: &'a App, page: &'a AlbumPage, compact: bool) -> Element<'a, Message> {
     let p = app.presentation();
-    let artist = album
-        .tracks
-        .first()
-        .map_or("", |track| track.metadata.album_artist.as_str());
+    let album = &page.inspection;
     let count = album.tracks.len();
     let mut details = Vec::new();
     if let Some(year) = album.album_release_year {
@@ -172,11 +170,7 @@ fn album_header<'a>(app: &'a App, album: &'a Inspection, compact: bool) -> Eleme
         action(
             app,
             "album-back",
-            if app.catalog.artist.is_some() {
-                "Back to artist"
-            } else {
-                "Back to results"
-            },
+            app.catalog.back_label(),
             Action::Back,
             !app.busy() && !app.catalog.confirm_replace,
             false,
@@ -187,7 +181,7 @@ fn album_header<'a>(app: &'a App, album: &'a Inspection, compact: bool) -> Eleme
                 text(&album.title)
                     .size(if compact { 25 } else { 36 })
                     .font(style::semibold()),
-                text(artist).size(16),
+                album_artist_credits(app, page),
                 text(details.join("  ·  "))
                     .size(13)
                     .color(p.colors.text_muted),
@@ -208,6 +202,42 @@ fn album_header<'a>(app: &'a App, album: &'a Inspection, compact: bool) -> Eleme
     ]
     .spacing(14)
     .into()
+}
+
+fn album_artist_credits<'a>(app: &'a App, page: &'a AlbumPage) -> Element<'a, Message> {
+    if page.artists.is_empty() {
+        let artist = page
+            .inspection
+            .tracks
+            .first()
+            .map_or("", |track| track.metadata.album_artist.as_str());
+        return text(artist).size(16).into();
+    }
+
+    let p = app.presentation();
+    let enabled = !app.busy() && !app.catalog.confirm_replace;
+    let mut credits = row![].spacing(4).align_y(Alignment::Center);
+    for (index, artist) in page.artists.iter().enumerate() {
+        if index > 0 {
+            credits = credits.push(text("&").size(14).color(p.colors.text_muted));
+        }
+        if artist.id.is_some() {
+            let label = text(&artist.name).size(16).color(if enabled {
+                p.colors.accent
+            } else {
+                p.colors.text_muted
+            });
+            credits = credits.push(super::focus_button::wrap(
+                artist_credit_id(index),
+                button(label).padding([3, 4]).style(p.quiet()),
+                enabled.then_some(Message::Catalog(Action::OpenAlbumArtist(index))),
+                p.colors.accent,
+            ));
+        } else {
+            credits = credits.push(text(&artist.name).size(16));
+        }
+    }
+    credits.wrap().vertical_spacing(2).into()
 }
 
 fn album_tracks<'a>(app: &'a App, album: &'a Inspection) -> Element<'a, Message> {

@@ -48,8 +48,8 @@ impl App {
         let Some(desktop) = self.desktop.clone() else {
             return Task::none();
         };
-        let urls: Vec<_> = if let Some(album) = &catalog.album {
-            album.artwork_url.iter().cloned().collect()
+        let urls: Vec<_> = if let Some(album) = catalog.album() {
+            album.inspection.artwork_url.iter().cloned().collect()
         } else {
             catalog
                 .featured()
@@ -57,8 +57,7 @@ impl App {
                 .into_iter()
                 .chain(
                     catalog
-                        .artist
-                        .as_ref()
+                        .artist()
                         .and_then(|page| page.artist.artwork_url.as_deref()),
                 )
                 .chain(

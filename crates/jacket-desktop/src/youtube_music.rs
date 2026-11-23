@@ -78,6 +78,7 @@ pub struct Song {
     pub title: String,
     pub artist: String,
     pub album: String,
+    album_id: Option<String>,
     pub duration: Option<u64>,
     pub artwork_url: Option<String>,
     available: bool,
@@ -145,10 +146,24 @@ pub struct Album {
     pub artwork_url: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub struct ArtistCredit {
+    pub name: String,
+    pub id: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct AlbumPage {
+    pub inspection: Inspection,
+    pub artists: Vec<ArtistCredit>,
+}
+
 #[derive(Deserialize)]
 struct AlbumDetail {
     title: String,
     artist: String,
+    #[serde(default)]
+    artists: Vec<ArtistCredit>,
     year: Option<u32>,
     artwork_url: Option<String>,
     playlist_id: Option<String>,
@@ -274,12 +289,48 @@ pub(crate) fn album(
     runtime: &Runtime,
     id: &str,
     cancel: &Cancellation,
-) -> Result<Inspection, String> {
+) -> Result<AlbumPage, String> {
     if !valid_album_id(id) {
         return Err("YouTube Music returned an invalid album identifier.".into());
     }
-    let detail = request(runtime, "album", id, None, cancel)?;
-    inspection(id, detail)
+    let mut detail: AlbumDetail = request(runtime, "album", id, None, cancel)?;
+    let mut artists = std::mem::take(&mut detail.artists);
+    artists.retain_mut(|artist| {
+        artist.id = artist.id.take().filter(|id| valid_artist_id(id));
+        !artist.name.trim().is_empty()
+    });
+    Ok(AlbumPage {
+        inspection: inspection(id, detail)?,
+        artists,
+    })
+}
+
+pub(crate) fn song_album(
+    runtime: &Runtime,
+    song: Song,
+    cancel: &Cancellation,
+) -> Result<AlbumPage, String> {
+    if let Some(id) = song.album_id.as_deref().filter(|id| valid_album_id(id)) {
+        return album(runtime, id, cancel);
+    }
+    let detail = song_details(runtime, &song.id, cancel)?;
+    let id = detail
+        .and_then(|song| song.album_id)
+        .filter(|id| valid_album_id(id))
+        .ok_or("YouTube Music didn't link this recording to an album.")?;
+    album(runtime, &id, cancel)
+}
+
+fn song_details(
+    runtime: &Runtime,
+    id: &str,
+    cancel: &Cancellation,
+) -> Result<Option<Song>, String> {
+    if song_url(id).is_none() {
+        return Err("YouTube Music returned an invalid recording identifier.".into());
+    }
+    let detail: Option<Song> = request(runtime, "song", id, None, cancel)?;
+    Ok(detail.filter(|song| song.id == id && song.available))
 }
 
 pub(crate) fn song(
@@ -287,10 +338,7 @@ pub(crate) fn song(
     mut song: Song,
     cancel: &Cancellation,
 ) -> Result<Inspection, String> {
-    if song_url(&song.id).is_none() {
-        return Err("YouTube Music returned an invalid recording identifier.".into());
-    }
-    if let Ok(Some(detail)) = request::<Option<Song>>(runtime, "song", &song.id, None, cancel) {
+    if let Ok(Some(detail)) = song_details(runtime, &song.id, cancel) {
         song.fill_details(detail);
     }
     cancel.check().map_err(|error| error.to_string())?;
@@ -417,6 +465,69 @@ mod tests {
     use audio_engine::CollectionMode;
     use serde_json::json;
 
+    #[cfg(unix)]
+    #[test]
+    fn song_album_uses_the_search_id_or_the_exact_recording_relationship() {
+        use super::{song_album, Song};
+        use audio_engine::Cancellation;
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        let recording = |id: &str, album_id: Option<&str>| {
+            json!({
+                "id": id, "title": "First Light", "artist": "The Paper Trails",
+                "album": "Room to breathe", "album_id": album_id, "available": true,
+            })
+        };
+        let details = json!({
+            "title": "Room to breathe (Expanded Edition)", "artist": "The Paper Trails",
+            "artists": [
+                {"name": "The Paper Trails", "id": "UCtest000000000000000001"},
+                {"name": "Guest", "id": "MPREb_wrong_type"}
+            ],
+            "tracks": [{"id": "abcdefghijk", "title": "First Light", "artist": "", "available": true}]
+        });
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("catalog-fixture");
+        fs::write(
+            &path,
+            format!(
+                r#"#!/bin/sh
+case "$1:$2" in
+    song:abcdefghijk) printf '%s\n' '{}' ;;
+    song:abcdefghijl) printf '%s\n' '{}' ;;
+    album:MPREb_expanded) printf '%s\n' '{}' ;;
+    *) exit 1 ;;
+esac
+"#,
+                recording("abcdefghijk", Some("MPREb_expanded")),
+                recording("abcdefghijk", Some("MPREb_expanded")),
+                details
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        let runtime = Runtime::Bundled(path);
+        let cancel = Cancellation::default();
+        for hit in [
+            // No fixture accepts a song lookup for this ID.
+            recording("abcdefghijm", Some("MPREb_expanded")),
+            recording("abcdefghijk", None),
+        ] {
+            let song: Song = serde_json::from_value(hit).unwrap();
+            let album = song_album(&runtime, song, &cancel).unwrap();
+            assert_eq!(album.inspection.title, "Room to breathe (Expanded Edition)");
+            assert_eq!(
+                album.artists[0].id.as_deref(),
+                Some("UCtest000000000000000001")
+            );
+            assert!(album.artists[1].id.is_none());
+        }
+        let wrong_recording = serde_json::from_value(recording("abcdefghijl", None)).unwrap();
+        assert!(song_album(&runtime, wrong_recording, &cancel)
+            .unwrap_err()
+            .contains("didn't link this recording"));
+    }
+
     #[test]
     fn packaged_runtime_takes_priority_over_the_development_interpreter() {
         let temp = tempfile::tempdir().unwrap();
@@ -503,6 +614,7 @@ mod tests {
 
     fn edition(track_count: usize) -> AlbumDetail {
         AlbumDetail {
+            artists: Vec::new(),
             title: "Room to breathe (Expanded Edition)".into(),
             artist: "The Paper Trails".into(),
             year: Some(2024),

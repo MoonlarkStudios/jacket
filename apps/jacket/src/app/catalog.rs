@@ -2,7 +2,7 @@ use super::{catalog_media::CatalogMedia, persistence, App, Message, Panel};
 use audio_engine::Inspection;
 use iced::{widget::operation, Task};
 use jacket_desktop::catalog::{SearchKind, SearchRequest};
-use jacket_desktop::youtube_music::{ArtistPage, SearchHit, SearchItem};
+use jacket_desktop::youtube_music::{AlbumPage, ArtistPage, SearchHit, SearchItem};
 use jacket_desktop::{CatalogEvent, Job};
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -23,6 +23,8 @@ pub enum CatalogAction {
     Filter(Option<SearchKind>),
     ToggleArtistReleases,
     OpenResult(SearchKind, String),
+    OpenSongAlbum(String),
+    OpenAlbumArtist(usize),
     OpenInBrowser,
     Scrolled(f32),
     Back,
@@ -38,14 +40,41 @@ pub enum CatalogPending {
     Song,
 }
 
+enum CatalogPage {
+    Search,
+    Artist {
+        page: ArtistPage,
+        all_releases: bool,
+    },
+    Album(Box<AlbumPage>),
+}
+
+impl CatalogPage {
+    fn initial_focus(&self) -> &'static str {
+        match self {
+            Self::Search => "album-search",
+            Self::Artist { .. } => "artist-back",
+            Self::Album(_) => "review-album",
+        }
+    }
+}
+
+struct BrowsePosition {
+    filter: Option<SearchKind>,
+    scroll_y: f32,
+    focus: String,
+}
+
+struct HistoryEntry {
+    page: CatalogPage,
+    position: BrowsePosition,
+}
+
 pub struct Catalog {
     pub visible: bool,
     pub query: String,
     pub searched: String,
     pub filter: Option<SearchKind>,
-    pub artist: Option<ArtistPage>,
-    pub all_artist_releases: bool,
-    pub album: Option<Box<Inspection>>,
     pub media: CatalogMedia,
     pub error: Option<String>,
     pub pending: Option<CatalogPending>,
@@ -56,8 +85,11 @@ pub struct Catalog {
     song: Option<Box<Inspection>>,
     queued_action: Option<CatalogAction>,
     scroll_y: f32,
-    search_scroll_y: f32,
-    album_origin: Option<(String, f32)>,
+    page: CatalogPage,
+    history: Vec<HistoryEntry>,
+    pending_origin: Option<BrowsePosition>,
+    review_origin: Option<BrowsePosition>,
+    song_focus: Option<String>,
 }
 
 impl Catalog {
@@ -67,9 +99,6 @@ impl Catalog {
             query: String::new(),
             searched: String::new(),
             filter: None,
-            artist: None,
-            all_artist_releases: false,
-            album: None,
             media: CatalogMedia::default(),
             error: None,
             pending: None,
@@ -80,20 +109,74 @@ impl Catalog {
             song: None,
             queued_action: None,
             scroll_y: 0.0,
-            search_scroll_y: 0.0,
-            album_origin: None,
+            page: CatalogPage::Search,
+            history: Vec::new(),
+            pending_origin: None,
+            review_origin: None,
+            song_focus: None,
         }
     }
 
     pub fn search_home(&self) -> bool {
-        self.artist.is_none() && self.album.is_none()
+        matches!(self.page, CatalogPage::Search)
+    }
+
+    pub fn artist(&self) -> Option<&ArtistPage> {
+        match &self.page {
+            CatalogPage::Artist { page, .. } => Some(page),
+            _ => None,
+        }
+    }
+
+    pub fn show_all_artist_releases(&self) -> bool {
+        matches!(
+            self.page,
+            CatalogPage::Artist {
+                all_releases: true,
+                ..
+            }
+        )
+    }
+
+    pub fn album(&self) -> Option<&AlbumPage> {
+        match &self.page {
+            CatalogPage::Album(album) => Some(album),
+            _ => None,
+        }
+    }
+
+    pub fn back_label(&self) -> &'static str {
+        match self.history.last().map(|entry| &entry.page) {
+            Some(CatalogPage::Artist { .. }) => "Back to artist",
+            Some(CatalogPage::Album(_)) => "Back to album",
+            _ => "Back to results",
+        }
     }
 
     pub fn hits(&self) -> &[SearchHit] {
-        if let Some(artist) = &self.artist {
-            return &artist.hits;
+        match &self.page {
+            CatalogPage::Search => self.results.get(&self.filter).map_or(&[], Vec::as_slice),
+            CatalogPage::Artist { page, .. } => &page.hits,
+            CatalogPage::Album(_) => &[],
         }
-        self.results.get(&self.filter).map_or(&[], Vec::as_slice)
+    }
+
+    fn result(&self, kind: SearchKind, id: &str) -> Option<SearchItem> {
+        if self.confirm_replace || (self.search_home() && self.query.trim() != self.searched) {
+            return None;
+        }
+        self.hits()
+            .iter()
+            .find(|hit| hit.item.kind() == kind && hit.item.id() == id)
+            .map(|hit| hit.item.clone())
+    }
+
+    fn position(&self, focus: String) -> BrowsePosition {
+        BrowsePosition {
+            filter: self.filter,
+            scroll_y: self.scroll_y,
+            focus,
+        }
     }
 
     pub fn featured(&self) -> Option<&SearchHit> {
@@ -224,20 +307,21 @@ impl App {
         match action {
             CatalogAction::Browse => {
                 self.catalog.visible = true;
-                return operation::focus(if self.catalog.album.is_some() {
-                    "review-album"
-                } else if self.catalog.artist.is_some() {
-                    "artist-back"
-                } else {
-                    "album-search"
-                });
+                if let Some(position) = self.catalog.review_origin.take() {
+                    return self.restore_catalog_position(position);
+                }
+                return Task::batch([
+                    self.catalog_scroll(self.catalog.scroll_y),
+                    operation::focus(self.catalog.page.initial_focus()),
+                ]);
             }
             CatalogAction::FocusSearch => {
                 self.catalog.visible = true;
-                self.catalog.album = None;
-                self.catalog.artist = None;
+                self.catalog.page = CatalogPage::Search;
+                self.catalog.history.clear();
                 self.catalog.song = None;
-                self.catalog.album_origin = None;
+                self.catalog.song_focus = None;
+                self.catalog.review_origin = None;
                 self.catalog.confirm_replace = false;
                 self.catalog.error = None;
                 return Task::batch([self.catalog_scroll(0.0), operation::focus("album-search")]);
@@ -246,6 +330,7 @@ impl App {
                 self.catalog.search_due = None;
                 self.catalog.visible = false;
                 self.catalog.song = None;
+                self.catalog.song_focus = None;
                 self.catalog.confirm_replace = false;
                 return self.update(Message::PasteLink);
             }
@@ -253,6 +338,9 @@ impl App {
                 self.catalog.search_due = None;
                 self.catalog.visible = false;
                 self.catalog.song = None;
+                if let Some(focus) = self.catalog.song_focus.take() {
+                    self.catalog.review_origin = Some(self.catalog.position(focus));
+                }
                 self.catalog.confirm_replace = false;
             }
             CatalogAction::Filter(filter) => {
@@ -273,51 +361,40 @@ impl App {
                 }
             }
             CatalogAction::ToggleArtistReleases => {
-                if self.catalog.artist.is_some()
-                    && self.catalog.album.is_none()
-                    && !self.catalog.confirm_replace
-                {
-                    self.catalog.all_artist_releases = !self.catalog.all_artist_releases;
+                if !self.catalog.confirm_replace {
+                    if let CatalogPage::Artist { all_releases, .. } = &mut self.catalog.page {
+                        *all_releases = !*all_releases;
+                    }
                 }
             }
             CatalogAction::OpenResult(kind, id) => {
-                let catalog = &mut self.catalog;
-                if catalog.album.is_some()
-                    || catalog.confirm_replace
-                    || (catalog.search_home() && catalog.query.trim() != catalog.searched)
-                {
-                    return Task::none();
-                }
-                let Some(item) = catalog
-                    .hits()
-                    .iter()
-                    .find(|hit| hit.item.kind() == kind && hit.item.id() == id)
-                    .map(|hit| hit.item.clone())
-                else {
+                let Some(item) = self.catalog.result(kind, &id) else {
                     return Task::none();
                 };
-                catalog.song = None;
-                catalog.error = None;
+                let focus = result_id(kind, &id);
+                self.catalog.song = None;
+                self.catalog.error = None;
                 match item {
                     SearchItem::Artist(_) => {
                         if let Some(desktop) = desktop {
-                            catalog.search_scroll_y = catalog.scroll_y;
-                            self.start_catalog(
+                            self.start_navigation(
                                 CatalogPending::Artist,
+                                focus,
                                 desktop.open_youtube_music_artist(id),
                             );
                         }
                     }
                     SearchItem::Album(_) => {
                         if let Some(desktop) = desktop {
-                            catalog.album_origin = Some((id.clone(), catalog.scroll_y));
-                            self.start_catalog(
+                            self.start_navigation(
                                 CatalogPending::Album,
+                                focus,
                                 desktop.open_youtube_music_album(id),
                             );
                         }
                     }
                     SearchItem::Song(song) => {
+                        self.catalog.song_focus = Some(focus);
                         if let Some(desktop) = desktop.filter(|_| song.needs_details()) {
                             self.start_catalog(
                                 CatalogPending::Song,
@@ -335,6 +412,33 @@ impl App {
                     }
                 }
             }
+            CatalogAction::OpenSongAlbum(id) => {
+                if let (Some(desktop), Some(SearchItem::Song(song))) =
+                    (desktop, self.catalog.result(SearchKind::Songs, &id))
+                {
+                    self.start_navigation(
+                        CatalogPending::Album,
+                        song_album_id(&id),
+                        desktop.open_youtube_music_song_album(song),
+                    );
+                }
+            }
+            CatalogAction::OpenAlbumArtist(index) => {
+                if !self.catalog.confirm_replace {
+                    let id = self
+                        .catalog
+                        .album()
+                        .and_then(|album| album.artists.get(index))
+                        .and_then(|artist| artist.id.clone());
+                    if let (Some(desktop), Some(id)) = (desktop, id) {
+                        self.start_navigation(
+                            CatalogPending::Artist,
+                            artist_credit_id(index),
+                            desktop.open_youtube_music_artist(id),
+                        );
+                    }
+                }
+            }
             CatalogAction::Search => {
                 let catalog = &mut self.catalog;
                 catalog.search_due = None;
@@ -346,6 +450,7 @@ impl App {
                     return Task::none();
                 }
                 catalog.song = None;
+                catalog.song_focus = None;
                 if catalog.searched != query {
                     catalog.results.clear();
                 }
@@ -365,33 +470,21 @@ impl App {
                 if self.catalog.confirm_replace {
                     self.catalog.confirm_replace = false;
                     self.catalog.song = None;
-                    return operation::focus(if self.catalog.album.is_some() {
-                        "review-album"
-                    } else if self.catalog.artist.is_some() {
-                        "artist-back"
-                    } else {
-                        "album-search"
-                    });
+                    let focus = self
+                        .catalog
+                        .song_focus
+                        .take()
+                        .unwrap_or_else(|| self.catalog.page.initial_focus().into());
+                    return operation::focus(focus);
                 }
-                if self.catalog.album.take().is_some() {
-                    if let Some((id, offset)) = self.catalog.album_origin.take() {
-                        return Task::batch([
-                            self.catalog_scroll(offset),
-                            operation::focus(result_id(SearchKind::Albums, &id)),
-                        ]);
-                    }
-                    return self.catalog_scroll(0.0);
-                }
-                if let Some(artist) = self.catalog.artist.take() {
-                    return Task::batch([
-                        self.catalog_scroll(self.catalog.search_scroll_y),
-                        operation::focus(result_id(SearchKind::Artists, &artist.artist.id)),
-                    ]);
+                if let Some(previous) = self.catalog.history.pop() {
+                    self.catalog.page = previous.page;
+                    return self.restore_catalog_position(previous.position);
                 }
                 return self.update_catalog(CatalogAction::ClearSearch);
             }
             CatalogAction::Review | CatalogAction::ConfirmReview => {
-                if self.catalog.song.is_none() && self.catalog.album.is_none() {
+                if self.catalog.song.is_none() && self.catalog.album().is_none() {
                     return Task::none();
                 }
                 if matches!(action, CatalogAction::ConfirmReview) {
@@ -406,11 +499,18 @@ impl App {
                     .catalog
                     .song
                     .take()
-                    .or_else(|| self.catalog.album.clone());
+                    .map(|inspection| *inspection)
+                    .or_else(|| self.catalog.album().map(|album| album.inspection.clone()));
                 if let Some(inspection) = inspection {
+                    let focus = self
+                        .catalog
+                        .song_focus
+                        .take()
+                        .unwrap_or_else(|| self.catalog.page.initial_focus().into());
+                    self.catalog.review_origin = Some(self.catalog.position(focus));
                     self.catalog.confirm_replace = false;
                     self.url.clone_from(&inspection.source_url);
-                    return self.finish_inspection(*inspection);
+                    return self.finish_inspection(inspection);
                 }
             }
             CatalogAction::FocusResult
@@ -453,6 +553,43 @@ impl App {
         )
     }
 
+    fn restore_catalog_position(&mut self, position: BrowsePosition) -> Task<Message> {
+        self.catalog.filter = position.filter;
+        Task::batch([
+            self.catalog_scroll(position.scroll_y),
+            operation::focus(position.focus),
+        ])
+    }
+
+    fn start_navigation(
+        &mut self,
+        pending: CatalogPending,
+        focus: String,
+        job: Result<Job, String>,
+    ) {
+        if job.is_ok() {
+            self.catalog.song_focus = None;
+            self.catalog.pending_origin = Some(self.catalog.position(focus));
+        }
+        self.start_catalog(pending, job);
+    }
+
+    fn finish_navigation(
+        &mut self,
+        page: CatalogPage,
+        origin: Option<BrowsePosition>,
+    ) -> Task<Message> {
+        let initial_focus = page.initial_focus();
+        let previous = std::mem::replace(&mut self.catalog.page, page);
+        if let Some(position) = origin {
+            self.catalog.history.push(HistoryEntry {
+                page: previous,
+                position,
+            });
+        }
+        Task::batch([self.catalog_scroll(0.0), operation::focus(initial_focus)])
+    }
+
     fn start_catalog(&mut self, pending: CatalogPending, job: Result<Job, String>) {
         self.catalog.error = None;
         match job {
@@ -470,6 +607,10 @@ impl App {
         event: Result<CatalogEvent, String>,
     ) -> Task<Message> {
         let pending = self.catalog.pending.take();
+        let origin = self.catalog.pending_origin.take();
+        if matches!(pending, Some(CatalogPending::Song)) && event.is_err() {
+            self.catalog.song_focus = None;
+        }
         if std::mem::take(&mut self.catalog.cancelling) {
             return self
                 .catalog
@@ -487,13 +628,16 @@ impl App {
                 }
             }
             Ok(CatalogEvent::Artist(artist)) => {
-                self.catalog.all_artist_releases = false;
-                self.catalog.artist = Some(artist);
-                return Task::batch([self.catalog_scroll(0.0), operation::focus("artist-back")]);
+                return self.finish_navigation(
+                    CatalogPage::Artist {
+                        page: artist,
+                        all_releases: false,
+                    },
+                    origin,
+                );
             }
             Ok(CatalogEvent::Album(album)) => {
-                self.catalog.album = Some(album);
-                return Task::batch([self.catalog_scroll(0.0), operation::focus("review-album")]);
+                return self.finish_navigation(CatalogPage::Album(album), origin);
             }
             Ok(CatalogEvent::Song(song)) => {
                 self.catalog.song = Some(song);
@@ -513,6 +657,14 @@ impl App {
 
 pub fn result_id(kind: SearchKind, id: &str) -> String {
     format!("catalog-{}-{id}", kind.label())
+}
+
+pub fn artist_credit_id(index: usize) -> String {
+    format!("album-artist-{index}")
+}
+
+pub fn song_album_id(id: &str) -> String {
+    format!("song-album-{id}")
 }
 
 impl App {
@@ -554,29 +706,23 @@ impl App {
         hits.push(json!({
             "result_type": "song", "featured": false, "id": "abcdefghijk",
             "title": "First Light", "artist": "The Paper Trails", "album": "Room to breathe",
-            "duration": 192, "available": true, "artwork_url": COVER,
+            "album_id": "MPREb_example1", "duration": 192, "available": true, "artwork_url": COVER,
         }));
+        let artist = json!({"id": "UCtest000000000000000001", "name": "The Paper Trails"});
         if scenario == "catalog-artist" {
-            self.catalog.artist = Some(
-                serde_json::from_value(json!({
-                    "artist": {"id": "UCtest000000000000000001", "name": "The Paper Trails"},
-                    "hits": hits,
-                }))
-                .expect("fictional artist"),
-            );
-        } else {
-            hits.insert(
-                0,
-                json!({
-                    "result_type": "artist", "featured": true, "id": "UCtest000000000000000001",
-                    "name": "The Paper Trails",
-                }),
-            );
-            self.catalog.results.insert(
-                None,
-                serde_json::from_value(json!(hits)).expect("fictional search results"),
-            );
+            self.catalog.page = CatalogPage::Artist {
+                page: serde_json::from_value(json!({ "artist": artist, "hits": hits }))
+                    .expect("fictional artist"),
+                all_releases: false,
+            };
         }
+        hits.insert(0, json!({
+            "result_type": "artist", "featured": true, "id": artist["id"], "name": artist["name"],
+        }));
+        self.catalog.results.insert(
+            None,
+            serde_json::from_value(json!(hits)).expect("fictional search results"),
+        );
         if scenario == "catalog-album" {
             let mut album = crate::example::album();
             album.title = releases[0].1.into();
@@ -586,7 +732,23 @@ impl App {
                 track.metadata.album.clone_from(&album.title);
                 track.source_metadata.album.clone_from(&album.title);
             }
-            self.catalog.album = Some(Box::new(album));
+            self.catalog.page = CatalogPage::Album(Box::new(AlbumPage {
+                inspection: album,
+                artists: vec![serde_json::from_value(artist).expect("fictional artist credit")],
+            }));
+        }
+        let focus = match &self.catalog.page {
+            CatalogPage::Artist { page, .. } => {
+                Some(result_id(SearchKind::Artists, &page.artist.id))
+            }
+            CatalogPage::Album(_) => Some(result_id(SearchKind::Albums, releases[0].0)),
+            CatalogPage::Search => None,
+        };
+        if let Some(focus) = focus {
+            self.catalog.history.push(HistoryEntry {
+                page: CatalogPage::Search,
+                position: self.catalog.position(focus),
+            });
         }
         self.catalog.media.complete(
             COVER.into(),
@@ -597,9 +759,12 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{CatalogAction, CatalogPending, SEARCH_DELAY};
+    use super::{
+        artist_credit_id, song_album_id, CatalogAction, CatalogPage, CatalogPending, SEARCH_DELAY,
+    };
     use crate::app::App;
     use jacket_desktop::catalog::SearchKind;
+    use jacket_desktop::youtube_music::AlbumPage;
     use jacket_desktop::CatalogEvent;
     use std::time::{Duration, Instant};
 
@@ -614,10 +779,13 @@ mod tests {
         album.title = "Room to breathe (Expanded Edition)".into();
         let track = album.tracks[0].clone();
         album.tracks = vec![track; 20];
-        let _ = app.catalog_finished(Ok(CatalogEvent::Album(Box::new(album))));
+        let _ = app.catalog_finished(Ok(CatalogEvent::Album(Box::new(AlbumPage {
+            inspection: album,
+            artists: Vec::new(),
+        }))));
         assert!(app.review.is_none());
         assert!(app.catalog.visible);
-        assert_eq!(app.catalog.album.as_ref().unwrap().tracks.len(), 20);
+        assert_eq!(app.catalog.album().unwrap().inspection.tracks.len(), 20);
 
         let _ = app.update_catalog(CatalogAction::Review);
         let review = app.review.as_ref().unwrap();
@@ -631,23 +799,55 @@ mod tests {
     }
 
     #[test]
-    fn album_back_restores_artist_and_search_context() {
+    fn back_through_artist_and_album_restores_the_song_filter_scroll_and_link() {
         let (mut app, _) = App::new();
         app.loading = false;
         app.catalog_snapshot("catalog-artist");
-        app.catalog.album_origin = Some(("MPREb_example1".into(), 128.0));
-        app.catalog.search_scroll_y = 74.0;
+        let artist = app.catalog.artist().unwrap().clone();
+        app.catalog_snapshot("catalog-album");
+        let album = app.catalog.album().unwrap().clone();
+        app.catalog_snapshot("catalog-results");
 
-        let _ = app.catalog_finished(Ok(CatalogEvent::Album(Box::new(crate::example::album()))));
+        app.catalog.filter = Some(SearchKind::Songs);
+        app.catalog.scroll_y = 74.0;
+        let song_link = song_album_id("abcdefghijk");
+        app.catalog.pending_origin = Some(app.catalog.position(song_link.clone()));
+        let _ = app.catalog_finished(Ok(CatalogEvent::Album(Box::new(album))));
+        assert_eq!(app.catalog.back_label(), "Back to results");
+        assert_eq!(app.catalog.scroll_y, 0.0);
+        assert_eq!(app.catalog.history[0].position.focus, song_link);
+
+        app.catalog.scroll_y = 128.0;
+        let credit_link = artist_credit_id(0);
+        app.catalog.pending_origin = Some(app.catalog.position(credit_link.clone()));
+        let _ = app.catalog_finished(Ok(CatalogEvent::Artist(artist)));
+        assert_eq!(app.catalog.back_label(), "Back to album");
+        assert_eq!(app.catalog.history[1].position.focus, credit_link);
         let _ = app.update_catalog(CatalogAction::Back);
-        assert!(app.catalog.album.is_none());
-        assert!(app.catalog.artist.is_some());
+        assert!(app.catalog.album().is_some());
         assert_eq!(app.catalog.scroll_y, 128.0);
 
         let _ = app.update_catalog(CatalogAction::Back);
-        assert!(app.catalog.search_home());
+        assert!(matches!(app.catalog.page, CatalogPage::Search));
         assert_eq!(app.catalog.query, "The Paper Trails");
+        assert_eq!(app.catalog.filter, Some(SearchKind::Songs));
         assert_eq!(app.catalog.scroll_y, 74.0);
+    }
+
+    #[test]
+    fn a_cancelled_navigation_does_not_push_a_page() {
+        let (mut app, _) = App::new();
+        app.loading = false;
+        app.catalog_snapshot("catalog-album");
+        let album = app.catalog.album().unwrap().clone();
+        let history = app.catalog.history.len();
+        app.catalog.pending = Some(CatalogPending::Album);
+        app.catalog.pending_origin = Some(app.catalog.position(artist_credit_id(0)));
+        app.catalog.cancelling = true;
+
+        let _ = app.catalog_finished(Ok(CatalogEvent::Album(Box::new(album))));
+        assert_eq!(app.catalog.history.len(), history);
+        assert!(app.catalog.pending_origin.is_none());
     }
 
     #[test]

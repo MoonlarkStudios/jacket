@@ -50,7 +50,9 @@ Open an artist to browse their releases and top songs.
 
 Choose an album to see its artwork, edition, and track list. Select **Review download**
 to choose tracks and edit tags before saving. You can also open a song directly
-from search or paste a YouTube link.
+from search or paste a YouTube link. **View album** on a song opens its linked edition.
+Select a credited artist on an album to browse their catalog. Back returns to the
+previous page and restores your filter, scroll position, and focused result.
 
 ## Prepare your audio
 

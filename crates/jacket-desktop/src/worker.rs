@@ -15,7 +15,7 @@ pub enum CatalogEvent {
         hits: Vec<crate::youtube_music::SearchHit>,
     },
     Artist(crate::youtube_music::ArtistPage),
-    Album(Box<Inspection>),
+    Album(Box<crate::youtube_music::AlbumPage>),
     Song(Box<Inspection>),
 }
 

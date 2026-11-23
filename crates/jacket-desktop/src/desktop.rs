@@ -320,6 +320,13 @@ impl Desktop {
         })
     }
 
+    pub fn open_youtube_music_song_album(&self, song: youtube_music::Song) -> Result<Job, String> {
+        self.youtube_music_job(move |runtime, cancel| {
+            youtube_music::song_album(runtime, song, cancel)
+                .map(|album| crate::CatalogEvent::Album(Box::new(album)))
+        })
+    }
+
     pub fn open_youtube_music_song(&self, song: youtube_music::Song) -> Result<Job, String> {
         self.youtube_music_job(move |runtime, cancel| {
             youtube_music::song(runtime, song, cancel)

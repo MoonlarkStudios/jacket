@@ -50,6 +50,7 @@ def artist_hit(item, artist_id=None):
 
 
 def song_hit(item):
+    album = item.get("album") or {}
     duration = item.get("duration_seconds")
     if duration is None:
         parts = (item.get("length") or "").split(":")
@@ -59,7 +60,8 @@ def song_hit(item):
         "id": item.get("videoId") or "",
         "title": item.get("title") or "",
         "artist": artists(item),
-        "album": (item.get("album") or {}).get("name") or "",
+        "album": album.get("name") or "",
+        "album_id": album.get("id"),
         "duration": duration,
         "artwork_url": artwork(item, 160),
         "available": item.get("isAvailable", True),
@@ -111,6 +113,10 @@ def artist_detail(client, artist_id):
 def album_detail(client, album_id):
     item = client.get_album(album_id)
     return album_hit(item, 512) | {
+        "artists": [
+            {"name": artist["name"], "id": artist.get("id")}
+            for artist in item.get("artists") or [] if artist.get("name")
+        ],
         "playlist_id": item.get("audioPlaylistId"),
         "track_count": item.get("trackCount"),
         "tracks": [

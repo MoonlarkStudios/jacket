@@ -16,7 +16,7 @@ mod state;
 #[cfg(test)]
 mod tests;
 
-pub use catalog::{result_id, CatalogAction, CatalogPending};
+pub use catalog::{artist_credit_id, result_id, song_album_id, CatalogAction, CatalogPending};
 pub use intake::SourceKind;
 pub use receipt::Receipt;
 pub use state::{App, Message, Panel, ProfileChoice};

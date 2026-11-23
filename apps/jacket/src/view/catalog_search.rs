@@ -1,6 +1,6 @@
 use super::catalog::{action, card};
 use super::components;
-use crate::app::{result_id, App, CatalogAction as Action, Message};
+use crate::app::{result_id, song_album_id, App, CatalogAction as Action, Message};
 use crate::icons::{self, Icon};
 use crate::style;
 use iced::widget::{button, column, container, grid, image, row, space, text};
@@ -30,7 +30,7 @@ pub(super) fn filters(app: &App) -> Element<'_, Message> {
 pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
     let p = app.presentation();
     let catalog = &app.catalog;
-    let artist_page = catalog.artist.as_ref();
+    let artist_page = catalog.artist();
     if artist_page.is_none() {
         if catalog.query.trim().is_empty() {
             return text("Search YouTube Music to find a release or recording.")
@@ -49,7 +49,7 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
             .push(action(
                 app,
                 "artist-back",
-                "Back to results",
+                catalog.back_label(),
                 Action::Back,
                 !app.busy() && !catalog.confirm_replace,
                 false,
@@ -154,7 +154,7 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
             heading = heading.push(action(
                 app,
                 "artist-releases",
-                if catalog.all_artist_releases {
+                if catalog.show_all_artist_releases() {
                     "Show fewer"
                 } else {
                     "Show all"
@@ -165,7 +165,7 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
             ));
         }
         let limit = match (artist_page.is_some(), kind) {
-            (true, SearchKind::Albums) if !catalog.all_artist_releases => album_columns,
+            (true, SearchKind::Albums) if !catalog.show_all_artist_releases() => album_columns,
             (true, _) => group.len(),
             (false, SearchKind::Albums) => album_columns,
             (false, _) if compact => 2,
@@ -281,7 +281,7 @@ fn result_row<'a>(app: &'a App, item: &YouTubeItem, featured: bool) -> Element<'
     } else {
         details
     };
-    card(
+    let result = card(
         app,
         result_id(item.kind(), item.id()),
         title.clone(),
@@ -294,7 +294,25 @@ fn result_row<'a>(app: &'a App, item: &YouTubeItem, featured: bool) -> Element<'
             if featured { 56.0 } else { 40.0 },
         )),
         Action::OpenResult(item.kind(), item.id().into()),
-    )
+    );
+    if let YouTubeItem::Song(song) = item {
+        row![
+            result,
+            action(
+                app,
+                song_album_id(&song.id),
+                "View album",
+                Action::OpenSongAlbum(song.id.clone()),
+                !app.busy() && !app.catalog.confirm_replace,
+                false,
+            ),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .into()
+    } else {
+        result
+    }
 }
 
 pub(super) fn thumbnail(
