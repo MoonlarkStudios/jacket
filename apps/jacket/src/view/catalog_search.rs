@@ -3,7 +3,7 @@ use super::components;
 use crate::app::{result_id, song_album_id, App, CatalogAction as Action, Message};
 use crate::icons::{self, Icon};
 use crate::style;
-use iced::widget::{button, column, container, grid, image, row, space, text};
+use iced::widget::{button, column, container, grid, image, row, sensor, space, text};
 use iced::{Alignment, ContentFit, Element, Length};
 use jacket_desktop::catalog::SearchKind;
 use jacket_desktop::youtube_music::{Album, SearchHit, SearchItem as YouTubeItem};
@@ -31,6 +31,7 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
     let p = app.presentation();
     let catalog = &app.catalog;
     let artist_page = catalog.artist();
+    let has_more_releases = artist_page.is_some_and(|page| page.has_more_releases);
     if artist_page.is_none() {
         if catalog.query.trim().is_empty() {
             return text("Search YouTube Music to find a release or recording.")
@@ -75,7 +76,7 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
     }
 
     let hits = catalog.hits();
-    if hits.is_empty() {
+    if hits.is_empty() && !has_more_releases {
         if catalog.pending.is_none() && catalog.error.is_none() {
             let label = if artist_page.is_some() {
                 "No releases or songs found"
@@ -127,7 +128,8 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
                     && featured.is_none_or(|featured| featured.item.id() != hit.item.id())
             })
             .collect::<Vec<_>>();
-        if group.is_empty() {
+        let artist_releases = artist_page.is_some() && kind == SearchKind::Albums;
+        if group.is_empty() && !(artist_releases && has_more_releases) {
             continue;
         }
         let label = match (artist_page.is_some(), kind) {
@@ -150,7 +152,7 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
                 false,
             ));
         }
-        if artist_page.is_some() && kind == SearchKind::Albums && group.len() > album_columns {
+        if artist_releases && (has_more_releases || group.len() > album_columns) {
             heading = heading.push(action(
                 app,
                 "artist-releases",
@@ -232,7 +234,7 @@ fn album_card<'a>(app: &'a App, album: &'a Album, compact: bool) -> Element<'a, 
     ]
     .spacing(8)
     .width(Length::Fill);
-    super::focus_button::wrap(
+    let card = super::focus_button::wrap(
         result_id(SearchKind::Albums, &album.id),
         button(content)
             .width(Length::Fill)
@@ -241,7 +243,29 @@ fn album_card<'a>(app: &'a App, album: &'a Album, compact: bool) -> Element<'a, 
         (!app.busy() && !app.catalog.confirm_replace)
             .then(|| Message::Catalog(Action::OpenResult(SearchKind::Albums, album.id.clone()))),
         p.colors.accent,
-    )
+    );
+    if let Some(url) = album
+        .artwork_url
+        .as_ref()
+        .filter(|_| app.catalog.show_all_artist_releases())
+    {
+        sensor(card)
+            .key_ref(&album.id)
+            .anticipate(180)
+            .on_show(|_| {
+                Message::Catalog(Action::ArtistReleaseArtwork {
+                    id: album.id.clone(),
+                    url: Some(url.clone()),
+                })
+            })
+            .on_hide(Message::Catalog(Action::ArtistReleaseArtwork {
+                id: album.id.clone(),
+                url: None,
+            }))
+            .into()
+    } else {
+        card
+    }
 }
 
 fn result_row<'a>(app: &'a App, item: &YouTubeItem, featured: bool) -> Element<'a, Message> {

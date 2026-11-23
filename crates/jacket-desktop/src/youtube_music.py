@@ -29,13 +29,13 @@ def year(item):
     return int(value) if len(value) == 4 and value.isascii() and value.isdecimal() else None
 
 
-def album_hit(item, min_width=160):
+def album_hit(item, min_width=160, *, default_kind="Album"):
     return {
         "id": item.get("browseId") or "",
         "title": item.get("title") or "",
         "artist": artists(item),
         "year": year(item),
-        "kind": item.get("type") or "Album",
+        "kind": item.get("type") or default_kind,
         "artwork_url": artwork(item, min_width),
     }
 
@@ -97,19 +97,32 @@ def search_hits(client, query, category):
     return hits[:24]
 
 
-def artist_detail(client, artist_id):
+def artist_detail(client, artist_id, *, full_releases=False):
     item = client.get_artist(artist_id)
     hits = []
-    for key, kind, read_hit in (
-        ("albums", "album", album_hit),
-        ("singles", "album", album_hit),
-        ("songs", "song", song_hit),
-    ):
-        for result in (item.get(key) or {}).get("results", [])[:12]:
-            hit = read_hit(result)
-            hit["artist"] = hit["artist"] or item.get("name") or ""
-            hits.append({"result_type": kind, "featured": False, **hit})
-    return {"artist": artist_hit(item, artist_id), "hits": hits}
+    name = item.get("name") or ""
+    has_more_releases = False
+    for key, default_kind in (("albums", "Album"), ("singles", "Single")):
+        shelf = item.get(key) or {}
+        results = shelf.get("results") or []
+        browse_id, params = shelf.get("browseId"), shelf.get("params")
+        if browse_id and params:
+            has_more_releases = True
+            if full_releases:
+                results = client.get_artist_albums(browse_id, params, limit=None) or results
+        for result in results:
+            hit = album_hit(result, default_kind=default_kind)
+            hit["artist"] = hit["artist"] or name
+            hits.append({"result_type": "album", "featured": False, **hit})
+    for result in ((item.get("songs") or {}).get("results") or [])[:12]:
+        hit = song_hit(result)
+        hit["artist"] = hit["artist"] or name
+        hits.append({"result_type": "song", "featured": False, **hit})
+    return {
+        "artist": artist_hit(item, artist_id),
+        "hits": hits,
+        "has_more_releases": has_more_releases,
+    }
 
 
 def album_detail(client, album_id):
@@ -149,7 +162,7 @@ def title_key(title):
 def artist_ids(item):
     credits = item.get("artists") or []
     if all(credit.get("id") for credit in credits):
-        return {credit["id"] for credit in credits}
+        return {credit["id"].removeprefix("MPLA") for credit in credits}
     return set()
 
 
@@ -258,8 +271,8 @@ def main():
         result = search_hits(client, value, category or None)
     elif operation == "album":
         result = album_detail(client, value)
-    elif operation == "artist":
-        result = artist_detail(client, value)
+    elif operation in ("artist", "artist-releases"):
+        result = artist_detail(client, value, full_releases=operation == "artist-releases")
     elif operation == "song":
         result = song_detail(client, value)
     else:

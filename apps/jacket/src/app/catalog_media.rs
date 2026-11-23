@@ -1,7 +1,8 @@
 //! Bounded background artwork fetches for the active catalog page.
 use super::{persistence, App, Message, Panel};
 use iced::{widget::image::Handle, Task};
-use std::collections::{HashSet, VecDeque};
+use jacket_desktop::catalog::SearchKind;
+use std::collections::{BTreeMap, HashSet, VecDeque};
 
 const CACHE_SIZE: usize = 96;
 const CONCURRENT_REQUESTS: usize = 3;
@@ -9,6 +10,7 @@ const CONCURRENT_REQUESTS: usize = 3;
 #[derive(Default)]
 pub struct CatalogMedia {
     loading: HashSet<String>,
+    visible_releases: BTreeMap<String, String>,
     // Cache failed lookups as well so a missing cover doesn't trigger a fetch every tick.
     covers: VecDeque<(String, Option<Handle>)>,
 }
@@ -24,6 +26,18 @@ impl CatalogMedia {
             self.covers.pop_front();
         }
         self.covers.push_back((url, image));
+    }
+
+    pub(super) fn set_release_artwork(&mut self, id: String, url: Option<String>) {
+        if let Some(url) = url {
+            self.visible_releases.insert(id, url);
+        } else {
+            self.visible_releases.remove(&id);
+        }
+    }
+
+    pub(super) fn clear_release_artwork(&mut self) {
+        self.visible_releases.clear();
     }
 
     fn needs_artwork(&mut self, url: &str) -> bool {
@@ -65,6 +79,9 @@ impl App {
                 )
                 .collect()
         } else {
+            // A full discography can exceed the artwork cache. Fetch its cards
+            // near the viewport so distant rows do not evict visible artwork.
+            let expanded = catalog.show_all_artist_releases();
             catalog
                 .featured()
                 .and_then(|hit| hit.item.artwork_url())
@@ -78,8 +95,10 @@ impl App {
                     catalog
                         .hits()
                         .iter()
+                        .filter(|hit| !expanded || hit.item.kind() != SearchKind::Albums)
                         .filter_map(|hit| hit.item.artwork_url()),
                 )
+                .chain(catalog.media.visible_releases.values().map(String::as_str))
                 .map(str::to_owned)
                 .collect()
         };

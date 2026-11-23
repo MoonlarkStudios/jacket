@@ -22,6 +22,7 @@ pub enum CatalogAction {
     Search,
     Filter(Option<SearchKind>),
     ToggleArtistReleases,
+    ArtistReleaseArtwork { id: String, url: Option<String> },
     OpenResult(SearchKind, String),
     OpenSongAlbum(String),
     OpenAlbumArtist(usize),
@@ -38,6 +39,7 @@ pub enum CatalogAction {
 pub enum CatalogPending {
     Search,
     Artist,
+    ArtistReleases,
     Album,
     Editions,
     Song,
@@ -48,6 +50,7 @@ enum CatalogPage {
     Artist {
         page: ArtistPage,
         all_releases: bool,
+        expanded_hits: Option<Vec<SearchHit>>,
     },
     Album(Box<AlbumPage>, EditionShelf),
 }
@@ -176,6 +179,11 @@ impl Catalog {
     pub fn hits(&self) -> &[SearchHit] {
         match &self.page {
             CatalogPage::Search => self.results.get(&self.filter).map_or(&[], Vec::as_slice),
+            CatalogPage::Artist {
+                all_releases: true,
+                expanded_hits: Some(hits),
+                ..
+            } => hits,
             CatalogPage::Artist { page, .. } => &page.hits,
             CatalogPage::Album(..) => &[],
         }
@@ -260,6 +268,12 @@ impl App {
                 self.catalog.scroll_y = offset;
                 return Task::none();
             }
+            CatalogAction::ArtistReleaseArtwork { id, url } => {
+                if self.catalog.show_all_artist_releases() {
+                    self.catalog.media.set_release_artwork(id, url);
+                }
+                return Task::none();
+            }
             CatalogAction::OpenInBrowser => {
                 let query = self.catalog.query.trim().to_owned();
                 if let Some(desktop) = self.desktop.clone() {
@@ -338,6 +352,7 @@ impl App {
             CatalogAction::FocusSearch => {
                 self.catalog.visible = true;
                 self.catalog.page = CatalogPage::Search;
+                self.catalog.media.clear_release_artwork();
                 self.catalog.history.clear();
                 self.catalog.song = None;
                 self.catalog.song_focus = None;
@@ -382,8 +397,25 @@ impl App {
             }
             CatalogAction::ToggleArtistReleases => {
                 if !self.catalog.confirm_replace {
-                    if let CatalogPage::Artist { all_releases, .. } = &mut self.catalog.page {
-                        *all_releases = !*all_releases;
+                    if let CatalogPage::Artist {
+                        page,
+                        all_releases,
+                        expanded_hits,
+                    } = &mut self.catalog.page
+                    {
+                        self.catalog.error = None;
+                        if !*all_releases && expanded_hits.is_none() && page.has_more_releases {
+                            if let Some(desktop) = desktop {
+                                let job =
+                                    desktop.youtube_music_artist_releases(page.artist.id.clone());
+                                self.start_catalog(CatalogPending::ArtistReleases, job);
+                            }
+                        } else {
+                            *all_releases = !*all_releases;
+                            if !*all_releases {
+                                self.catalog.media.clear_release_artwork();
+                            }
+                        }
                     }
                 }
             }
@@ -532,6 +564,7 @@ impl App {
                 }
                 if let Some(previous) = self.catalog.history.pop() {
                     self.catalog.page = previous.page;
+                    self.catalog.media.clear_release_artwork();
                     return self.restore_catalog_position(previous.position);
                 }
                 return self.update_catalog(CatalogAction::ClearSearch);
@@ -571,6 +604,7 @@ impl App {
             | CatalogAction::Cancel
             | CatalogAction::Query(_)
             | CatalogAction::Scrolled(_)
+            | CatalogAction::ArtistReleaseArtwork { .. }
             | CatalogAction::OpenInBrowser => {
                 unreachable!("catalog controls handled before busy actions")
             }
@@ -634,6 +668,7 @@ impl App {
     ) -> Task<Message> {
         let initial_focus = page.initial_focus();
         let previous = std::mem::replace(&mut self.catalog.page, page);
+        self.catalog.media.clear_release_artwork();
         if let Some(position) = origin {
             self.catalog.history.push(HistoryEntry {
                 page: previous,
@@ -665,6 +700,9 @@ impl App {
             self.catalog.song_focus = None;
         }
         if std::mem::take(&mut self.catalog.cancelling) {
+            if matches!(pending, Some(CatalogPending::ArtistReleases)) {
+                return operation::focus("artist-releases");
+            }
             if matches!(pending, Some(CatalogPending::Editions)) {
                 if let CatalogPage::Album(_, shelf) = &mut self.catalog.page {
                     shelf.open = false;
@@ -691,9 +729,22 @@ impl App {
                     CatalogPage::Artist {
                         page: artist,
                         all_releases: false,
+                        expanded_hits: None,
                     },
                     origin,
                 );
+            }
+            Ok(CatalogEvent::ArtistReleases(hits)) => {
+                if let CatalogPage::Artist {
+                    all_releases,
+                    expanded_hits,
+                    ..
+                } = &mut self.catalog.page
+                {
+                    *expanded_hits = Some(hits);
+                    *all_releases = true;
+                    return operation::focus("artist-releases");
+                }
             }
             Ok(CatalogEvent::Album(album)) => {
                 return self.finish_navigation(CatalogPage::album(album), origin);
@@ -717,6 +768,9 @@ impl App {
                     || self.catalog.query.trim() == self.catalog.searched
                 {
                     self.catalog.error = Some(error);
+                }
+                if matches!(pending, Some(CatalogPending::ArtistReleases)) {
+                    return operation::focus("artist-releases");
                 }
             }
         }
@@ -787,6 +841,7 @@ impl App {
                 page: serde_json::from_value(json!({ "artist": artist, "hits": hits }))
                     .expect("fictional artist"),
                 all_releases: false,
+                expanded_hits: None,
             };
         }
         hits.insert(0, json!({
@@ -917,6 +972,141 @@ mod tests {
         assert_eq!(app.catalog.query, "The Paper Trails");
         assert_eq!(app.catalog.filter, Some(SearchKind::Songs));
         assert_eq!(app.catalog.scroll_y, 74.0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn show_all_loads_releases_on_demand_and_keeps_them_when_returning_from_an_album() {
+        use serde_json::json;
+        use std::{fs, os::unix::fs::PermissionsExt, thread};
+
+        const ARTIST: &str = "UCtest000000000000000001";
+        let root = tempfile::tempdir().unwrap();
+        let resources = root.path().join("resources");
+        let launcher = resources.join("catalog-tools/bin/youtube-music");
+        fs::create_dir_all(launcher.parent().unwrap()).unwrap();
+        let albums = (0..125)
+            .map(|index| {
+                json!({
+                    "result_type": "album", "featured": false,
+                    "id": format!("MPREb_release{index}"), "title": format!("Release {index}"),
+                    "artist": "The Paper Trails", "kind": "Album",
+                })
+            })
+            .collect::<Vec<_>>();
+        let preview = json!({
+            "artist": {"id": format!("MPLA{ARTIST}"), "name": "The Paper Trails"},
+            "hits": &albums[..3], "has_more_releases": true,
+        });
+        let expanded = json!({
+            "artist": {"id": ARTIST, "name": "The Paper Trails"},
+            "hits": albums, "has_more_releases": true,
+        });
+        let final_album = json!({
+            "title": "Release 124", "artist": "The Paper Trails",
+            "tracks": [{"id": "abcdefghijk", "title": "First Light", "artist": "", "available": true}],
+        });
+        fs::write(
+            &launcher,
+            format!(
+                r#"#!/bin/sh
+case "$1:$2" in
+    artist:{ARTIST}) printf '%s\n' '{preview}' ;;
+    artist-releases:{ARTIST}) printf '%s\n' '{expanded}' ;;
+    album:MPREb_release124) printf '%s\n' '{final_album}' ;;
+    *) exit 1 ;;
+esac
+"#
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
+        let (mut app, _) = App::new();
+        app.loading = false;
+        app.catalog_snapshot("catalog-results");
+        app.desktop = Some(
+            jacket_desktop::Desktop::with_directories(
+                root.path().join("data"),
+                root.path().join("cache"),
+                resources,
+                root.path().join("home"),
+            )
+            .unwrap(),
+        );
+        let finish_job = |app: &mut App| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while app.job.is_some() {
+                assert!(
+                    Instant::now() < deadline,
+                    "catalog fixture did not complete"
+                );
+                let _ = app.tick();
+                thread::sleep(Duration::from_millis(5));
+            }
+            assert!(app.catalog.error.is_none(), "{:?}", app.catalog.error);
+        };
+
+        let _ = app.update_catalog(CatalogAction::OpenResult(
+            SearchKind::Artists,
+            ARTIST.into(),
+        ));
+        finish_job(&mut app);
+        assert_eq!(app.catalog.artist().unwrap().artist.id, ARTIST);
+        assert_eq!(app.catalog.hits().len(), 3);
+        assert!(!app.catalog.show_all_artist_releases());
+
+        let _ = app.update_catalog(CatalogAction::ToggleArtistReleases);
+        assert!(matches!(
+            app.catalog.pending,
+            Some(CatalogPending::ArtistReleases)
+        ));
+        assert_eq!(app.catalog.hits().len(), 3);
+        finish_job(&mut app);
+        assert!(app.catalog.show_all_artist_releases());
+        assert_eq!(app.catalog.hits().len(), 125);
+
+        let last_release = "MPREb_release124";
+        app.catalog.scroll_y = 300.0;
+        let _ = app.update_catalog(CatalogAction::OpenResult(
+            SearchKind::Albums,
+            last_release.into(),
+        ));
+        finish_job(&mut app);
+        assert_eq!(app.catalog.album().unwrap().id, last_release);
+        let _ = app.update_catalog(CatalogAction::Back);
+        assert!(app.catalog.show_all_artist_releases());
+        assert_eq!(app.catalog.hits().len(), 125);
+        assert_eq!(app.catalog.scroll_y, 300.0);
+
+        let _ = app.update_catalog(CatalogAction::ToggleArtistReleases);
+        assert_eq!(app.catalog.hits().len(), 3);
+        let _ = app.update_catalog(CatalogAction::ToggleArtistReleases);
+        assert!(app.job.is_none());
+        assert_eq!(app.catalog.hits().len(), 125);
+    }
+
+    #[test]
+    fn failed_or_cancelled_artist_expansion_keeps_the_preview() {
+        let (mut app, _) = App::new();
+        app.loading = false;
+        app.catalog_snapshot("catalog-artist");
+        let preview_count = app.catalog.hits().len();
+        app.catalog.pending = Some(CatalogPending::ArtistReleases);
+        let _ = app.catalog_finished(Err("Could not load releases.".into()));
+        assert_eq!(
+            app.catalog.error.as_deref(),
+            Some("Could not load releases.")
+        );
+        assert!(!app.catalog.show_all_artist_releases());
+        assert_eq!(app.catalog.hits().len(), preview_count);
+
+        app.catalog.error = None;
+        app.catalog.pending = Some(CatalogPending::ArtistReleases);
+        app.catalog.cancelling = true;
+        let _ = app.catalog_finished(Ok(CatalogEvent::ArtistReleases(Vec::new())));
+        assert!(app.catalog.error.is_none());
+        assert!(!app.catalog.show_all_artist_releases());
+        assert_eq!(app.catalog.hits().len(), preview_count);
     }
 
     #[test]

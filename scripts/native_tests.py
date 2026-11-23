@@ -78,6 +78,51 @@ class EditionMatching(unittest.TestCase):
         self.assertNotIn(mock.call('MPREb_single'), self.client.get_album.call_args_list)
 
 
+class ArtistReleases(unittest.TestCase):
+    def test_artist_preview_leaves_full_album_and_single_lookups_to_expansion(self):
+        bridge = load_script('youtube_music', packaging.CATALOG_HELPER)
+        client = mock.Mock()
+        albums = [{'browseId': f'MPREb_album{n}', 'title': f'Album {n}'} for n in range(125)]
+        singles = [{'browseId': 'MPREb_single', 'title': 'A single'}]
+        client.get_artist.return_value = {
+            'name': 'Example Artist',
+            'albums': {'browseId': 'album-shelf', 'params': 'all-albums', 'results': albums[:3]},
+            'singles': {'browseId': 'single-shelf', 'params': 'all-singles', 'results': []},
+            'songs': {'results': [{'videoId': 'abcdefghijk', 'title': 'A song'}]},
+        }
+        client.get_artist_albums.side_effect = [albums, singles]
+
+        preview = bridge.artist_detail(client, 'UCexample')
+        self.assertTrue(preview['has_more_releases'])
+        self.assertEqual([row['id'] for row in preview['hits']],
+                         [row['browseId'] for row in albums[:3]] + ['abcdefghijk'])
+        client.get_artist_albums.assert_not_called()
+
+        expanded = bridge.artist_detail(client, 'UCexample', full_releases=True)
+        self.assertEqual(client.get_artist_albums.call_args_list, [
+            mock.call('album-shelf', 'all-albums', limit=None),
+            mock.call('single-shelf', 'all-singles', limit=None),
+        ])
+        self.assertEqual([row['id'] for row in expanded['hits']],
+                         [row['browseId'] for row in albums + singles] + ['abcdefghijk'])
+        self.assertEqual(expanded['hits'][-2]['kind'], 'Single')
+        self.assertEqual(expanded['hits'][-2]['artist'], 'Example Artist')
+
+    def test_artist_shelf_without_a_full_list_keeps_all_preview_releases(self):
+        bridge = load_script('youtube_music', packaging.CATALOG_HELPER)
+        client = mock.Mock()
+        client.get_artist.return_value = {
+            'name': 'Example Artist',
+            'albums': {'results': [
+                {'browseId': f'MPREb_album{n}', 'title': f'Album {n}'} for n in range(16)
+            ]},
+        }
+        page = bridge.artist_detail(client, 'UCexample', full_releases=True)
+        self.assertFalse(page['has_more_releases'])
+        self.assertEqual(len(page['hits']), 16)
+        client.get_artist_albums.assert_not_called()
+
+
 class DependencyBoundaries(unittest.TestCase):
     def test_native_workspace_has_no_webview_or_legacy_build_members(self):
         workspace = tomllib.loads((ROOT / 'Cargo.toml').read_text())['workspace']

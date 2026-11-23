@@ -381,6 +381,7 @@ fn status(app: &App) -> Element<'_, Message> {
             match pending {
                 CatalogPending::Search => "Searching YouTube Music…",
                 CatalogPending::Artist => "Loading artist…",
+                CatalogPending::ArtistReleases => "Loading all releases…",
                 CatalogPending::Album => "Loading album…",
                 CatalogPending::Editions => "Looking for other editions…",
                 CatalogPending::Song => "Loading recording details…",

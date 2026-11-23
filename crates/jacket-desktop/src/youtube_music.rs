@@ -70,6 +70,8 @@ pub struct Artist {
 pub struct ArtistPage {
     pub artist: Artist,
     pub hits: Vec<SearchHit>,
+    #[serde(default)]
+    pub has_more_releases: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -228,7 +230,11 @@ fn request<T: DeserializeOwned>(
 ) -> Result<T, String> {
     let mut command = runtime.command();
     command.args([operation, value, filter.map_or("", filter_name)]);
-    let timeout = Duration::from_secs(if operation == "song" { 6 } else { 12 });
+    let timeout = Duration::from_secs(match operation {
+        "song" => 6,
+        "artist-releases" => 45,
+        _ => 12,
+    });
     let bytes =
         audio_engine::process::run(&mut command, cancel, timeout).map_err(|error| match error {
             EngineError::Tool(message) if !message.is_empty() => message,
@@ -263,7 +269,13 @@ fn validate_hits(results: &mut Vec<SearchHit>) {
         let valid = match &mut hit.item {
             SearchItem::Artist(artist) => {
                 discard_untrusted_artwork(&mut artist.artwork_url);
-                valid_artist_id(&artist.id) && !artist.name.trim().is_empty()
+                let Some(id) = normalize_artist_id(&artist.id) else {
+                    return false;
+                };
+                if id != artist.id {
+                    artist.id = id.to_owned();
+                }
+                !artist.name.trim().is_empty()
             }
             SearchItem::Album(album) => {
                 discard_untrusted_artwork(&mut album.artwork_url);
@@ -281,15 +293,21 @@ fn validate_hits(results: &mut Vec<SearchHit>) {
 pub(crate) fn artist(
     runtime: &Runtime,
     id: &str,
+    full_releases: bool,
     cancel: &Cancellation,
 ) -> Result<ArtistPage, String> {
-    if !valid_artist_id(id) {
-        return Err("YouTube Music returned an invalid artist identifier.".into());
-    }
-    let mut page: ArtistPage = request(runtime, "artist", id, None, cancel)?;
-    if page.artist.id != id || page.artist.name.trim().is_empty() {
+    let id =
+        normalize_artist_id(id).ok_or("YouTube Music returned an invalid artist identifier.")?;
+    let operation = if full_releases {
+        "artist-releases"
+    } else {
+        "artist"
+    };
+    let mut page: ArtistPage = request(runtime, operation, id, None, cancel)?;
+    if normalize_artist_id(&page.artist.id) != Some(id) || page.artist.name.trim().is_empty() {
         return Err("YouTube Music did not return the requested artist.".into());
     }
+    page.artist.id = id.to_owned();
     discard_untrusted_artwork(&mut page.artist.artwork_url);
     validate_hits(&mut page.hits);
     Ok(page)
@@ -306,7 +324,11 @@ pub(crate) fn album(
     let mut detail: AlbumDetail = request(runtime, "album", id, None, cancel)?;
     let mut artists = std::mem::take(&mut detail.artists);
     artists.retain_mut(|artist| {
-        artist.id = artist.id.take().filter(|id| valid_artist_id(id));
+        artist.id = artist
+            .id
+            .as_deref()
+            .and_then(normalize_artist_id)
+            .map(str::to_owned);
         !artist.name.trim().is_empty()
     });
     Ok(AlbumPage {
@@ -377,12 +399,14 @@ pub(crate) fn song(
     song.inspection()
 }
 
-fn valid_artist_id(id: &str) -> bool {
-    id.starts_with("UC")
+fn normalize_artist_id(id: &str) -> Option<&str> {
+    let id = id.strip_prefix("MPLA").unwrap_or(id);
+    (id.starts_with("UC")
         && id.len() == 24
         && id
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')))
+    .then_some(id)
 }
 
 fn song_url(id: &str) -> Option<String> {
@@ -513,7 +537,7 @@ mod tests {
         let details = json!({
             "title": "Room to breathe (Expanded Edition)", "artist": "The Paper Trails",
             "artists": [
-                {"name": "The Paper Trails", "id": "UCtest000000000000000001"},
+                {"name": "The Paper Trails", "id": "MPLAUCtest000000000000000001"},
                 {"name": "Guest", "id": "MPREb_wrong_type"}
             ],
             "tracks": [{"id": "abcdefghijk", "title": "First Light", "artist": "", "available": true}]
@@ -582,6 +606,23 @@ esac
             Runtime::discover(&resources, None),
             Some(Runtime::Bundled(launcher)),
         );
+    }
+
+    #[test]
+    fn prefixed_artist_results_are_normalized_before_deduplication() {
+        let mut hits: Vec<SearchHit> = serde_json::from_value(json!([
+            {"result_type": "artist", "featured": true, "id": "MPLAUCtest000000000000000001",
+                "name": "The Paper Trails"},
+            {"result_type": "artist", "featured": false, "id": "UCtest000000000000000001",
+                "name": "The Paper Trails"},
+            {"result_type": "artist", "featured": false, "id": "MPLAMPREb_notAnArtist",
+                "name": "Invalid artist"}
+        ]))
+        .unwrap();
+        validate_hits(&mut hits);
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].featured);
+        assert_eq!(hits[0].item.id(), "UCtest000000000000000001");
     }
 
     #[test]

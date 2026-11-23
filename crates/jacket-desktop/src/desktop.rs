@@ -309,7 +309,14 @@ impl Desktop {
 
     pub fn open_youtube_music_artist(&self, id: String) -> Result<Job, String> {
         self.youtube_music_job(move |runtime, cancel| {
-            youtube_music::artist(runtime, &id, cancel).map(crate::CatalogEvent::Artist)
+            youtube_music::artist(runtime, &id, false, cancel).map(crate::CatalogEvent::Artist)
+        })
+    }
+
+    pub fn youtube_music_artist_releases(&self, id: String) -> Result<Job, String> {
+        self.youtube_music_job(move |runtime, cancel| {
+            youtube_music::artist(runtime, &id, true, cancel)
+                .map(|page| crate::CatalogEvent::ArtistReleases(page.hits))
         })
     }
 
