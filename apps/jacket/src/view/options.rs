@@ -2,32 +2,22 @@ use crate::app::{App, Message};
 use crate::editor::Kind;
 use crate::icons::{self, Icon};
 use crate::settings::{FormatChoice, OutputChoice};
-use crate::style;
-use audio_engine::{ArtworkMode, AudioFormat, OutputKind};
-use iced::widget::{
-    button, column, container, pick_list, row, rule, scrollable, space, text, Column,
-};
+use audio_engine::{AudioFormat, OutputKind};
+use iced::widget::{button, column, pick_list, row, rule, space, text};
 use iced::{Alignment, Element, Length};
 
-pub fn view(app: &App, docked: bool) -> Element<'_, Message> {
+pub fn view(app: &App) -> Element<'_, Message> {
     let p = app.presentation();
     let Some(review) = &app.review else {
         return space().into();
     };
-    if docked && review.preferences.output_kind == OutputKind::File {
-        return file_inspector(app, review);
-    }
-    let mut fields = Column::new().spacing(18).width(Length::Fill);
-    if docked {
-        fields = fields.push(text("Export").size(14).font(style::semibold()));
-    }
     let output = row![
         output(app, OutputChoice::File, "File", Icon::File),
         output(app, OutputChoice::Folder, "Folder", Icon::Folder),
         output(app, OutputChoice::Zip, "ZIP", Icon::Archive),
     ]
     .spacing(6);
-    fields = fields.push(
+    let mut fields = column![].spacing(18).width(Length::Fill).push(
         column![
             text("Output type").size(12).color(p.colors.text_muted),
             output
@@ -66,13 +56,12 @@ pub fn view(app: &App, docked: bool) -> Element<'_, Message> {
     fields = fields.push(rule::horizontal(1).style(p.line())).push(
         column![
             row![
-                text(
-                    if review.preferences.output_kind == OutputKind::File || app.is_album_folder() {
-                        "Save As filename"
-                    } else {
-                        "Output name"
-                    }
-                )
+                text(match review.preferences.output_kind {
+                    OutputKind::File => "Save As filename",
+                    OutputKind::Folder if app.is_album_folder() => "Save As folder name",
+                    OutputKind::Folder => "Folder name",
+                    OutputKind::Zip => "ZIP filename",
+                })
                 .size(12)
                 .color(p.colors.text_muted),
                 space::horizontal(),
@@ -86,109 +75,30 @@ pub fn view(app: &App, docked: bool) -> Element<'_, Message> {
         ]
         .spacing(5),
     );
-    let content: Element<'_, Message> = if docked {
-        scrollable(container(fields).padding(iced::Padding {
-            right: 12.0,
-            ..iced::Padding::ZERO
-        }))
-        .style(p.scrollbar())
-        .direction(crate::style::scroll_direction())
-        .height(Length::Fill)
-        .into()
-    } else {
-        fields.into()
-    };
-    if !docked {
-        return content;
+    let mut actions = row![
+        super::focus_button::wrap(
+            "discard-review",
+            button("Discard review").padding([7, 0]).style(p.quiet()),
+            (!app.busy()).then_some(Message::Reset),
+            p.colors.accent,
+        ),
+        space::horizontal()
+    ]
+    .align_y(Alignment::Center);
+    if app.uses_music_folder() {
+        actions = actions.push(super::focus_button::wrap(
+            "export-music-folder",
+            button("Music folder settings…")
+                .padding([7, 9])
+                .style(p.secondary()),
+            (!app.busy()).then_some(Message::OpenMusicFolder),
+            p.colors.accent,
+        ));
     }
-    let actions = if app.is_album_folder() {
-        super::destination::save_controls(app, super::destination::Placement::Inspector)
-    } else {
-        preview_button(app)
-    };
-    column![
-        content,
-        rule::horizontal(1).style(p.line()),
-        actions,
-        discard(app),
-    ]
-    .spacing(12)
-    .height(Length::Fill)
-    .into()
-}
-
-fn file_inspector<'a>(app: &'a App, review: &'a jacket_core::Review) -> Element<'a, Message> {
-    let p = app.presentation();
-    let cover = if matches!(review.preferences.artwork_mode, ArtworkMode::None) {
-        "No cover"
-    } else {
-        "Embed cover when supported"
-    };
-    let options = super::focus_button::wrap(
-        "file-export-options",
-        button(
-            row![
-                icons::view(Icon::Settings, p.colors.text_muted, 15.0),
-                text("Export options").size(12)
-            ]
-            .spacing(8)
-            .align_y(Alignment::Center),
-        )
-        .style(p.secondary())
-        .padding([8, 10]),
-        (!app.busy()).then_some(Message::OpenPanel(crate::app::Panel::Options)),
-        p.colors.accent,
-    );
-    column![
-        text("Export").size(14).font(style::semibold()),
-        super::destination::save_controls(app, super::destination::Placement::Inspector),
-        rule::horizontal(1).style(p.line()),
-        text(format!(
-            "{} · {cover}",
-            FormatChoice::from(review.preferences.format)
-        ))
-        .size(12)
-        .color(p.colors.text_muted),
-        options,
-        space::vertical(),
-        discard(app),
-    ]
-    .spacing(12)
-    .height(Length::Fill)
-    .into()
-}
-
-fn discard(app: &App) -> Element<'_, Message> {
-    button("Discard review")
-        .padding(6)
-        .on_press_maybe((!app.busy()).then_some(Message::Reset))
-        .style(app.presentation().quiet())
+    fields
+        .push(rule::horizontal(1).style(p.line()))
+        .push(actions)
         .into()
-}
-
-fn preview_button(app: &App) -> Element<'_, Message> {
-    let p = app.presentation();
-    button(
-        row![
-            text("Preview files").size(13),
-            space::horizontal(),
-            icons::view(
-                Icon::ArrowRight,
-                if app.can_preview() {
-                    p.colors.accent_text
-                } else {
-                    p.derived.disabled
-                },
-                15.0
-            )
-        ]
-        .align_y(Alignment::Center),
-    )
-    .width(Length::Fill)
-    .padding([11, 12])
-    .on_press_maybe(app.can_preview().then_some(Message::Preview))
-    .style(p.primary())
-    .into()
 }
 
 fn output<'a>(

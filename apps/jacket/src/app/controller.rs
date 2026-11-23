@@ -3,7 +3,7 @@ use super::{App, Message, Panel, ProfileChoice};
 use crate::editor::{self, Editor};
 use crate::settings::BrowserChoice;
 use crate::{example, view};
-use audio_engine::{AuthOptions, OutputKind};
+use audio_engine::AuthOptions;
 use iced::{keyboard, window, Element, Subscription, Task, Theme};
 use jacket_core::{Review, SourceIntent, SourceLink};
 use jacket_desktop::artwork_assets::Crop;
@@ -149,7 +149,7 @@ impl App {
                     keyboard::Key::Character(ref value)
                         if modifiers.command() && value.eq_ignore_ascii_case("s") =>
                     {
-                        Some(Message::Preview)
+                        Some(Message::Save)
                     }
                     keyboard::Key::Character(ref value)
                         if modifiers.command()
@@ -230,10 +230,12 @@ impl App {
             Message::PrimaryAction => {
                 return match self.panel {
                     Panel::Workspace if self.result.is_some() => self.update(Message::OpenOutput),
+                    Panel::Workspace | Panel::Preview if self.can_export() => {
+                        self.update(Message::Save)
+                    }
                     Panel::Workspace | Panel::Options if self.can_preview() => {
                         self.update(Message::Preview)
                     }
-                    Panel::Preview if self.can_export() => self.update(Message::Save),
                     Panel::MusicFolder if !self.busy() => self.update(Message::ApplyMusicFolder),
                     Panel::Editor | Panel::SongEditor | Panel::CollectionEditor if !self.busy() => {
                         self.update(Message::Editor(editor::Action::Apply))
@@ -528,7 +530,7 @@ impl App {
                     && ((!self.panel.review_tool()
                         && !matches!(
                             self.panel,
-                            Panel::Editor | Panel::Crop | Panel::MusicFolder
+                            Panel::Editor | Panel::Cover | Panel::Crop | Panel::MusicFolder
                         ))
                         || panel == self.panel) =>
             {
@@ -541,8 +543,16 @@ impl App {
                 if self.panel == Panel::MusicFolder {
                     return self.close_music_folder();
                 }
+                if self.panel == Panel::Crop && self.crop_return_to_cover {
+                    self.crop_return_to_cover = false;
+                    self.crop_source = None;
+                    self.crop_dragging = false;
+                    self.panel = Panel::Cover;
+                    self.error = None;
+                    return iced::widget::operation::focus("review-crop-cover");
+                }
                 let focus = self.editor_return_focus().or_else(|| match self.panel {
-                    Panel::Crop => Some("review-crop-cover".into()),
+                    Panel::Cover | Panel::Crop => Some("edit-cover".into()),
                     Panel::TrackOrder => Some("open-track-order".into()),
                     _ => None,
                 });
@@ -552,6 +562,9 @@ impl App {
                 self.track_position = None;
                 self.crop_source = None;
                 self.crop_dragging = false;
+                if self.panel == Panel::Cover {
+                    self.error = None;
+                }
                 self.panel = Panel::Workspace;
                 self.pending_plan = None;
                 return Task::batch([
@@ -559,10 +572,13 @@ impl App {
                     focus.map_or_else(Task::none, iced::widget::operation::focus),
                 ]);
             }
-            Message::Preview
+            Message::Save
                 if !self.busy() && (self.panel == Panel::Editor || self.panel.inline_editor()) =>
             {
                 return self.update(Message::Editor(editor::Action::Apply));
+            }
+            Message::Save if self.panel == Panel::Options => {
+                return self.update(Message::Preview);
             }
             Message::Preview
                 if !self.busy()
@@ -572,26 +588,22 @@ impl App {
                 if let Err(error) = self.prepare_preview() {
                     self.error = Some(error);
                 } else {
-                    return Task::batch([self.preview_artwork(), self.scan_album_folder()]);
+                    return Task::batch([self.preview_artwork(), self.sync_album_scan()]);
                 }
             }
-            Message::AlbumScanned(request, result)
-                if self.panel == Panel::Preview && request == self.album_scan =>
-            {
+            Message::AlbumScanned(request, result) if request == self.album_scan => {
                 self.album_preview = Some(result);
             }
-            Message::ScanAlbumFolder if self.panel == Panel::Preview && !self.busy() => {
-                return self.scan_album_folder();
+            Message::ScanAlbumFolder
+                if matches!(self.panel, Panel::Workspace | Panel::Preview) && !self.busy() =>
+            {
+                self.invalidate_album_scan();
+                return self.sync_album_scan();
             }
             Message::Save | Message::SaveAs
                 if self.can_export()
                     && self.result.is_none()
-                    && (self.panel == Panel::Preview
-                        || (self.panel == Panel::Workspace
-                            && (self.is_album_folder()
-                                || self.review.as_ref().is_some_and(|review| {
-                                    review.preferences.output_kind == OutputKind::File
-                                })))) =>
+                    && matches!(self.panel, Panel::Workspace | Panel::Preview) =>
             {
                 return self.save_export(matches!(message, Message::SaveAs));
             }
@@ -607,17 +619,14 @@ impl App {
                     None
                 });
                 let Some(destination) = destination else {
-                    if self.pending_plan.as_ref().is_some_and(|plan| {
-                        plan.output_kind == OutputKind::File
-                            || (plan.mode == audio_engine::CollectionMode::Album
-                                && plan.output_kind == OutputKind::Folder)
-                    }) {
-                        if self.panel == Panel::Workspace {
-                            self.pending_plan = None;
-                        }
-                        return iced::widget::operation::focus("save-as");
+                    if self.panel == Panel::Workspace {
+                        self.pending_plan = None;
                     }
-                    return Task::none();
+                    return iced::widget::operation::focus(if self.uses_music_folder() {
+                        "save-as"
+                    } else {
+                        "save-output"
+                    });
                 };
                 if let Some(plan) = self.pending_plan.clone() {
                     let destination =
@@ -676,19 +685,19 @@ impl App {
                     }
                 }
             }
-            Message::OpenMusicFolder
+            Message::OpenMusicFolder | Message::PickMusicFolder
                 if !self.busy()
                     && matches!(
                         self.panel,
-                        Panel::Workspace | Panel::Preview | Panel::Settings
+                        Panel::Workspace | Panel::Preview | Panel::Options | Panel::Settings
                     ) =>
             {
-                return self.open_music_folder();
+                return self.open_music_folder(matches!(message, Message::PickMusicFolder));
             }
             Message::ChooseMusicRoot if !self.busy() && self.panel == Panel::MusicFolder => {
                 return self.pick_music_root();
             }
-            Message::MusicRootPicked(result) if self.panel == Panel::MusicFolder => {
+            Message::MusicRootPicked(result) if self.music_folder_editor.is_some() => {
                 self.dialog_open = false;
                 self.notice = None;
                 if self.close_after_job {
@@ -698,13 +707,28 @@ impl App {
                     match result {
                         Ok(Some(path)) => {
                             editor.root = Some(path);
-                            return iced::widget::operation::focus("music-folder-rule");
+                            if editor.direct {
+                                return self.apply_music_folder();
+                            }
+                            return iced::widget::operation::focus("save-music-folder");
                         }
+                        Ok(None) if editor.direct => return self.close_music_folder(),
                         Ok(None) => {}
-                        Err(error) => editor.error = Some(error),
+                        Err(error) => {
+                            editor.error = Some(error);
+                            self.panel = Panel::MusicFolder;
+                        }
                     }
                 }
                 return iced::widget::operation::focus("music-folder-root");
+            }
+            Message::TogglePathRule if !self.busy() && self.panel == Panel::MusicFolder => {
+                if let Some(editor) = &mut self.music_folder_editor {
+                    editor.customize = !editor.customize;
+                    if editor.customize {
+                        return iced::widget::operation::focus("music-folder-rule");
+                    }
+                }
             }
             Message::MusicRule(rule) if !self.busy() && self.panel == Panel::MusicFolder => {
                 if let Some(editor) = &mut self.music_folder_editor {
@@ -722,12 +746,13 @@ impl App {
             {
                 return self.save_music_folder(None);
             }
-            Message::MusicFolderSaved(result) if self.panel == Panel::MusicFolder => {
+            Message::MusicFolderSaved(result) if self.music_folder_editor.is_some() => {
                 self.dialog_open = false;
                 self.notice = None;
                 match result {
                     Ok(folder) => {
                         self.music_folder = folder;
+                        self.invalidate_album_scan();
                         if self.close_after_job {
                             return self.close();
                         }
@@ -735,9 +760,11 @@ impl App {
                     }
                     Err(error) => {
                         self.close_after_job = false;
+                        self.panel = Panel::MusicFolder;
                         if let Some(editor) = &mut self.music_folder_editor {
                             editor.error = Some(error);
                         }
+                        return iced::widget::operation::focus("music-folder-root");
                     }
                 }
             }
@@ -1123,7 +1150,7 @@ impl App {
                 if !self.busy()
                     && !self.example
                     && self.review.is_some()
-                    && matches!(self.panel, Panel::Workspace | Panel::Options) =>
+                    && matches!(self.panel, Panel::Workspace | Panel::Cover | Panel::Options) =>
             {
                 if path.extension().is_some_and(|extension| {
                     ["jpg", "jpeg", "png", "webp"]
@@ -1134,7 +1161,9 @@ impl App {
                 }
             }
             Message::UseSourceCover
-                if !self.busy() && !self.example && self.panel == Panel::Workspace =>
+                if !self.busy()
+                    && !self.example
+                    && matches!(self.panel, Panel::Workspace | Panel::Cover) =>
             {
                 return self.use_source_cover();
             }
@@ -1142,7 +1171,7 @@ impl App {
                 if !self.busy()
                     && !self.example
                     && self.review.is_some()
-                    && matches!(self.panel, Panel::Workspace | Panel::Options) =>
+                    && matches!(self.panel, Panel::Workspace | Panel::Cover | Panel::Options) =>
             {
                 self.dialog_open = true;
                 return Task::perform(
@@ -1162,8 +1191,15 @@ impl App {
                 if self.close_after_job {
                     return self.close();
                 }
-                if path.is_none() && self.panel == Panel::Workspace && self.review.is_some() {
-                    return iced::widget::operation::focus("review-choose-cover");
+                if path.is_none()
+                    && matches!(self.panel, Panel::Workspace | Panel::Cover)
+                    && self.review.is_some()
+                {
+                    return iced::widget::operation::focus(if self.panel == Panel::Cover {
+                        "review-choose-cover"
+                    } else {
+                        "edit-cover"
+                    });
                 }
                 if let (Some(path), Some(desktop)) = (path, self.desktop.clone()) {
                     self.dialog_open = true;
@@ -1197,12 +1233,17 @@ impl App {
                         self.crop_source = None;
                         self.source_cover_error = None;
                         self.preview_cover_error = None;
-                        let focus = if self.panel == Panel::Crop {
-                            "review-crop-cover"
-                        } else {
+                        if self.panel == Panel::Crop && self.crop_return_to_cover {
+                            self.panel = Panel::Cover;
+                        } else if self.panel != Panel::Cover {
+                            self.panel = Panel::Workspace;
+                        }
+                        self.crop_return_to_cover = false;
+                        let focus = if self.panel == Panel::Cover {
                             "review-choose-cover"
+                        } else {
+                            "edit-cover"
                         };
-                        self.panel = Panel::Workspace;
                         return Task::batch([
                             self.autosave().chain(iced::widget::operation::focus(focus)),
                             self.load_owned_artwork(),
@@ -1225,7 +1266,7 @@ impl App {
             Message::CropCover
                 if !self.busy()
                     && !self.example
-                    && matches!(self.panel, Panel::Workspace | Panel::Options) =>
+                    && matches!(self.panel, Panel::Workspace | Panel::Cover | Panel::Options) =>
             {
                 if let Some((asset, path)) = &self.cover {
                     return self.edit_cover_crop(asset.clone(), path.clone());

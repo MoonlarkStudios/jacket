@@ -3,16 +3,40 @@ use super::focus_button;
 use crate::app::{App, Message, Panel};
 use crate::settings::ArtworkChoice;
 use audio_engine::ArtworkMode;
-use iced::widget::{button, column, pick_list, row, text};
+use iced::widget::{button, column, pick_list, row, space, text};
 use iced::{Alignment, Element};
 use jacket_core::Review;
 
-pub fn view(app: &App, review: &Review) -> Element<'static, Message> {
+pub fn edit_button(app: &App) -> Element<'static, Message> {
+    let p = app.presentation();
+    focus_button::wrap(
+        "edit-cover",
+        button(text("Edit cover…").size(12))
+            .padding([5, 7])
+            .style(p.quiet()),
+        (!app.busy()).then_some(Message::OpenPanel(Panel::Cover)),
+        p.colors.accent,
+    )
+}
+
+pub fn view(app: &App) -> Element<'_, Message> {
+    let Some(review) = &app.review else {
+        return space().into();
+    };
+    column![
+        super::components::cover(app, 156.0, super::components::CoverContext::Source),
+        controls(app, review),
+    ]
+    .spacing(14)
+    .into()
+}
+
+fn controls(app: &App, review: &Review) -> Element<'static, Message> {
     let p = app.presentation();
     let custom = review.preferences.shared_artwork_asset.is_some();
     let source = review.source_artwork_url().is_some();
     let included = !matches!(review.preferences.artwork_mode, ArtworkMode::None);
-    let idle = !app.busy() && app.panel == Panel::Workspace;
+    let idle = !app.busy();
     let status = if !included {
         if review.is_song() {
             "Cover omitted from export"
@@ -104,9 +128,10 @@ pub fn view(app: &App, review: &Review) -> Element<'static, Message> {
             idle,
         ));
     }
-    let mut body = column![].spacing(6);
-    if review.is_song() || (included && custom && app.cover.is_none()) {
-        body = body.push(text(status).size(12).color(p.colors.text_muted));
-    }
-    body.push(controls.wrap().vertical_spacing(6)).into()
+    column![
+        text(status).size(12).color(p.colors.text_muted),
+        controls.wrap().vertical_spacing(6),
+    ]
+    .spacing(8)
+    .into()
 }

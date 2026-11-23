@@ -99,6 +99,7 @@ impl App {
             self.raster_refresh_pending = false;
             tasks.push(self.display_scale_changed(self.display_scale));
         }
+        tasks.push(self.sync_album_scan());
         if self.screenshot.is_some() && self.started.elapsed() > Duration::from_secs(2) {
             tasks.push(
                 window::oldest()
@@ -106,11 +107,7 @@ impl App {
                     .map(Message::Screenshot),
             );
         }
-        if tasks.is_empty() {
-            Task::none()
-        } else {
-            Task::batch(tasks)
-        }
+        Task::batch(tasks)
     }
 
     pub(super) fn position_crop(&mut self) {

@@ -1,186 +1,206 @@
 use super::focus_button;
 use crate::app::{App, Message, Panel};
 use crate::style;
-use audio_engine::AudioFormat;
+use audio_engine::{AlbumTrackState, AudioFormat, OutputKind};
 use iced::widget::{button, column, container, row, scrollable, space, text, text_input};
 use iced::{Alignment, Element, Length};
 use jacket_core::PathRule;
 use std::path::Path;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Placement {
-    Inspector,
-    Compact,
-    Preview,
-}
-
-pub fn save_controls(app: &App, placement: Placement) -> Element<'_, Message> {
+pub fn save_bar(app: &App, compact: bool) -> Element<'_, Message> {
+    let Some(review) = &app.review else {
+        return space().into();
+    };
     let p = app.presentation();
     let album = app.is_album_folder();
+    let organized = app.uses_music_folder();
+    let configured = organized && app.music_folder.is_some();
+    let preview = app.panel == Panel::Preview;
+    let kind = review.preferences.output_kind;
+    let format = review.preferences.format;
     let path = if album {
         app.music_album_path()
+            .map(|path| path.display().to_string())
     } else {
-        app.music_file_path()
+        app.music_file_path().map(|stem| full_path(&stem, format))
     };
-    let configured = app.music_folder.is_some();
-    let compact = placement == Placement::Compact;
-    let change = focus_button::wrap(
-        "edit-music-folder",
-        button(
-            text(if configured {
-                "Change…"
-            } else {
-                "Set up a music folder…"
-            })
-            .size(12),
-        )
-        .padding([6, 8])
-        .style(p.quiet()),
-        (!app.busy()).then_some(Message::OpenMusicFolder),
-        p.colors.accent,
-    );
-    let mut content = column![].spacing(8).width(Length::Fill);
-    if let Some(stem) = &path {
-        let format = app
-            .review
-            .as_ref()
-            .expect("music path belongs to a review")
-            .preferences
-            .format;
-        content = content.push(
-            column![
-                row![
-                    text(if album {
-                        "Album folder"
+    let scan = app.album_folder_preview();
+    let counts = scan.and_then(|result| result.as_ref().ok()).map(|scan| {
+        let kept = scan.kept();
+        let renamed = scan
+            .tracks
+            .iter()
+            .filter(|track| track.state == AlbumTrackState::AddCopy)
+            .count();
+        (kept, scan.tracks.len() - kept, renamed)
+    });
+    let choice = |id, label: String, message, enabled: bool, primary| {
+        focus_button::wrap(
+            id,
+            button(text(label).size(13))
+                .padding([8, 11])
+                .style(move |theme, status| {
+                    if primary {
+                        p.primary()(theme, status)
                     } else {
-                        "Save to music folder"
-                    })
-                    .size(12)
-                    .font(style::semibold()),
-                    space::horizontal(),
-                    change
-                ]
-                .spacing(6)
-                .align_y(Alignment::Center),
-                readable_path(
-                    if album {
-                        stem.display().to_string()
-                    } else {
-                        full_path(stem, format)
-                    },
-                    if compact { 50 } else { 72 },
-                    app,
-                ),
-            ]
-            .spacing(4),
-        );
-        if !album && !matches!(format, AudioFormat::Mp3) {
-            content = content.push(
-                text(match format {
-                    AudioFormat::Compatible if placement == Placement::Inspector => {
-                        "Extension confirmed after download"
+                        p.secondary()(theme, status)
                     }
-                    AudioFormat::Compatible => "M4A or MP3 · Extension confirmed after download",
-                    _ => "Extension follows the source codec",
-                })
-                .size(11)
-                .color(p.colors.text_muted),
+                }),
+            enabled.then_some(message),
+            p.colors.accent,
+        )
+    };
+    let dest_label = if let Some(path) = path {
+        path
+    } else if organized {
+        if configured {
+            "Music folder"
+        } else {
+            "Choose where to save"
+        }
+        .to_owned()
+    } else {
+        format!(
+            "{} · {}",
+            track_count(review.selected.len()),
+            match kind {
+                OutputKind::Zip => "ZIP archive",
+                _ => "Folder",
+            }
+        )
+    };
+    let mut destination = column![readable_path(dest_label, 34, app)]
+        .spacing(4)
+        .width(Length::Fill);
+    if album && configured {
+        if let Some((kept, add, renamed)) = counts {
+            let mut summary = format!("{kept} already there · {add} to add");
+            if renamed > 0 {
+                summary.push_str(&format!(" · {renamed} with new filenames"));
+            }
+            destination = destination.push(text(summary).size(11).color(p.colors.text_muted));
+        } else if scan.is_none() && !app.example && !review.selected.is_empty() {
+            destination = destination.push(
+                text("Checking album folder…")
+                    .size(11)
+                    .color(p.colors.text_muted),
             );
+        }
+    } else if configured && kind == OutputKind::File && !matches!(format, AudioFormat::Mp3) {
+        let codec = match format {
+            AudioFormat::Compatible => "M4A or MP3 · Extension confirmed after download",
+            _ => "Extension follows the source codec",
+        };
+        destination = destination.push(text(codec).size(11).color(p.colors.text_muted));
+    }
+    let mut location = row![destination].spacing(8).align_y(Alignment::Center);
+    if configured {
+        location = location.push(focus_button::wrap(
+            "edit-music-folder",
+            button(text("Change…").size(12))
+                .padding([6, 8])
+                .style(p.quiet()),
+            (!app.busy()).then_some(Message::PickMusicFolder),
+            p.colors.accent,
+        ));
+    }
+    let label = if organized && !configured {
+        "Choose folder…".to_owned()
+    } else if album {
+        match counts {
+            Some((_, 1, _)) => "Add 1 track".into(),
+            Some((_, count, _)) if count > 1 => format!("Add {count} tracks"),
+            _ => "Save album".into(),
         }
     } else {
-        content = content.push(change);
-        if !album
-            && app
-                .review
-                .as_ref()
-                .is_some_and(|review| review.selected.len() != 1)
-        {
-            content = content.push(
-                text("Select one track to save an audio file.")
-                    .size(12)
-                    .color(p.colors.warning),
-            );
+        match kind {
+            OutputKind::File => "Save",
+            OutputKind::Folder => "Save folder…",
+            OutputKind::Zip => "Save ZIP…",
         }
-    }
-
-    let save_as = focus_button::wrap(
-        "save-as",
-        button(text("Save As…").size(13))
-            .width(if !configured && placement == Placement::Inspector {
-                Length::Fill
-            } else {
-                Length::Shrink
-            })
-            .padding([9, 12])
-            .style(move |theme, status| {
-                if configured {
-                    p.secondary()(theme, status)
-                } else {
-                    p.primary()(theme, status)
-                }
-            }),
-        app.can_export().then_some(Message::SaveAs),
-        p.colors.accent,
-    );
-    let navigation = match placement {
-        Placement::Compact => (
-            "Export options",
+        .into()
+    };
+    let mut actions = row![if preview {
+        choice(
+            "back-to-review",
+            "Back to review".into(),
+            Message::ClosePanel,
+            !app.dialog_open,
+            false,
+        )
+    } else {
+        choice(
+            "export-options",
+            "Options…".into(),
             Message::OpenPanel(Panel::Options),
             !app.busy(),
-        ),
-        Placement::Inspector => ("Preview details", Message::Preview, app.can_preview()),
-        Placement::Preview => ("Back to review", Message::ClosePanel, !app.dialog_open),
-    };
-    let navigate = focus_button::wrap(
-        "file-save-navigation",
-        button(text(navigation.0).size(12))
-            .padding([7, 7])
-            .style(p.quiet()),
-        navigation.2.then_some(navigation.1),
-        p.colors.accent,
-    );
-    let mut actions = row![].spacing(8).align_y(Alignment::Center);
-    if !(album && placement == Placement::Inspector) {
-        actions = actions.push(navigate);
+            false,
+        )
+    }]
+    .spacing(7)
+    .align_y(Alignment::Center);
+    if album && !preview && configured {
+        actions = actions.push(choice(
+            "preview-files",
+            "Files…".into(),
+            Message::Preview,
+            app.can_preview(),
+            false,
+        ));
     }
-    actions = actions.push(space::horizontal());
-    if !configured && placement == Placement::Inspector {
-        content = content.push(save_as);
-    } else {
-        actions = actions.push(save_as);
+    if compact || preview {
+        actions = actions.push(space::horizontal());
     }
-    if configured {
-        let ready = app.can_export()
-            && (!album
-                || placement != Placement::Preview
-                || matches!(app.album_preview, Some(Ok(_))));
-        let save = focus_button::wrap(
-            "save-organized-output",
-            button(
-                text(if album && placement != Placement::Preview {
-                    "Save…"
-                } else {
-                    "Save"
-                })
-                .size(13),
-            )
-            .width(if placement == Placement::Inspector {
-                Length::Fill
-            } else {
-                Length::Shrink
-            })
-            .padding([9, 12])
-            .style(p.primary()),
-            ready.then_some(Message::Save),
-            p.colors.accent,
+    if organized {
+        actions = actions.push(choice(
+            "save-as",
+            "Save As…".into(),
+            Message::SaveAs,
+            app.can_export(),
+            false,
+        ));
+    }
+    actions = actions.push(choice(
+        "save-output",
+        label,
+        Message::Save,
+        app.can_export() && (!album || !configured || counts.is_some()),
+        true,
+    ));
+    let mut bar = column![].spacing(7).width(Length::Fill);
+    if let Some(Err(error)) = scan.filter(|_| !preview) {
+        bar = bar.push(
+            row![
+                text(error)
+                    .size(12)
+                    .color(p.colors.warning)
+                    .width(Length::Fill),
+                choice(
+                    "check-album-folder",
+                    "Check again".into(),
+                    Message::ScanAlbumFolder,
+                    !app.busy(),
+                    false
+                ),
+            ]
+            .spacing(7)
+            .align_y(Alignment::Center),
         );
-        if placement == Placement::Inspector {
-            content = content.push(save);
-        } else {
-            actions = actions.push(save);
-        }
     }
-    content.push(actions).into()
+    if compact || preview {
+        bar.push(location).push(actions)
+    } else {
+        bar.push(
+            row![location.width(Length::Fill), actions]
+                .spacing(16)
+                .align_y(Alignment::Center),
+        )
+    }
+    .into()
+}
+
+fn track_count(count: usize) -> String {
+    format!("{count} {}", if count == 1 { "track" } else { "tracks" })
 }
 
 pub fn settings(app: &App) -> Element<'_, Message> {
@@ -235,27 +255,33 @@ pub fn editor(app: &App) -> Element<'_, Message> {
             space::horizontal(),
             focus_button::wrap(
                 "music-folder-root",
-                button(text(if root.is_some() { "Change folder…" } else { "Choose folder…" }).size(13))
-                    .padding([8, 12])
-                    .style(p.secondary()),
+                button(
+                    text(if root.is_some() {
+                        "Change folder…"
+                    } else {
+                        "Choose folder…"
+                    })
+                    .size(13)
+                )
+                .padding([8, 12])
+                .style(p.secondary()),
                 (!app.busy()).then_some(Message::ChooseMusicRoot),
                 p.colors.accent,
             ),
-        ].spacing(12).align_y(Alignment::Center),
-        text(root.map_or_else(|| "Choose where Jacket should save organized audio files.".into(), |path| path.display().to_string()))
-            .size(13).color(p.colors.text_muted).wrapping(iced::widget::text::Wrapping::WordOrGlyph),
-        text("Path rule").size(13).font(style::semibold()),
-        text_input("{{album_artist}}/{{album}}/{{song}}", &editor.rule)
-            .id("music-folder-rule")
-            .on_input_maybe((!app.busy()).then_some(Message::MusicRule))
-            .on_submit_maybe((!app.busy() && root.is_some() && parsed.is_ok()).then_some(Message::ApplyMusicFolder))
-            .style(p.input())
-            .padding([9, 11]),
-        text("Fields  {{artist}}  {{album_artist}}  {{album}}  {{song}}")
-            .size(12).color(p.colors.text_muted),
-        text("A blank album skips its folder. A blank album artist uses the track artist. Jacket adds the file extension.")
-            .size(12).color(p.colors.text_muted),
-    ].spacing(14).width(Length::Fill);
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center),
+        text(root.map_or_else(
+            || "Choose where Jacket should save organized audio files.".into(),
+            |path| path.display().to_string()
+        ))
+        .size(13)
+        .color(p.colors.text_muted)
+        .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+    ]
+    .spacing(14)
+    .width(Length::Fill);
+    let valid_rule = parsed.is_ok();
     match parsed {
         Ok(rule) => {
             let metadata = app.music_folder_sample();
@@ -283,6 +309,39 @@ pub fn editor(app: &App) -> Element<'_, Message> {
             content = content.push(text(error).size(12).color(p.colors.danger));
         }
         Err(_) => (),
+    }
+    let customize = focus_button::wrap(
+        "customize-path",
+        button(
+            text(if editor.customize {
+                "Hide path rule"
+            } else {
+                "Customize path…"
+            })
+            .size(12),
+        )
+        .padding([6, 8])
+        .style(p.quiet()),
+        (!app.busy()).then_some(Message::TogglePathRule),
+        p.colors.accent,
+    );
+    if editor.customize {
+        content = content.push(column![
+            row![text("Path rule").size(13).font(style::semibold()), space::horizontal(), customize]
+                .align_y(Alignment::Center),
+            text_input("{{album_artist}}/{{album}}/{{song}}", &editor.rule)
+                .id("music-folder-rule")
+                .on_input_maybe((!app.busy()).then_some(Message::MusicRule))
+                .on_submit_maybe((!app.busy() && root.is_some() && valid_rule).then_some(Message::ApplyMusicFolder))
+                .style(p.input())
+                .padding([9, 11]),
+            text("Fields  {{artist}}  {{album_artist}}  {{album}}  {{song}}")
+                .size(12).color(p.colors.text_muted),
+            text("A blank album skips its folder. A blank album artist uses the track artist. Jacket adds the file extension.")
+                .size(12).color(p.colors.text_muted),
+        ].spacing(8));
+    } else {
+        content = content.push(customize);
     }
     content.into()
 }

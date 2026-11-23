@@ -132,7 +132,7 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
     }
     let organized = app.is_album_folder() && app.music_folder.is_some() && !app.example;
     let album = if organized {
-        match &app.album_preview {
+        match app.album_folder_preview() {
             Some(Ok(album)) => Some(album),
             Some(Err(error)) => {
                 return body

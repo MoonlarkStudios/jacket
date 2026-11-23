@@ -80,6 +80,7 @@ fn view_at(app: &App, size: iced::Size) -> Element<'_, Message> {
                 Panel::MusicFolder => "Music folder",
                 Panel::Options => "Export options",
                 Panel::Preview => "Preview export",
+                Panel::Cover => "Edit cover",
                 Panel::Editor => {
                     if app.editor.as_ref().is_some_and(|editor| {
                         matches!(editor.kind, crate::editor::Kind::OutputName)
@@ -138,7 +139,7 @@ fn view_at(app: &App, size: iced::Size) -> Element<'_, Message> {
                 }
                 Panel::Replace | Panel::Discard | Panel::Close => 280.0,
                 Panel::Crop => 640.0,
-                Panel::MusicFolder => 480.0,
+                Panel::Cover | Panel::Options | Panel::MusicFolder => 480.0,
                 _ => 780.0,
             };
             let modal = container(modal)
@@ -170,8 +171,9 @@ fn panel_body(app: &App, compact: bool) -> Element<'_, Message> {
         Panel::Appearance => preferences::appearance(app),
         Panel::Settings => preferences::settings(app),
         Panel::MusicFolder => destination::editor(app),
-        Panel::Options => options::view(app, false),
+        Panel::Options => options::view(app),
         Panel::Preview => preview::view(app, compact),
+        Panel::Cover => super::cover_controls::view(app),
         Panel::Editor => {
             if let (Some(editor), Some(review)) = (&app.editor, &app.review) {
                 editor.view(review, p)
@@ -488,28 +490,11 @@ fn actions(app: &App) -> Option<Element<'_, Message>> {
     if app.panel == Panel::MusicFolder {
         return Some(destination::editor_actions(app));
     }
-    if app.panel == Panel::Preview
-        && (app.is_album_folder()
-            || app
-                .preview_plan()
-                .is_some_and(|plan| plan.output_kind == audio_engine::OutputKind::File))
-    {
-        return Some(destination::save_controls(
-            app,
-            destination::Placement::Preview,
-        ));
+    if app.panel == Panel::Preview {
+        return Some(destination::save_bar(app, true));
     }
     let p = app.presentation();
     let (label, message, enabled) = match app.panel {
-        Panel::Preview => (
-            match app.preview_plan().map(|plan| plan.output_kind) {
-                Some(audio_engine::OutputKind::Zip) => "Save ZIP…",
-                Some(audio_engine::OutputKind::Folder) => "Save folder…",
-                _ => "Save audio file…",
-            },
-            Message::Save,
-            app.can_export(),
-        ),
         Panel::Editor => (
             "Apply changes",
             Message::Editor(crate::editor::Action::Apply),
@@ -521,19 +506,20 @@ fn actions(app: &App) -> Option<Element<'_, Message>> {
             !app.busy() && !app.example,
         ),
         Panel::Options => ("Preview files", Message::Preview, app.can_preview()),
+        Panel::Cover => ("Done", Message::ClosePanel, !app.busy()),
         Panel::Settings | Panel::Appearance | Panel::SourceNotes => {
             ("Done", Message::ClosePanel, true)
         }
         _ => return None,
     };
-    let back = if matches!(app.panel, Panel::Preview | Panel::Options) {
+    let back = if app.panel == Panel::Options {
         "Back to review"
     } else {
         "Cancel"
     };
     let back: Element<'_, Message> = if matches!(
         app.panel,
-        Panel::Settings | Panel::Appearance | Panel::SourceNotes
+        Panel::Cover | Panel::Settings | Panel::Appearance | Panel::SourceNotes
     ) {
         space().into()
     } else {

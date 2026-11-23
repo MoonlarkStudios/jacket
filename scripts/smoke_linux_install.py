@@ -165,7 +165,7 @@ def verify_export(destination, expected_tags=MEDIA_TAGS):
     print(f'Verified written file, tags and embedded artwork: {destination}', flush=True)
 
 
-def prepare_album_review(review, started_review):
+def prepare_collection_review(review, started_review, *, album):
     saved = json.loads(started_review)
     draft = saved['draft']
     inspection = draft['inspection']
@@ -174,14 +174,16 @@ def prepare_album_review(review, started_review):
     second_tags = dict(first['metadata'], title='Second light', trackNumber=2)
     second = dict(first, id='fixture0002', sourceUrl=second_url,
                   sourceMetadata=second_tags, metadata=second_tags)
-    album_title = MEDIA_TAGS['album']
-    album_url = 'https://music.youtube.com/playlist?list=OLAK5uy_fixture'
-    session = 'offline-album-review'
+    mode = 'album' if album else 'collection'
+    title = MEDIA_TAGS['album'] if album else 'Evening rotation'
+    url = ('https://music.youtube.com/playlist?list=OLAK5uy_fixture' if album
+           else 'https://www.youtube.com/playlist?list=PLSample123456')
+    session = f'offline-{mode}-review'
     saved['sessionId'] = session
-    draft.update(sessionId=session, url=album_url, selected=[0, 1])
-    inspection.update(title=album_title, sourceUrl=album_url, suggestedMode='album',
+    draft.update(sessionId=session, url=url, selected=[0, 1])
+    inspection.update(title=title, sourceUrl=url, suggestedMode=mode,
                       tracks=[first, second])
-    draft['preferences'].update(title=album_title, mode='album', albumTitle=album_title,
+    draft['preferences'].update(title=title, mode=mode, albumTitle=MEDIA_TAGS['album'],
                                 albumArtist=MEDIA_TAGS['artist'], outputKind='folder')
     write_json(review, saved)
 
@@ -200,7 +202,7 @@ def album_is_cancelled():
 
 
 def album_recovery(evidence, log, environment, recording, album, review, started_review):
-    prepare_album_review(review, started_review)
+    prepare_collection_review(review, started_review, album=True)
     first = album / 'First light.mp3'
     second = album / 'Second light.mp3'
     first_hash = sha256(first.read_bytes()).hexdigest()
@@ -210,10 +212,8 @@ def album_recovery(evidence, log, environment, recording, album, review, started
     with process([JACKET, '--compact'], log, failure_image=failure, env=environment) as app:
         jacket = window('Jacket', app)
         time.sleep(1)
+        run('import', '-window', jacket, evidence / 'album-review.png')
         key(jacket, 'ctrl+s')
-        time.sleep(0.6)
-        run('import', '-window', jacket, evidence / 'album-preview.png')
-        key(jacket, 'Return')
         wait_for('the missing album track to start', gate.with_suffix('.started').is_file)
         key(jacket, 'Escape')
         wait_for('the cancelled album checkpoint', album_is_cancelled)
@@ -242,6 +242,29 @@ def album_recovery(evidence, log, environment, recording, album, review, started
         assert app.wait(timeout=15) == 0
 
 
+def playlist_export(evidence, log, environment, recording, review, started_review):
+    prepare_collection_review(review, started_review, album=False)
+    chosen = recording.parent / 'playlists'
+    chosen.mkdir()
+    with process([JACKET, '--compact'], log, failure_image=evidence / 'playlist-failure.png', env=environment) as app:
+        jacket = window('Jacket', app)
+        time.sleep(1)
+        key(jacket, 'ctrl+s')
+        choose(window('Choose a parent music folder', app), chosen)
+        output = chosen / 'Evening rotation'
+        manifest = output / 'manifest.json'
+        wait_for('the playlist manifest', manifest.is_file)
+        tracks = json.loads(manifest.read_text())['tracks']
+        assert len(tracks) == 2
+        for track, title in zip(tracks, ('First light', 'Second light'), strict=True):
+            verify_export(output / track['relativePath'], dict(MEDIA_TAGS, title=title))
+        wait_for('playlist export completion', lambda: json.loads(review.read_text())['draft'] is None)
+        time.sleep(0.7)
+        run('import', '-window', jacket, evidence / 'playlist-saved.png')
+        run('wmctrl', '-ic', hex(int(jacket)))
+        assert app.wait(timeout=15) == 0
+
+
 def smoke(evidence):
     recording, original, selected, config, review = prepare(Path.home())
     environment = dict(os.environ, ICED_BACKEND='tiny-skia', GDK_BACKEND='x11',
@@ -254,20 +277,14 @@ def smoke(evidence):
         with process([JACKET, '--compact'], log, failure_image=evidence / 'failure.png', env=environment) as app:
             jacket = window('Jacket', app)
             time.sleep(1)
-            click(jacket, 552, 484)
-            time.sleep(0.4)
-            click(jacket, 489, 155)
+            click(jacket, 552, 507)
             choose(window('Choose your music folder', app), selected)
-            time.sleep(0.6)
-            click(jacket, 514, 506)
             wait_for('saved music folder', lambda: json.loads(config.read_text())['root'] == str(selected))
             key(jacket, 'ctrl+shift+s')
             key(window('Save audio file', app), 'Escape')
             time.sleep(0.6)
             assert not list(selected.iterdir()) and not list(original.iterdir())
             key(jacket, 'ctrl+s')
-            time.sleep(0.4)
-            key(jacket, 'Return')
             destination = selected / 'The Paper Trails/Room to breathe/First light.mp3'
             verify_export(destination)
             wait_for('organized export completion', lambda: json.loads(review.read_text())['draft'] is None)
@@ -279,6 +296,7 @@ def smoke(evidence):
             assert app.wait(timeout=15) == 0
         album_recovery(evidence, log, environment, recording, destination.parent, review,
                        started_review)
+        playlist_export(evidence, log, environment, recording, review, started_review)
         review.write_bytes(started_review)
         with process([JACKET, '--compact'], log, failure_image=evidence / 'failure.png', env=environment) as app:
             jacket = window('Jacket', app)

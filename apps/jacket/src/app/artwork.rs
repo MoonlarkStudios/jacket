@@ -15,6 +15,7 @@ impl App {
         self.crop_preview_size = size;
         self.crop_source = Some((asset, path));
         self.crop_dragging = false;
+        self.crop_return_to_cover = self.panel == Panel::Cover;
         self.panel = Panel::Crop;
         self.error = None;
         self.load_owned_artwork()
@@ -62,9 +63,13 @@ impl App {
         self.preview_cover = None;
         self.preview_cover_error = None;
         self.error = None;
+        let focus = if self.panel == Panel::Cover {
+            "review-choose-cover"
+        } else {
+            "edit-cover"
+        };
         Task::batch([
-            self.autosave()
-                .chain(iced::widget::operation::focus("review-choose-cover")),
+            self.autosave().chain(iced::widget::operation::focus(focus)),
             self.cover_preview(),
         ])
     }

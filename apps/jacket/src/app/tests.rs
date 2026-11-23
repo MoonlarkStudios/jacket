@@ -731,7 +731,7 @@ fn save_shortcut_applies_the_open_metadata_form_without_previewing_stale_tags() 
         Field::Title,
         "Corrected title".into(),
     )));
-    let _ = app.update(Message::Preview);
+    let _ = app.update(Message::Save);
     assert_eq!(app.panel, Panel::Workspace);
     assert!(app.editor.is_none());
     assert!(
@@ -759,7 +759,7 @@ fn invalid_metadata_stays_open_and_preserves_the_review_when_the_save_shortcut_i
         serde_json::to_value(app.review.as_ref().expect("review").draft()).expect("snapshot");
     let _ = app.update(Message::OpenEditor(Kind::Track(0)));
     let _ = app.update(Message::Editor(Action::Input(Field::Track, "1.5".into())));
-    let _ = app.update(Message::Preview);
+    let _ = app.update(Message::Save);
     assert_eq!(app.panel, Panel::CollectionEditor);
     assert!(app.editor.as_ref().expect("form preserved").error.is_some());
     assert_eq!(
@@ -790,7 +790,7 @@ fn navigation_shortcuts_keep_an_unsaved_editor_and_theme_changes_keep_its_values
     );
     let _ = app.update(Message::ThemePreset(crate::theme::Preset::CatppuccinMocha));
     assert_eq!(app.panel, Panel::CollectionEditor);
-    let _ = app.update(Message::Preview);
+    let _ = app.update(Message::Save);
     assert_eq!(
         app.review.as_ref().expect("review").inspection.tracks[0]
             .metadata
@@ -806,12 +806,14 @@ fn preview_and_source_shortcuts_do_not_leave_other_modal_contexts() {
     for panel in [
         Panel::Settings,
         Panel::Appearance,
+        Panel::Cover,
         Panel::Crop,
         Panel::Discard,
         Panel::Close,
     ] {
         app.panel = panel;
         assert_eq!(app.update(Message::Preview).units(), 0);
+        assert_eq!(app.update(Message::Save).units(), 0);
         assert_eq!(app.panel, panel);
         assert!(app.preview.is_none());
         assert_eq!(app.update(Message::FocusSource).units(), 0);
@@ -844,11 +846,7 @@ fn cancelling_a_destination_keeps_the_captured_preview_ready_to_retry() {
         app.dialog_open = true;
 
         let actions = app.update(Message::Destination(Ok(None))).units();
-        assert_eq!(
-            actions > 0,
-            matches!(kind, OutputKind::File | OutputKind::Folder),
-            "song and album pickers return focus to Save As"
-        );
+        assert!(actions > 0, "cancellation restores focus to a save action");
 
         assert!(
             !app.dialog_open,
@@ -866,8 +864,8 @@ fn cancelling_a_destination_keeps_the_captured_preview_ready_to_retry() {
         assert_eq!(app.review.as_ref().expect("review").identity(), identity);
         assert_eq!(app.save_pending, 0);
         assert!(
-            app.update(Message::Save).units() > 0,
-            "Save can reopen the destination dialog"
+            app.update(Message::SaveAs).units() > 0,
+            "Save As can reopen the destination dialog"
         );
         assert!(app.dialog_open);
         assert!(app.notice.is_some());
@@ -876,7 +874,7 @@ fn cancelling_a_destination_keeps_the_captured_preview_ready_to_retry() {
         assert!(app.notice.is_none());
         assert!(app.pending_plan.is_some());
         assert!(!app.busy());
-        assert!(app.update(Message::Save).units() > 0);
+        assert!(app.update(Message::SaveAs).units() > 0);
         assert!(app.error.is_none());
     }
 }
@@ -968,16 +966,15 @@ fn songs_and_album_folders_share_the_library_path_and_save_as_remains_available(
     app.review = Some(Review::new(inspection.clone(), AudioFormat::Mp3));
     let album = app.music_album_path().unwrap();
     assert_eq!(album, root.join("Various Artists/Compilation"));
-    let _ = app.update(Message::Save);
-    assert_eq!(app.panel, Panel::Preview);
-    assert!(app.pending_plan.is_some());
+    let _ = app.update(Message::Tick);
+    assert_eq!(app.panel, Panel::Workspace);
+    assert!(app.album_scan_key.is_some());
     assert!(!app.dialog_open);
     let _ = app.update(Message::SaveAs);
     assert!(app.dialog_open);
     let _ = app.update(Message::Destination(Ok(None)));
-    assert_eq!(app.panel, Panel::Preview);
+    assert_eq!(app.panel, Panel::Workspace);
     assert_eq!(app.music_album_path().unwrap(), album);
-    let _ = app.update(Message::ClosePanel);
     inspection.tracks.truncate(1);
     inspection.suggested_mode = audio_engine::CollectionMode::Collection;
     app.review = Some(Review::new(inspection, AudioFormat::Mp3));
@@ -985,6 +982,101 @@ fn songs_and_album_folders_share_the_library_path_and_save_as_remains_available(
         app.music_file_path().unwrap().parent(),
         Some(album.as_path())
     );
+}
+
+#[test]
+fn first_save_chooses_a_library_and_returns_to_review_before_exporting() {
+    let (root, desktop) = desktop();
+    let mut app = app(desktop);
+    app.review = Some(song_review());
+    assert!(app.update(Message::Save).units() > 0);
+    assert!(app.dialog_open);
+    assert_eq!(app.panel, Panel::Workspace);
+    let _ = app.update(Message::MusicRootPicked(Ok(None)));
+    assert!(app.music_folder.is_none());
+    assert!(app.music_folder_editor.is_none());
+
+    let _ = app.update(Message::Save);
+    let path = root.path().to_owned();
+    assert!(
+        app.update(Message::MusicRootPicked(Ok(Some(path.clone()))))
+            .units()
+            > 0
+    );
+    let _ = app.update(Message::MusicFolderSaved(Ok(Some(
+        super::destination::MusicFolder {
+            root: path.clone(),
+            rule: jacket_core::PathRule::default(),
+        },
+    ))));
+    assert_eq!(app.panel, Panel::Workspace);
+    assert!(app.music_file_path().unwrap().starts_with(path));
+    assert!(app.pending_plan.is_none());
+    assert!(app.job.is_none());
+    assert!(!app.busy());
+    assert!(app.update(Message::Save).units() > 0);
+    assert!(
+        app.dialog_open,
+        "the second save goes directly to export preparation"
+    );
+}
+
+#[test]
+fn a_playlist_saves_directly_from_review_and_can_reopen_its_picker() {
+    use audio_engine::{CollectionMode, OutputKind};
+    for (kind, tag_mode) in [
+        (OutputKind::Folder, CollectionMode::Collection),
+        (OutputKind::Folder, CollectionMode::Album),
+        (OutputKind::Zip, CollectionMode::Collection),
+    ] {
+        let (_root, desktop) = desktop();
+        let mut app = app(desktop);
+        let review = app.review.as_mut().unwrap();
+        review.inspection.suggested_mode = CollectionMode::Collection;
+        review.preferences.mode = tag_mode;
+        review.preferences.output_kind = kind;
+        assert!(app.update(Message::Save).units() > 0);
+        assert_eq!(app.panel, Panel::Workspace);
+        assert_eq!(app.pending_plan.as_ref().unwrap().output_kind, kind);
+        assert!(app.dialog_open && app.preview.is_none());
+        let _ = app.update(Message::Destination(Ok(None)));
+        assert!(app.pending_plan.is_none());
+        assert!(app.update(Message::Save).units() > 0);
+    }
+}
+
+#[test]
+fn album_scan_cannot_enable_save_for_a_changed_selection_or_destination() {
+    use super::destination::MusicFolder;
+    let (root, desktop) = desktop();
+    let mut app = app(desktop);
+    app.music_folder = Some(MusicFolder {
+        root: root.path().to_owned(),
+        rule: jacket_core::PathRule::default(),
+    });
+    let _ = app.update(Message::Tick);
+    let first = app.album_scan;
+    let current = |app: &App| app.album_folder_preview().is_some();
+    let scan = || Ok(audio_engine::AlbumPreview { tracks: Vec::new() });
+    let _ = app.update(Message::AlbumScanned(first, scan()));
+    assert!(current(&app));
+
+    let review = app.review.as_mut().unwrap();
+    review.selected.remove(&0);
+    review.changed().unwrap();
+    assert!(!current(&app));
+    let _ = app.update(Message::Save);
+    assert!(!app.dialog_open);
+    assert_ne!(first, app.album_scan);
+    let _ = app.update(Message::AlbumScanned(first, scan()));
+    assert!(!current(&app));
+    let _ = app.update(Message::AlbumScanned(app.album_scan, scan()));
+    assert!(current(&app));
+
+    app.music_folder.as_mut().unwrap().root = root.path().join("replacement");
+    assert!(!current(&app));
+    let _ = app.update(Message::Save);
+    assert!(!app.dialog_open);
 }
 
 #[test]
@@ -1168,13 +1260,18 @@ fn closing_a_staged_crop_preserves_the_chosen_cover_and_review_without_saving() 
     let original =
         serde_json::to_value(app.review.as_ref().expect("review").draft()).expect("snapshot");
     let (staged, staged_file) = example::cover().expect("staged cover");
+    app.track_scroll = 140.0;
     app.crop_source = Some((staged, staged_file.path().to_path_buf()));
     app.crop_dragging = true;
+    app.crop_return_to_cover = true;
     app.panel = Panel::Crop;
 
     let _ = app.update(Message::ClosePanel);
 
+    assert_eq!(app.panel, Panel::Cover);
+    let _ = app.update(Message::ClosePanel);
     assert_eq!(app.panel, Panel::Workspace);
+    assert_eq!(app.track_scroll, 140.0);
     assert!(app.crop_source.is_none());
     assert!(!app.crop_dragging);
     let (chosen, path) = app.cover.as_ref().expect("original cover retained");
