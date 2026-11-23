@@ -7,9 +7,10 @@ pub mod browser_sessions;
 mod desktop;
 pub mod downloader_updates;
 mod export_completion;
+pub mod musicbrainz;
 pub mod recovery;
 pub mod reviews;
 mod worker;
 
 pub use desktop::{Desktop, SessionAction};
-pub use worker::{Event, Job};
+pub use worker::{CatalogEvent, Event, Job};

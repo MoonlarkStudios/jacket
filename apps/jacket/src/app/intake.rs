@@ -102,6 +102,7 @@ impl App {
             self.notice = Some("Lookup cancelled.".into());
             return self.focus_after_lookup_stop();
         }
+        self.catalog.visible = false;
         // Keep an explicit song/playlist choice available beside the link.
         if !SourceLink::parse(&self.url).is_ok_and(|link| link.has_playlist_context()) {
             self.url = inspection.source_url.clone();

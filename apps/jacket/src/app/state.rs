@@ -1,3 +1,4 @@
+use super::catalog::{Catalog as AlbumCatalog, CatalogAction};
 use super::destination::{ExportDestination, MusicFolder, MusicFolderEditor};
 use super::intake::{Intake, IntakeCoverRequest};
 use super::receipt::{Receipt, Recording};
@@ -79,6 +80,8 @@ pub enum Message {
     Quit,
     RetryStartup,
     Booted(Result<Box<Boot>, String>),
+    Catalog(CatalogAction),
+    CatalogCover(String, Result<crate::artwork::Raster, String>),
     Url(String),
     Pasted(String),
     Intent(SourceIntent),
@@ -223,6 +226,7 @@ pub struct TrackPositionEdit {
 pub struct App {
     pub desktop: Option<Desktop>,
     pub review: Option<Review>,
+    pub catalog: AlbumCatalog,
     pub job: Option<Job>,
     pub url: String,
     pub intent: SourceIntent,

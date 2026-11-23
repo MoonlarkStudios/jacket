@@ -74,6 +74,7 @@ impl App {
         let mut app = Self {
             desktop: None,
             review: None,
+            catalog: super::catalog::Catalog::new(!isolated),
             job: None,
             url: String::new(),
             intent: SourceIntent::Song,
@@ -202,6 +203,12 @@ impl App {
                         }
                         Err(error) => app.error = Some(error.to_string()),
                     },
+                    Some(
+                        scenario @ ("catalog" | "catalog-results" | "catalog-editions"
+                        | "catalog-album" | "catalog-match" | "catalog-variant"),
+                    ) => {
+                        app.catalog_snapshot(scenario);
+                    }
                     Some("settings") => app.panel = Panel::Settings,
                     Some("appearance") => app.panel = Panel::Appearance,
                     Some("options") => app.panel = Panel::Options,

@@ -30,6 +30,7 @@ impl App {
                         }
                     }
                 }
+                Event::Catalog(event) => tasks.push(self.catalog_finished(Ok(event))),
                 Event::Progress(progress) => self.progress = Some(progress),
                 Event::Inspected(inspection) => {
                     tasks.push(self.finish_inspection(inspection));
@@ -38,6 +39,10 @@ impl App {
                     tasks.push(self.finish_export(result));
                 }
                 Event::Failed(error) => {
+                    if self.catalog.pending.is_some() {
+                        tasks.push(self.catalog_finished(Err(error)));
+                        continue;
+                    }
                     if let Some(intake) = self.intake.take() {
                         if intake.cancelling {
                             self.notice = Some("Lookup cancelled.".into());
@@ -168,6 +173,7 @@ impl App {
         match SourceLink::parse(&self.url) {
             Ok(link) => {
                 self.source_error = None;
+                self.catalog.visible = false;
                 self.admit(desktop.inspect(link.target(self.intent).to_owned(), self.auth.clone()));
                 if let Some(job) = &self.job {
                     self.intake = Some(super::intake::Intake::new(

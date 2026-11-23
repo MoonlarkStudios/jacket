@@ -2,14 +2,25 @@
 use crate::auth_session;
 use crate::browser_sessions::AccessCheck;
 use crate::downloader_updates::Status;
+use crate::musicbrainz::{Edition, Release, SearchResults};
 use audio_engine::{Cancellation, ExportResult, Inspection, InspectionUpdate, ProgressEvent};
+use jacket_core::AlbumMatch;
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 #[derive(Clone, Debug)]
+pub enum CatalogEvent {
+    Searched(SearchResults),
+    Editions(Vec<Edition>),
+    Released(Box<Release>),
+    Matched(Box<AlbumMatch>),
+}
+
+#[derive(Clone, Debug)]
 pub enum Event {
     Track(Box<InspectionUpdate>),
+    Catalog(CatalogEvent),
     Progress(ProgressEvent),
     Inspected(Inspection),
     Exported(ExportResult),

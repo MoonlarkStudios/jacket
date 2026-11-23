@@ -6,7 +6,9 @@ use crate::export_completion;
 use crate::recovery::{self, Recovery};
 use crate::reviews::{self, CompletionIdentity, ReviewDraft};
 use crate::worker::{Admission, Event, Job, Lease};
-use audio_engine::{AuthOptions, Browser, ExportPlan, ExportResult, OutputKind, Toolchain};
+use audio_engine::{
+    AuthOptions, Browser, Cancellation, ExportPlan, ExportResult, OutputKind, Toolchain,
+};
 use directories::BaseDirs;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -286,7 +288,93 @@ impl Desktop {
         }
         artwork_assets::prune(&self.artwork_root(), &retained)
     }
+    pub fn search_albums(&self, query: String, offset: usize) -> Result<Job, String> {
+        self.catalog_job(move |cancel| {
+            crate::musicbrainz::search(&query, offset, cancel).map(crate::CatalogEvent::Searched)
+        })
+    }
+
+    pub fn album_editions(&self, group: crate::musicbrainz::Album) -> Result<Job, String> {
+        self.catalog_job(move |cancel| {
+            crate::musicbrainz::editions(&group.id, &group, cancel)
+                .map(crate::CatalogEvent::Editions)
+        })
+    }
+
+    pub fn album_release(&self, id: String) -> Result<Job, String> {
+        self.catalog_job(move |cancel| {
+            crate::musicbrainz::release(&id, cancel)
+                .map(|release| crate::CatalogEvent::Released(Box::new(release)))
+        })
+    }
+
+    fn catalog_job(
+        &self,
+        run: impl FnOnce(&Cancellation) -> Result<crate::CatalogEvent, String> + Send + 'static,
+    ) -> Result<Job, String> {
+        Job::spawn(operation_id(), &self.0.admission, move |cancel, _| {
+            run(cancel).map(Event::Catalog)
+        })
+    }
+
+    pub fn match_album(
+        &self,
+        release: &crate::musicbrainz::Release,
+        url: String,
+        auth: AuthOptions,
+    ) -> Result<Job, String> {
+        let link = jacket_core::SourceLink::parse(&url)?;
+        let playlist = link
+            .playlist_url
+            .ok_or("Paste a YouTube album or playlist link.")?;
+        let linked = release.sources.contains(&playlist);
+        let album = release.album.clone();
+        self.inspection_job(auth, move |tools, auth, cancel, _| {
+            let inspect = if linked {
+                audio_engine::source::list_linked_album
+            } else {
+                audio_engine::inspect
+            };
+            let inspection =
+                inspect(tools, &playlist, auth, cancel).map_err(|error| error.to_string())?;
+            album
+                .match_source(inspection)
+                .map(|matched| Event::Catalog(crate::CatalogEvent::Matched(Box::new(matched))))
+        })
+    }
+
+    pub fn open_album_store(&self, url: &str) -> Result<(), String> {
+        crate::musicbrainz::download_store(url).ok_or("This download store is unsupported.")?;
+        match open_command(Path::new(url)) {
+            Ok(status) if status.success() => Ok(()),
+            _ => Err("Could not open the download store in your browser.".into()),
+        }
+    }
+
     pub fn inspect(&self, url: String, auth: AuthOptions) -> Result<Job, String> {
+        self.inspection_job(auth, move |tools, auth, cancel, events| {
+            audio_engine::inspect_streaming(tools, &url, auth, cancel, |update| {
+                if events.send(Event::Track(Box::new(update))).is_err() {
+                    cancel.cancel();
+                }
+            })
+            .map(Event::Inspected)
+            .map_err(|error| error.to_string())
+        })
+    }
+
+    fn inspection_job(
+        &self,
+        auth: AuthOptions,
+        inspect: impl FnOnce(
+                &Toolchain,
+                &AuthOptions,
+                &Cancellation,
+                &std::sync::mpsc::SyncSender<Event>,
+            ) -> Result<Event, String>
+            + Send
+            + 'static,
+    ) -> Result<Job, String> {
         let desktop = self.clone();
         Job::spawn(operation_id(), &self.0.admission, move |cancel, events| {
             let _guard = desktop
@@ -299,22 +387,11 @@ impl Desktop {
             let auth = desktop.resolve_auth(&auth)?;
             let handoff = auth_session::materialize(&desktop.session_root(), &Keychain, &auth)?;
             let runtime_auth = handoff.as_ref().map_or(&auth, |handoff| &handoff.auth);
-            let inspection = audio_engine::inspect_streaming(
-                &desktop.tools()?,
-                &url,
-                runtime_auth,
-                cancel,
-                |update| {
-                    if events.send(Event::Track(Box::new(update))).is_err() {
-                        cancel.cancel();
-                    }
-                },
-            )
-            .map_err(|error| error.to_string())?;
+            let result = inspect(&desktop.tools()?, runtime_auth, cancel, events)?;
             if let Some(handoff) = handoff {
                 handoff.persist(&desktop.session_root(), &Keychain)?;
             }
-            Ok(Event::Inspected(inspection))
+            Ok(result)
         })
     }
 

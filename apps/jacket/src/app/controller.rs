@@ -42,6 +42,7 @@ impl App {
 
     pub fn can_preview(&self) -> bool {
         !self.busy()
+            && !self.catalog.visible
             && !self.panel.review_tool()
             && self.review.as_ref().is_some_and(|review| {
                 let uses_shared_cover = matches!(
@@ -195,6 +196,7 @@ impl App {
                                 Ok(review) => {
                                     self.url = review.inspection.source_url.clone();
                                     self.review = Some(review);
+                                    self.catalog.visible = false;
                                 }
                                 Err(error) => self.error = Some(error),
                             }
@@ -224,11 +226,24 @@ impl App {
                 }
             }
             Message::Tick => return self.tick(),
+            Message::Catalog(action) => return self.update_catalog(action),
+            Message::CatalogCover(url, Ok(raster)) => {
+                if self
+                    .catalog
+                    .release
+                    .as_ref()
+                    .and_then(|release| release.cover.as_ref())
+                    == Some(&url)
+                {
+                    self.catalog.cover = Some(raster);
+                }
+            }
             Message::ThemeShortcut(preset) if self.panel == Panel::Appearance => {
                 return self.update(Message::ThemePreset(preset))
             }
             Message::PrimaryAction => {
                 return match self.panel {
+                    Panel::Workspace if self.catalog.visible => Task::none(),
                     Panel::Workspace if self.result.is_some() => self.update(Message::OpenOutput),
                     Panel::Workspace | Panel::Preview if self.can_export() => {
                         self.update(Message::Save)
@@ -249,6 +264,11 @@ impl App {
                 crate::platform::window_ready();
                 return Task::batch([
                     self.load_owned_artwork(),
+                    if self.catalog.visible && self.catalog.group.is_none() {
+                        iced::widget::operation::focus("album-search")
+                    } else {
+                        Task::none()
+                    },
                     window::oldest()
                         .and_then(window::scale_factor)
                         .map(Message::DisplayScale),
@@ -280,6 +300,7 @@ impl App {
                 self.source_error = None;
             }
             Message::Pasted(url) if !self.busy() && !self.panel.review_tool() => {
+                self.catalog.visible = false;
                 self.url = url.trim().to_owned();
                 self.intent = SourceIntent::Song;
                 self.source_error = None;
@@ -323,6 +344,7 @@ impl App {
                     self.example_previous = Some(self.suspend_review());
                 }
                 self.example = true;
+                self.catalog.visible = false;
                 self.review = Some(Review::new(
                     example::album(),
                     self.appearance.default_format.into(),
@@ -771,7 +793,9 @@ impl App {
             Message::Cancel => {
                 if let Some(job) = &self.job {
                     job.cancel();
-                    if let Some(intake) = &mut self.intake {
+                    if self.catalog.pending.is_some() {
+                        self.catalog.cancelling = true;
+                    } else if let Some(intake) = &mut self.intake {
                         intake.cancelling = true;
                     } else {
                         self.notice = Some(
@@ -860,6 +884,7 @@ impl App {
                                 Some((previous, record.review_identity.clone()));
                             self.example = false;
                             self.review = Some(Review::from_plan(&record.plan));
+                            self.catalog.visible = false;
                             self.url = record.plan.source_url.clone();
                             self.auth = record.plan.auth.clone();
                             self.cover = None;
@@ -896,7 +921,9 @@ impl App {
                 self.panel = Panel::Workspace;
                 if let Some(job) = &self.job {
                     job.cancel();
-                    if let Some(intake) = &mut self.intake {
+                    if self.catalog.pending.is_some() {
+                        self.catalog.cancelling = true;
+                    } else if let Some(intake) = &mut self.intake {
                         intake.cancelling = true;
                     }
                 } else {
@@ -1383,12 +1410,14 @@ impl App {
             }
             Message::Opened(Err(error)) => self.error = Some(error),
             Message::FocusSource if !self.busy() && self.panel == Panel::Workspace => {
-                return iced::widget::operation::focus("source-url")
+                self.catalog.visible = false;
+                return iced::widget::operation::focus("source-url");
             }
             Message::Escape | Message::CapturedEscape
                 if matches!(message, Message::Escape)
                     || self.panel.review_tool()
-                    || self.panel == Panel::Crop =>
+                    || self.panel == Panel::Crop
+                    || self.catalog.visible =>
             {
                 if self.panel == Panel::TrackOrder && self.track_position.is_some() {
                     return self.cancel_track_position();
@@ -1397,6 +1426,8 @@ impl App {
                     return self.update(Message::ClosePanel);
                 } else if self.job.is_some() {
                     return self.update(Message::Cancel);
+                } else if self.catalog.visible {
+                    return self.update_catalog(super::CatalogAction::Back);
                 }
             }
             Message::Screenshot(screenshot) => {

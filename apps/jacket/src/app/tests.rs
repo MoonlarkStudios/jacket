@@ -23,6 +23,7 @@ fn app(desktop: Desktop) -> App {
     app.example = false;
     app.desktop = Some(desktop);
     app.review = Some(Review::new(example::album(), AudioFormat::Compatible));
+    app.catalog.visible = false;
     app
 }
 
@@ -1541,4 +1542,56 @@ fn restoring_a_suspended_remote_cover_refreshes_for_the_current_display_density(
     );
     assert_eq!(app.review.as_ref().expect("same review").identity(), before);
     assert_eq!(app.save_pending, 0);
+}
+
+#[test]
+fn an_incomplete_catalog_match_replaces_a_review_only_after_confirmation() {
+    use super::CatalogAction;
+    use audio_engine::{AuthOptions, CollectionMode};
+    use jacket_core::TrackMatch;
+
+    let (_root, desktop) = desktop();
+    let mut app = app(desktop);
+    let previous = app.review.take().unwrap();
+    let identity = previous.identity();
+    app.catalog_snapshot("catalog-match");
+    app.review = Some(previous);
+
+    let matched = app.catalog.matched.as_ref().unwrap();
+    assert_eq!(
+        matched
+            .tracks
+            .iter()
+            .filter(|status| **status == TrackMatch::Missing)
+            .count(),
+        2
+    );
+
+    let _ = app.update(Message::Catalog(CatalogAction::Review));
+    assert!(app.catalog.confirm_replace);
+    assert_eq!(app.review.as_ref().unwrap().identity(), identity);
+    let _ = app.update(Message::Catalog(CatalogAction::ReturnToReview));
+    assert!(!app.catalog.visible);
+    assert_eq!(app.review.as_ref().unwrap().identity(), identity);
+
+    let _ = app.update(Message::Catalog(CatalogAction::Browse));
+    let _ = app.update(Message::Catalog(CatalogAction::Review));
+    let _ = app.update(Message::Catalog(CatalogAction::ConfirmReview));
+    assert!(!app.catalog.visible);
+    let review = app.review.as_ref().unwrap();
+    assert_ne!(review.identity(), identity);
+    let restored = Review::from_draft(review.draft()).expect("a catalog review can be reopened");
+    let plan = restored.plan(AuthOptions::default()).unwrap();
+    assert_eq!(plan.mode, CollectionMode::Album);
+    assert_eq!(plan.tracks.len(), 5);
+    assert_eq!(
+        plan.tracks[0].metadata.album,
+        "Room to breathe (Expanded edition)"
+    );
+    assert_eq!(plan.tracks[0].metadata.release_year, Some(2026));
+    assert_ne!(
+        plan.tracks[0].source_metadata.album,
+        plan.tracks[0].metadata.album
+    );
+    assert!(audio_engine::preview_export(&plan).is_ok());
 }

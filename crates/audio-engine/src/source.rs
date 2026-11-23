@@ -203,9 +203,21 @@ pub fn valid_artwork_url(input: &str) -> bool {
             && url.password().is_none()
             && url.port().is_none()
             && url.host_str().is_some_and(|host| {
-                ["ytimg.com", "googleusercontent.com", "ggpht.com"]
+                let youtube = ["ytimg.com", "googleusercontent.com", "ggpht.com"]
                     .iter()
-                    .any(|allowed| host == *allowed || host.ends_with(&format!(".{allowed}")))
+                    .any(|allowed| host == *allowed || host.ends_with(&format!(".{allowed}")));
+                let path = url.path();
+                let cover_archive = host == "coverartarchive.org"
+                    && path.starts_with("/release/")
+                    && ["/front-500", "/front-1200"]
+                        .iter()
+                        .any(|suffix| path.ends_with(suffix));
+                let archive_image = (host == "archive.org" || host.ends_with(".archive.org"))
+                    && (path.starts_with("/download/mbid-") || path.contains("/items/mbid-"))
+                    && [".jpg", ".png", ".webp"]
+                        .iter()
+                        .any(|suffix| path.ends_with(suffix));
+                youtube || cover_archive || archive_image
             })
     })
 }
@@ -322,6 +334,30 @@ pub fn inspect(
     cancel: &Cancellation,
 ) -> Result<Inspection> {
     inspect_streaming(tools, input, auth, cancel, |_| {})
+}
+
+/// Read the ordered metadata for a known catalog-linked album with one listing
+/// request. Individual media URLs are resolved by the downloader during save.
+pub fn list_linked_album(
+    tools: &Toolchain,
+    input: &str,
+    auth: &AuthOptions,
+    cancel: &Cancellation,
+) -> Result<Inspection> {
+    let input = validate_inspection_source_url(input)?;
+    if collection_mode(&input) != CollectionMode::Album {
+        return Err(EngineError::Invalid(
+            "Use a YouTube Music album link.".into(),
+        ));
+    }
+    let mut cmd = inspection_command(tools, &input, auth, true)?;
+    let mut inspection = StreamingInspection::new(input);
+    run_lines(&mut cmd, cancel, Duration::from_secs(45), |line| {
+        inspection.read_line(line)?;
+        Ok(())
+    })?;
+    cancel.check()?;
+    inspection.finish()
 }
 
 struct StreamingInspection {
@@ -447,7 +483,7 @@ pub fn inspect_streaming(
     let song_artwork = is_video_source(&input).then(|| {
         std::thread::spawn(move || crate::song_artwork::lookup(&song_source, &song_cancel))
     });
-    let mut cmd = inspection_command(tools, &input, auth)?;
+    let mut cmd = inspection_command(tools, &input, auth, false)?;
     let mut inspection = StreamingInspection::new(input);
     run_lines(&mut cmd, cancel, Duration::from_secs(600), |line| {
         if let Some(update) = inspection.read_line(line)? {
@@ -466,7 +502,12 @@ pub fn inspect_streaming(
     Ok(result)
 }
 
-fn inspection_command(tools: &Toolchain, input: &str, auth: &AuthOptions) -> Result<Command> {
+fn inspection_command(
+    tools: &Toolchain,
+    input: &str,
+    auth: &AuthOptions,
+    flat: bool,
+) -> Result<Command> {
     let mut source =
         url::Url::parse(&validate_inspection_source_url(input)?).expect("validated source URL");
     let mut cmd = downloader(tools, auth)?;
@@ -477,6 +518,9 @@ fn inspection_command(tools: &Toolchain, input: &str, auth: &AuthOptions) -> Res
         source = url::Url::parse("https://www.youtube.com/watch").expect("static YouTube URL");
         source.query_pairs_mut().append_pair("v", &id);
         cmd.arg("--no-playlist");
+    }
+    if flat {
+        cmd.args(["--flat-playlist", "--playlist-end", "501"]);
     }
     cmd.args([
         "--dump-json",
@@ -574,6 +618,53 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn linked_album_listing_inspects_playlist_metadata_with_one_process() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let downloader = root.path().join("yt-dlp");
+        std::fs::write(
+            &downloader,
+            r#"#!/bin/sh
+case " $* " in
+  *" --flat-playlist --playlist-end 501 --dump-json "*) ;;
+  *) exit 1 ;;
+esac
+printf '%s\n' \
+  '{"id":"fixture0001","title":"First track","duration":180}' \
+  '{"id":"fixture0002","title":"Second track","duration":190}' \
+  'PLAYLIST {"title":"An album","playlist_count":2}'
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&downloader, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let tools = Toolchain {
+            yt_dlp: downloader,
+            ffmpeg: "ffmpeg".into(),
+            ffprobe: "ffprobe".into(),
+            node: None,
+        };
+        let result = list_linked_album(
+            &tools,
+            "https://music.youtube.com/playlist?list=OLAK5uy_fixture123",
+            &AuthOptions::default(),
+            &Cancellation::default(),
+        )
+        .unwrap();
+        assert_eq!(result.title, "An album");
+        assert_eq!(result.tracks.len(), 2);
+        assert_eq!(result.tracks[0].duration, Some(180.0));
+        assert!(list_linked_album(
+            &tools,
+            "https://www.youtube.com/watch?v=fixture0001",
+            &AuthOptions::default(),
+            &Cancellation::default(),
+        )
+        .is_err());
+    }
+
     #[test]
     fn song_inspection_discards_playlist_context_only_for_the_downloader() {
         let tools = Toolchain {
@@ -587,7 +678,8 @@ mod tests {
             "https://www.youtube.com/watch?v=eQVkkG8Oz8c&list=PLmix&start_radio=1",
             "https://youtu.be/eQVkkG8Oz8c?si=share&list=OLAK5uy_example&t=30",
         ] {
-            let command = inspection_command(&tools, input, &AuthOptions::default()).unwrap();
+            let command =
+                inspection_command(&tools, input, &AuthOptions::default(), false).unwrap();
             let args: Vec<_> = command.get_args().collect();
             assert!(args.contains(&std::ffi::OsStr::new("--no-playlist")));
             assert_eq!(
@@ -602,7 +694,8 @@ mod tests {
             "https://www.youtube.com/playlist?list=PLmix",
             "https://music.youtube.com/browse/MPexample",
         ] {
-            let command = inspection_command(&tools, input, &AuthOptions::default()).unwrap();
+            let command =
+                inspection_command(&tools, input, &AuthOptions::default(), false).unwrap();
             let args: Vec<_> = command.get_args().collect();
             assert!(!args.contains(&std::ffi::OsStr::new("--no-playlist")));
             assert_eq!(*args.last().unwrap(), input);
@@ -630,7 +723,7 @@ mod tests {
             "https://youtu.be/",
         ] {
             assert!(
-                inspection_command(&tools, input, &AuthOptions::default()).is_err(),
+                inspection_command(&tools, input, &AuthOptions::default(), false).is_err(),
                 "{input}"
             );
             assert!(
@@ -642,6 +735,7 @@ mod tests {
             &tools,
             "https://www.youtube.com/watch?list=OLAK5uy_example",
             &AuthOptions::default(),
+            false,
         )
         .is_ok());
     }
@@ -790,6 +884,26 @@ mod tests {
         assert_eq!(preview.tracks.len(), 2);
         assert_eq!(preview.suggested_mode, CollectionMode::Collection);
         assert!(preview.warnings[0].contains("1 unavailable"));
+    }
+
+    #[test]
+    fn cover_art_archive_accepts_its_release_images_and_redirect_hosts() {
+        for url in [
+            "https://coverartarchive.org/release/e65fcfb0-02dc-407c-ab28-8168dafcb999/front-500",
+            "https://archive.org/download/mbid-e65fcfb0-02dc-407c-ab28-8168dafcb999/cover_thumb500.jpg",
+            "https://dn710000.ca.archive.org/0/items/mbid-e65fcfb0-02dc-407c-ab28-8168dafcb999/cover_thumb500.jpg",
+        ] {
+            assert!(valid_artwork_url(url), "{url}");
+        }
+        for url in [
+            "https://coverartarchive.org/admin/front-500",
+            "https://archive.org/download/unrelated/cover.jpg",
+            "http://archive.org/download/mbid-test/cover.jpg",
+            "https://archive.org.invalid/download/mbid-test/cover.jpg",
+            "https://archive.org/download/mbid-test/audio.flac",
+        ] {
+            assert!(!valid_artwork_url(url), "{url}");
+        }
     }
 
     #[test]

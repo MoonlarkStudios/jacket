@@ -438,7 +438,7 @@ fn acquire(
 fn artwork(tools: &Toolchain, source: &str, dir: &Path, cancel: &Cancellation) -> Result<PathBuf> {
     if !valid_artwork_url(source) {
         return Err(EngineError::Invalid(
-            "Artwork must be a YouTube source image.".into(),
+            "Artwork must be an image from a supported source.".into(),
         ));
     }
     cancel.check()?;

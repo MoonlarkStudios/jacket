@@ -8,8 +8,8 @@
 <p align="center"><strong>From link to neatly packed.</strong><br>Prepare tagged audio for your music library and Resonant.</p>
 
 Jacket is a native desktop application from [Moonlark Studios](https://github.com/MoonlarkStudios).
-Paste a YouTube or YouTube Music link, review the tracks and metadata, and save
-local audio. Jacket is the preparation companion to Resonant: export a recording,
+Find an album or paste a YouTube or YouTube Music link. Review the tracks and
+metadata, then save local audio. Jacket is the preparation companion to Resonant: export a recording,
 then open it in Resonant for listening, practice and analysis.
 
 Jacket uses **Rust and iced 0.14**, following the native direction of Resonant v2.
@@ -41,6 +41,14 @@ checks those prerequisites without changing the machine.
 Explore fictional tracks with `mise run example` (the binary's `--example` flag).
 The ordinary app has no example entry point. Example content is for interface
 review; real downloads require an inspected source.
+
+## Find an album
+
+Search for an album or an artist. Jacket shows one result per MusicBrainz album,
+with a track list and an edition picker. Check the linked YouTube Music album or
+paste a playlist link to match its audio to the edition. Review the matched tracks
+before saving. Jacket shows which tracks are missing or uncertain, and offers
+purchase links when MusicBrainz lists a supported store.
 
 ## Prepare your audio
 
