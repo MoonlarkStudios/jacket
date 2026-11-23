@@ -7,13 +7,14 @@ use iced::widget::{
 };
 use iced::{Alignment, ContentFit, Element, Length};
 use jacket_core::TrackMatch;
+use jacket_desktop::catalog::SearchProvider;
 use jacket_desktop::musicbrainz::Release;
 
 pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
     let p = app.presentation();
     let catalog = &app.catalog;
     let enabled = !app.busy();
-    let can_edit = !catalog.youtube_music_active
+    let can_edit = !catalog.youtube_music_active()
         || (!catalog.confirm_replace
             && !matches!(
                 catalog.pending,
@@ -94,27 +95,26 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
     ]
     .spacing(14);
     if catalog.youtube_music_available {
-        let source_choice = |label, youtube| {
+        let source_choice = |provider: SearchProvider| {
             super::focus_button::wrap(
-                if youtube {
-                    "catalog-youtube-music"
-                } else {
-                    "catalog-musicbrainz"
+                match provider {
+                    SearchProvider::YouTubeMusic => "catalog-youtube-music",
+                    SearchProvider::MusicBrainz => "catalog-musicbrainz",
                 },
-                button(label)
+                button(provider.label())
                     .padding([6, 12])
-                    .style(p.choice(catalog.youtube_music_active == youtube)),
-                (enabled && can_edit).then_some(Message::Catalog(Action::UseYouTubeMusic(youtube))),
+                    .style(p.choice(catalog.provider == provider)),
+                (enabled && can_edit).then_some(Message::Catalog(Action::SelectProvider(provider))),
                 p.colors.accent,
             )
         };
         let mut sources = row![
-            source_choice("YouTube Music", true),
-            source_choice("MusicBrainz", false)
+            source_choice(SearchProvider::YouTubeMusic),
+            source_choice(SearchProvider::MusicBrainz)
         ]
         .spacing(7)
         .align_y(Alignment::Center);
-        if catalog.youtube_music_active && !catalog.query.trim().is_empty() {
+        if catalog.youtube_music_active() && !catalog.query.trim().is_empty() {
             sources = sources.push(space::horizontal()).push(action(
                 app,
                 "search-in-browser",
@@ -126,12 +126,12 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
         }
         top = top.push(sources);
     }
-    if catalog.youtube_music_active {
+    if catalog.youtube_music_active() {
         top = top.push(catalog_search::youtube_music_filters(app));
     } else {
         top = top.push(catalog_search::filters(app, false));
     }
-    let body = if catalog.youtube_music_active {
+    let body = if catalog.youtube_music_active() {
         catalog_search::youtube_music(app, compact)
     } else if catalog.choosing_edition {
         editions(app)
@@ -686,7 +686,7 @@ pub(super) fn card<'a>(
         .padding([9, 12])
         .style(p.secondary()),
         ((!app.busy() || may_open_result)
-            && !(app.catalog.youtube_music_active && app.catalog.confirm_replace))
+            && !(app.catalog.youtube_music_active() && app.catalog.confirm_replace))
             .then_some(Message::Catalog(select)),
         p.colors.accent,
     )

@@ -1,5 +1,6 @@
 //! Indexed search and artist-scoped catalog browsing.
 use super::{request, validate_id, Album};
+use crate::catalog::SearchKind;
 use audio_engine::Cancellation;
 use serde::Deserialize;
 use std::collections::{HashSet, VecDeque};
@@ -12,30 +13,11 @@ const ALBUM_TYPES: &str = "(primarytype:album^8 OR primarytype:ep^3 OR primaryty
 const CACHE_CAPACITY: usize = 64;
 const CACHE_LIFETIME: Duration = Duration::from_secs(15 * 60);
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub enum SearchKind {
-    Artists,
-    Albums,
-    Songs,
-}
-
-impl SearchKind {
-    pub const ALL: [Self; 3] = [Self::Artists, Self::Albums, Self::Songs];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Artists => "Artists",
-            Self::Albums => "Albums",
-            Self::Songs => "Songs",
-        }
-    }
-
-    fn endpoint(self) -> &'static str {
-        match self {
-            Self::Artists => "artist",
-            Self::Albums => "release-group",
-            Self::Songs => "recording",
-        }
+fn endpoint(kind: SearchKind) -> &'static str {
+    match kind {
+        SearchKind::Artists => "artist",
+        SearchKind::Albums => "release-group",
+        SearchKind::Songs => "recording",
     }
 }
 
@@ -324,7 +306,7 @@ fn fetch(
         });
     }
     let response: SearchResponse = request(
-        kind.endpoint(),
+        endpoint(kind),
         &[
             ("query", &expression),
             ("limit", &limit.to_string()),

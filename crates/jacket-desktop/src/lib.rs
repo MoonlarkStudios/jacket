@@ -4,6 +4,7 @@ pub mod artwork_assets;
 mod artwork_preview;
 pub mod auth_session;
 pub mod browser_sessions;
+pub mod catalog;
 mod desktop;
 pub mod downloader_updates;
 mod export_completion;

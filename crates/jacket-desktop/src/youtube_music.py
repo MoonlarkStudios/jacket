@@ -129,8 +129,13 @@ def album_detail(client, album_id):
 def main():
     from ytmusicapi import YTMusic
 
-    operation, value, category = sys.argv[1:]
     client = YTMusic(language="en")
+    if sys.argv[1:] == ["--version"]:
+        from importlib.metadata import version
+
+        print(version("ytmusicapi"))
+        return
+    operation, value, category = sys.argv[1:]
     if operation == "search":
         result = search_hits(client, value, category or None)
     elif operation == "album":
@@ -148,6 +153,6 @@ if __name__ == "__main__":
     try:
         main()
     except ModuleNotFoundError:
-        sys.exit("Set up YouTube Music with mise run setup:youtube-music, then try again.")
+        sys.exit("YouTube Music could not load its search libraries.")
     except Exception:
         sys.exit("YouTube Music did not complete the request. Try again or open it in your browser.")

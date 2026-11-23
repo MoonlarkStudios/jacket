@@ -140,19 +140,23 @@ run = "python scripts/stage-macos-tools.py"
 description = "Build the pinned Linux runtime and corresponding source archive"
 run = "python scripts/stage-linux-tools.py"
 
+[tasks."tools:stage:catalog"]
+description = "Stage the pinned YouTube Music search helper and its libraries"
+run = "python scripts/stage-catalog-tools.py"
+
 [tasks."package:mac"]
 description = "Build an ad-hoc signed macOS native app candidate"
-depends = ["build", "tools:stage", "licenses:native"]
+depends = ["build", "tools:stage", "tools:stage:catalog", "licenses:native"]
 run = "python scripts/native_package.py --platform macos"
 
 [tasks."package:linux"]
 description = "Build a Linux native portable candidate with bundled audio tools"
-depends = ["build", "tools:stage:linux", "licenses:native"]
+depends = ["build", "tools:stage:linux", "tools:stage:catalog", "licenses:native"]
 run = "python scripts/native_package.py --platform linux"
 
 [tasks."installers:stage"]
 description = "Stage the shared DEB and RPM payload and matching sources"
-depends = ["build", "tools:stage:linux", "licenses:native"]
+depends = ["build", "tools:stage:linux", "tools:stage:catalog", "licenses:native"]
 run = "python scripts/native_installers.py stage"
 
 [tasks."installers:deb"]

@@ -71,9 +71,7 @@ impl App {
                 }
             }
         }
-        let mut catalog = super::catalog::Catalog::new(!isolated);
-        catalog.youtube_music_available = !isolated && jacket_desktop::youtube_music::enabled();
-        catalog.youtube_music_active = catalog.youtube_music_available;
+        let catalog = super::catalog::Catalog::new(!isolated);
         let mut app = Self {
             desktop: None,
             review: None,

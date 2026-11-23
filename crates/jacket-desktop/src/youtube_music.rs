@@ -1,33 +1,20 @@
-//! Public YouTube Music discovery for the local development build.
+//! Public YouTube Music discovery.
+use crate::catalog::SearchKind;
 use audio_engine::{Cancellation, CollectionMode, EngineError, Inspection, Metadata, Track};
 use jacket_core::SourceLink;
 use serde::{de::DeserializeOwned, Deserialize};
-use std::{collections::HashSet, path::PathBuf, process::Command, time::Duration};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    process::Command,
+    time::Duration,
+};
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
-pub enum SearchKind {
-    Artists,
-    Albums,
-    Songs,
-}
-
-impl SearchKind {
-    pub const ALL: [Self; 3] = [Self::Artists, Self::Albums, Self::Songs];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Artists => "Artists",
-            Self::Albums => "Albums",
-            Self::Songs => "Songs",
-        }
-    }
-
-    fn filter(self) -> &'static str {
-        match self {
-            Self::Artists => "artists",
-            Self::Albums => "albums",
-            Self::Songs => "songs",
-        }
+fn filter_name(kind: SearchKind) -> &'static str {
+    match kind {
+        SearchKind::Artists => "artists",
+        SearchKind::Albums => "albums",
+        SearchKind::Songs => "songs",
     }
 }
 
@@ -178,35 +165,44 @@ struct AlbumTrack {
     available: bool,
 }
 
-pub fn enabled() -> bool {
-    python().is_some()
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Runtime {
+    Bundled(PathBuf),
+    Development(PathBuf),
 }
 
-fn python() -> Option<PathBuf> {
-    std::env::var_os("JACKET_YOUTUBE_MUSIC_PYTHON")
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
+impl Runtime {
+    pub(crate) fn discover(resources: &Path, development: Option<PathBuf>) -> Option<Self> {
+        let bundled = resources.join("catalog-tools/bin/youtube-music");
+        if bundled.is_file() {
+            return Some(Self::Bundled(bundled));
+        }
+        development
+            .filter(|path| path.is_absolute() && path.is_file())
+            .map(Self::Development)
+    }
+
+    fn command(&self) -> Command {
+        match self {
+            Self::Bundled(launcher) => Command::new(launcher),
+            Self::Development(python) => {
+                let mut command = Command::new(python);
+                command.args(["-I", "-B", "-c", include_str!("youtube_music.py")]);
+                command
+            }
+        }
+    }
 }
 
 fn request<T: DeserializeOwned>(
+    runtime: &Runtime,
     operation: &str,
     value: &str,
     filter: Option<SearchKind>,
     cancel: &Cancellation,
 ) -> Result<T, String> {
-    let python = python()
-        .filter(|path| path.is_file())
-        .ok_or("Set up YouTube Music with mise run setup:youtube-music, then try again.")?;
-    let mut command = Command::new(python);
-    command.args([
-        "-I",
-        "-B",
-        "-c",
-        include_str!("youtube_music.py"),
-        operation,
-        value,
-        filter.map_or("", SearchKind::filter),
-    ]);
+    let mut command = runtime.command();
+    command.args([operation, value, filter.map_or("", filter_name)]);
     let timeout = Duration::from_secs(if operation == "song" { 6 } else { 12 });
     let bytes =
         audio_engine::process::run(&mut command, cancel, timeout).map_err(|error| match error {
@@ -223,6 +219,7 @@ fn request<T: DeserializeOwned>(
 }
 
 pub(crate) fn search(
+    runtime: &Runtime,
     query: &str,
     filter: Option<SearchKind>,
     cancel: &Cancellation,
@@ -230,7 +227,7 @@ pub(crate) fn search(
     if query.trim().is_empty() || query.chars().count() > 200 {
         return Err("Enter an artist, album, or song name up to 200 characters.".into());
     }
-    let mut results = request("search", query, filter, cancel)?;
+    let mut results = request(runtime, "search", query, filter, cancel)?;
     validate_hits(&mut results);
     Ok(results)
 }
@@ -256,11 +253,15 @@ fn validate_hits(results: &mut Vec<SearchHit>) {
     });
 }
 
-pub(crate) fn artist(id: &str, cancel: &Cancellation) -> Result<ArtistPage, String> {
+pub(crate) fn artist(
+    runtime: &Runtime,
+    id: &str,
+    cancel: &Cancellation,
+) -> Result<ArtistPage, String> {
     if !valid_artist_id(id) {
         return Err("YouTube Music returned an invalid artist identifier.".into());
     }
-    let mut page: ArtistPage = request("artist", id, None, cancel)?;
+    let mut page: ArtistPage = request(runtime, "artist", id, None, cancel)?;
     if page.artist.id != id || page.artist.name.trim().is_empty() {
         return Err("YouTube Music did not return the requested artist.".into());
     }
@@ -269,19 +270,27 @@ pub(crate) fn artist(id: &str, cancel: &Cancellation) -> Result<ArtistPage, Stri
     Ok(page)
 }
 
-pub(crate) fn album(id: &str, cancel: &Cancellation) -> Result<Inspection, String> {
+pub(crate) fn album(
+    runtime: &Runtime,
+    id: &str,
+    cancel: &Cancellation,
+) -> Result<Inspection, String> {
     if !valid_album_id(id) {
         return Err("YouTube Music returned an invalid album identifier.".into());
     }
-    let detail = request("album", id, None, cancel)?;
+    let detail = request(runtime, "album", id, None, cancel)?;
     inspection(id, detail)
 }
 
-pub(crate) fn song(mut song: Song, cancel: &Cancellation) -> Result<Inspection, String> {
+pub(crate) fn song(
+    runtime: &Runtime,
+    mut song: Song,
+    cancel: &Cancellation,
+) -> Result<Inspection, String> {
     if song_url(&song.id).is_none() {
         return Err("YouTube Music returned an invalid recording identifier.".into());
     }
-    if let Ok(Some(detail)) = request::<Option<Song>>("song", &song.id, None, cancel) {
+    if let Ok(Some(detail)) = request::<Option<Song>>(runtime, "song", &song.id, None, cancel) {
         song.fill_details(detail);
     }
     cancel.check().map_err(|error| error.to_string())?;
@@ -402,10 +411,35 @@ fn inspection(id: &str, mut detail: AlbumDetail) -> Result<Inspection, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        inspection, validate_hits, AlbumDetail, AlbumTrack, SearchHit, SearchItem, SearchKind,
+        inspection, validate_hits, AlbumDetail, AlbumTrack, Runtime, SearchHit, SearchItem,
+        SearchKind,
     };
     use audio_engine::CollectionMode;
     use serde_json::json;
+
+    #[test]
+    fn packaged_runtime_takes_priority_over_the_development_interpreter() {
+        let temp = tempfile::tempdir().unwrap();
+        let resources = temp.path().join("with spaces/resources");
+        let development = temp.path().join("development-python");
+        std::fs::write(&development, "").unwrap();
+        assert_eq!(
+            Runtime::discover(&resources, Some(development.clone())),
+            Some(Runtime::Development(development.clone())),
+        );
+
+        let launcher = resources.join("catalog-tools/bin/youtube-music");
+        std::fs::create_dir_all(launcher.parent().unwrap()).unwrap();
+        std::fs::write(&launcher, "").unwrap();
+        assert_eq!(
+            Runtime::discover(&resources, Some(development)),
+            Some(Runtime::Bundled(launcher.clone())),
+        );
+        assert_eq!(
+            Runtime::discover(&resources, None),
+            Some(Runtime::Bundled(launcher)),
+        );
+    }
 
     #[test]
     fn mixed_results_keep_provider_order_and_validate_song_review_identity() {

@@ -77,5 +77,11 @@ Development builds can use installed audio tools. Ignored generated runtimes are
 not part of a source checkout. Optional managed yt-dlp updates retain the upstream
 downloader's license and update independently from Jacket.
 
+Native candidates also ship [ytmusicapi](https://github.com/sigma67/ytmusicapi)
+and its Python dependencies under `catalog-tools`. Their original wheel
+metadata and licenses stay with the installed libraries, and `catalog-tools/sources`
+contains the corresponding source archives. Package versions and input hashes
+are pinned in [scripts/youtube-music-runtime.lock.json](scripts/youtube-music-runtime.lock.json).
+
 YouTube, Google and other third-party marks belong to their respective owners.
 Jacket has no affiliation with them.

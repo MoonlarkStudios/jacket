@@ -1,12 +1,14 @@
 use crate::artwork_assets::{self, Asset, Crop};
 use crate::auth_session::{self, Control, Keychain};
 use crate::browser_sessions::{self, Catalog, Locations};
+use crate::catalog::{SearchKind, SearchProvider, SearchRequest};
 use crate::downloader_updates::{self, Channel, Preferences};
 use crate::export_completion;
 use crate::musicbrainz::{self, SearchCache};
 use crate::recovery::{self, Recovery};
 use crate::reviews::{self, CompletionIdentity, ReviewDraft};
 use crate::worker::{Admission, Event, Job, Lease};
+use crate::youtube_music::{self, Runtime as YouTubeMusicRuntime};
 use audio_engine::{
     AuthOptions, Browser, Cancellation, ExportPlan, ExportResult, OutputKind, Toolchain,
 };
@@ -82,6 +84,7 @@ struct Services {
     session: Control,
     admission: Admission,
     catalog_search: Mutex<SearchCache>,
+    youtube_music: Option<YouTubeMusicRuntime>,
     exported: Mutex<HashMap<PathBuf, PublishedExport>>,
 }
 
@@ -197,6 +200,10 @@ impl Desktop {
         // A crashed development session can leave a plaintext handoff behind.
         // Cleanup owns the instance lock; a failure must not block public use.
         let _ = auth_session::startup(&data.join("auth-prototype"));
+        let youtube_music = YouTubeMusicRuntime::discover(
+            &resources,
+            std::env::var_os("JACKET_YOUTUBE_MUSIC_PYTHON").map(PathBuf::from),
+        );
         Ok(Self(Arc::new(Services {
             _instance: instance,
             data,
@@ -207,6 +214,7 @@ impl Desktop {
             session: Control::default(),
             admission: Arc::new(Mutex::new(None)),
             catalog_search: Mutex::default(),
+            youtube_music,
             exported: Mutex::new(HashMap::new()),
         })))
     }
@@ -291,10 +299,30 @@ impl Desktop {
         }
         artwork_assets::prune(&self.artwork_root(), &retained)
     }
-    pub fn search_catalog(
+    pub fn default_search_provider(&self) -> SearchProvider {
+        if self.0.youtube_music.is_some() {
+            SearchProvider::YouTubeMusic
+        } else {
+            SearchProvider::MusicBrainz
+        }
+    }
+
+    pub fn search_catalog(&self, request: SearchRequest) -> Result<Job, String> {
+        match request {
+            SearchRequest::YouTubeMusic { query, filter } => {
+                self.youtube_music_job(move |runtime, cancel| {
+                    youtube_music::search(runtime, &query, filter, cancel)
+                        .map(|hits| crate::CatalogEvent::YouTubeMusicResults { filter, hits })
+                })
+            }
+            SearchRequest::MusicBrainz { scope, pages } => self.search_musicbrainz(scope, pages),
+        }
+    }
+
+    fn search_musicbrainz(
         &self,
-        scope: crate::musicbrainz::SearchScope,
-        pages: Vec<(crate::musicbrainz::SearchKind, usize)>,
+        scope: musicbrainz::SearchScope,
+        pages: Vec<(SearchKind, usize)>,
     ) -> Result<Job, String> {
         let services = Arc::clone(&self.0);
         Job::spawn(operation_id(), &self.0.admission, move |cancel, events| {
@@ -361,33 +389,22 @@ impl Desktop {
         })
     }
 
-    pub fn search_youtube_music(
-        &self,
-        query: String,
-        filter: Option<crate::youtube_music::SearchKind>,
-    ) -> Result<Job, String> {
-        self.catalog_job(move |cancel| {
-            crate::youtube_music::search(&query, filter, cancel)
-                .map(|hits| crate::CatalogEvent::YouTubeMusicResults { filter, hits })
-        })
-    }
-
     pub fn open_youtube_music_artist(&self, id: String) -> Result<Job, String> {
-        self.catalog_job(move |cancel| {
-            crate::youtube_music::artist(&id, cancel).map(crate::CatalogEvent::YouTubeMusicArtist)
+        self.youtube_music_job(move |runtime, cancel| {
+            youtube_music::artist(runtime, &id, cancel).map(crate::CatalogEvent::YouTubeMusicArtist)
         })
     }
 
     pub fn open_youtube_music_album(&self, id: String) -> Result<Job, String> {
-        self.catalog_job(move |cancel| {
-            crate::youtube_music::album(&id, cancel)
+        self.youtube_music_job(move |runtime, cancel| {
+            youtube_music::album(runtime, &id, cancel)
                 .map(|album| crate::CatalogEvent::YouTubeMusicReview(Box::new(album)))
         })
     }
 
-    pub fn open_youtube_music_song(&self, song: crate::youtube_music::Song) -> Result<Job, String> {
-        self.catalog_job(move |cancel| {
-            crate::youtube_music::song(song, cancel)
+    pub fn open_youtube_music_song(&self, song: youtube_music::Song) -> Result<Job, String> {
+        self.youtube_music_job(move |runtime, cancel| {
+            youtube_music::song(runtime, song, cancel)
                 .map(|song| crate::CatalogEvent::YouTubeMusicReview(Box::new(song)))
         })
     }
@@ -400,6 +417,20 @@ impl Desktop {
             Ok(status) if status.success() => Ok(()),
             _ => Err("Could not open YouTube Music in your browser.".into()),
         }
+    }
+
+    fn youtube_music_job(
+        &self,
+        run: impl FnOnce(&YouTubeMusicRuntime, &Cancellation) -> Result<crate::CatalogEvent, String>
+            + Send
+            + 'static,
+    ) -> Result<Job, String> {
+        let runtime = self
+            .0
+            .youtube_music
+            .clone()
+            .ok_or("YouTube Music is unavailable in this build of Jacket.")?;
+        self.catalog_job(move |cancel| run(&runtime, cancel))
     }
 
     fn catalog_job(

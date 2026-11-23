@@ -223,6 +223,8 @@ impl App {
                                 self.cover = Some((asset, path));
                             }
                         }
+                        self.catalog.provider = boot.desktop.default_search_provider();
+                        self.catalog.youtube_music_available = self.catalog.youtube_music_active();
                         self.desktop = Some(boot.desktop);
                         // Update checks retain the existing explicit preference and run outside the UI thread.
                         if !self.close_after_job {

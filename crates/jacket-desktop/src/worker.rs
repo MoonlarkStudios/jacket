@@ -1,8 +1,9 @@
 //! One admitted operation owns its cancellation token until its worker exits.
 use crate::auth_session;
 use crate::browser_sessions::AccessCheck;
+use crate::catalog::SearchKind;
 use crate::downloader_updates::Status;
-use crate::musicbrainz::{Edition, Release, SearchKind, SearchPage, SongDetails};
+use crate::musicbrainz::{Edition, Release, SearchPage, SongDetails};
 use audio_engine::{Cancellation, ExportResult, Inspection, InspectionUpdate, ProgressEvent};
 use jacket_core::AlbumMatch;
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
@@ -23,7 +24,7 @@ pub enum CatalogEvent {
     Released(Box<Release>),
     Matched(Box<AlbumMatch>),
     YouTubeMusicResults {
-        filter: Option<crate::youtube_music::SearchKind>,
+        filter: Option<SearchKind>,
         hits: Vec<crate::youtube_music::SearchHit>,
     },
     YouTubeMusicArtist(crate::youtube_music::ArtistPage),

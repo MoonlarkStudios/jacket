@@ -7,15 +7,16 @@ use crate::icons::{self, Icon};
 use crate::style;
 use iced::widget::{button, column, container, image, row, space, text, text_input, tooltip};
 use iced::{Alignment, ContentFit, Element, Length};
-use jacket_desktop::musicbrainz::{Album, Artist, SearchHit, SearchKind, Song};
-use jacket_desktop::youtube_music::{SearchItem as YouTubeItem, SearchKind as YouTubeKind};
+use jacket_desktop::catalog::SearchKind;
+use jacket_desktop::musicbrainz::{Album, Artist, SearchHit, Song};
+use jacket_desktop::youtube_music::SearchItem as YouTubeItem;
 
 pub(super) fn youtube_music_filters(app: &App) -> Element<'_, Message> {
     let p = app.presentation();
     std::iter::once(None)
-        .chain(YouTubeKind::ALL.into_iter().map(Some))
+        .chain(SearchKind::ALL.into_iter().map(Some))
         .fold(row![].spacing(7), |bar, filter| {
-            let label = filter.map_or("All", YouTubeKind::label);
+            let label = filter.map_or("All", SearchKind::label);
             bar.push(super::focus_button::wrap(
                 format!("youtube-music-filter-{label}"),
                 button(label)
@@ -69,9 +70,9 @@ pub(super) fn youtube_music(app: &App, compact: bool) -> Element<'_, Message> {
     if hits.is_empty() {
         if catalog.pending.is_none() && catalog.error.is_none() {
             let label = match catalog.youtube_music_filter {
-                Some(YouTubeKind::Artists) => "No artists found",
-                Some(YouTubeKind::Albums) => "No albums found",
-                Some(YouTubeKind::Songs) => "No songs found",
+                Some(SearchKind::Artists) => "No artists found",
+                Some(SearchKind::Albums) => "No albums found",
+                Some(SearchKind::Songs) => "No songs found",
                 None => "No results found",
             };
             body = body.push(empty(app, label));
@@ -108,8 +109,8 @@ pub(super) fn youtube_music(app: &App, compact: bool) -> Element<'_, Message> {
             continue;
         }
         let label = match (artist_page.is_some(), kind) {
-            (true, YouTubeKind::Albums) => "Albums & singles",
-            (true, YouTubeKind::Songs) => "Top songs",
+            (true, SearchKind::Albums) => "Albums & singles",
+            (true, SearchKind::Songs) => "Top songs",
             _ => kind.label(),
         };
         let mut heading = row![

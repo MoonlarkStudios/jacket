@@ -89,12 +89,16 @@ test -s /usr/libexec/jacket/resources/notices/THIRD_PARTY_NOTICES.md
 libraries=$(ldd /usr/bin/jacket)
 [[ $libraries != *'not found'* ]]
 python3 -B scripts/stage-linux-tools.py --validate /usr/libexec/jacket/resources/audio-tools
+catalog_version=$(python3 -c 'import json; print(json.load(open("scripts/youtube-music-runtime.lock.json"))["packages"]["ytmusicapi"]["version"])')
+test "$(runuser -u jacket-test -- env -i HOME="$home" PATH=/usr/bin:/bin \
+  /usr/libexec/jacket/resources/catalog-tools/bin/youtube-music --version)" = "$catalog_version"
 
 runuser -u jacket-test -- env HOME="$home" xvfb-run -a -s '-screen 0 1280x900x24' dbus-run-session -- \
   python3 -B scripts/smoke_linux_install.py "$evidence"
 uninstall
 test ! -e /usr/bin/jacket
 test ! -e /usr/libexec/jacket/resources/audio-tools/bin/ffmpeg
+test ! -e /usr/libexec/jacket/resources/catalog-tools/bin/youtube-music
 test ! -e /usr/share/applications/com.moonlark.audio-dl.desktop
 test -s "$data/music-folder.json"
 test -s "$data/review-library/draft/review.json"

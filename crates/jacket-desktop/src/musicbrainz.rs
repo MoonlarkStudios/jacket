@@ -5,7 +5,7 @@ mod recording;
 
 use audio_engine::Cancellation;
 pub(crate) use discovery::{search, SearchCache};
-pub use discovery::{Artist, SearchHit, SearchKind, SearchPage, SearchScope, Song};
+pub use discovery::{Artist, SearchHit, SearchPage, SearchScope, Song};
 use jacket_core::{AlbumRelease, ReleaseTrack, SourceLink};
 pub(crate) use portraits::{artist_portraits, valid_credit_url};
 pub use portraits::{ArtistPortrait, PortraitCredit};
