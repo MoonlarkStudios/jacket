@@ -53,6 +53,11 @@ The first dependency fetch and runtime staging need network access. Native unit
 tests do not contact YouTube, access real browser databases or need an account.
 Media integration tests synthesize their own recordings.
 
+On the album-first branch, `mise run setup:youtube-music` prepares the local
+YouTube Music prototype. The `dev` and `desktop` tasks then open with YouTube
+Music album search selected. Use a fresh `JACKET_DATA_DIR` to test with an
+empty library and review history.
+
 CI runs the native quality gate and offline media integrations on Linux and
 macOS. Rust caches are separated by runner, architecture and toolchain, and are
 refreshed when native dependency manifests, lockfiles or build configuration

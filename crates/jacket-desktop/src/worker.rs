@@ -22,6 +22,8 @@ pub enum CatalogEvent {
     Editions(Vec<Edition>),
     Released(Box<Release>),
     Matched(Box<AlbumMatch>),
+    YouTubeMusicResults(Vec<crate::youtube_music::Album>),
+    YouTubeMusicAlbum(Box<Inspection>),
 }
 
 #[derive(Clone, Debug)]

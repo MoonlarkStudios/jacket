@@ -1,10 +1,54 @@
 use super::catalog::{action, card};
-use crate::app::{search_result_id, App, CatalogAction as Action, CatalogPending, Message};
+use crate::app::{
+    search_result_id, youtube_music_result_id, App, CatalogAction as Action, CatalogPending,
+    Message,
+};
 use crate::icons::{self, Icon};
 use crate::style;
 use iced::widget::{button, column, container, image, row, space, text, text_input, tooltip};
 use iced::{Alignment, ContentFit, Element, Length};
 use jacket_desktop::musicbrainz::{Album, Artist, SearchHit, SearchKind, Song};
+
+pub(super) fn youtube_music(app: &App) -> Element<'_, Message> {
+    let catalog = &app.catalog;
+    let p = app.presentation();
+    if catalog.searched.is_empty() {
+        return text("Choose an album edition to open its track list in review.")
+            .size(14)
+            .color(p.colors.text_muted)
+            .into();
+    }
+    if catalog.query.trim() != catalog.searched {
+        return space().into();
+    }
+    if catalog.youtube_music_results.is_empty() {
+        if catalog.pending.is_none() && catalog.error.is_none() {
+            return empty(app, "No albums found");
+        }
+        return space().into();
+    }
+    column(catalog.youtube_music_results.iter().map(|album| {
+        let subtitle = [
+            album.artist.clone(),
+            album.year.map_or_else(String::new, |year| year.to_string()),
+            album.kind.clone(),
+        ]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
+        card(
+            app,
+            youtube_music_result_id(&album.id),
+            album.title.clone(),
+            subtitle,
+            Some(cover_thumbnail(app, album.artwork_url.clone(), 44.0)),
+            Action::OpenYouTubeMusicAlbum(album.id.clone()),
+        )
+    }))
+    .spacing(8)
+    .into()
+}
 
 pub(super) fn filters(app: &App, artist: bool) -> Element<'_, Message> {
     let p = app.presentation();

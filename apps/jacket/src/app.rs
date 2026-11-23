@@ -16,7 +16,7 @@ mod state;
 #[cfg(test)]
 mod tests;
 
-pub use catalog::{search_result_id, CatalogAction, CatalogPending};
+pub use catalog::{search_result_id, youtube_music_result_id, CatalogAction, CatalogPending};
 pub use intake::SourceKind;
 pub use receipt::Receipt;
 pub use state::{App, Message, Panel, ProfileChoice};

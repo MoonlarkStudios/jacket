@@ -361,6 +361,30 @@ impl Desktop {
         })
     }
 
+    pub fn search_youtube_music(&self, query: String) -> Result<Job, String> {
+        self.catalog_job(move |cancel| {
+            crate::youtube_music::search(&query, cancel)
+                .map(crate::CatalogEvent::YouTubeMusicResults)
+        })
+    }
+
+    pub fn open_youtube_music_album(&self, id: String) -> Result<Job, String> {
+        self.catalog_job(move |cancel| {
+            crate::youtube_music::album(&id, cancel)
+                .map(|album| crate::CatalogEvent::YouTubeMusicAlbum(Box::new(album)))
+        })
+    }
+
+    pub fn open_youtube_music_search(&self, query: &str) -> Result<(), String> {
+        let mut url = reqwest::Url::parse("https://music.youtube.com/search")
+            .expect("constant YouTube Music search URL");
+        url.query_pairs_mut().append_pair("q", query);
+        match open_command(Path::new(url.as_str())) {
+            Ok(status) if status.success() => Ok(()),
+            _ => Err("Could not open YouTube Music in your browser.".into()),
+        }
+    }
+
     fn catalog_job(
         &self,
         run: impl FnOnce(&Cancellation) -> Result<crate::CatalogEvent, String> + Send + 'static,

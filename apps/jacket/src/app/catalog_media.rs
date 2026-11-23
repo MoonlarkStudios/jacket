@@ -106,7 +106,7 @@ impl App {
         // The overscan keeps art ready around the viewport, including rows
         // with wrapped metadata and the header on artist and song pages.
         let first = ((catalog.media.scroll_y / 64.0) as usize).saturating_sub(5);
-        let hits: Vec<_> = if catalog.song.is_some() {
+        let hits: Vec<_> = if catalog.youtube_music_active || catalog.song.is_some() {
             Vec::new()
         } else if let Some(kind) = catalog
             .artist
@@ -140,7 +140,15 @@ impl App {
                 }))
                 .collect()
         };
-        let urls: Vec<_> = if let Some(song) = &catalog.song {
+        let urls: Vec<_> = if catalog.youtube_music_active {
+            catalog
+                .youtube_music_results
+                .iter()
+                .skip(first)
+                .take(PREFETCH_ROWS)
+                .filter_map(|album| album.artwork_url.clone())
+                .collect()
+        } else if let Some(song) = &catalog.song {
             song.details
                 .iter()
                 .flat_map(|details| &details.albums)

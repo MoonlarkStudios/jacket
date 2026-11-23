@@ -13,20 +13,37 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
     let p = app.presentation();
     let catalog = &app.catalog;
     let enabled = !app.busy();
-    let can_replace_query = matches!(catalog.pending, Some(CatalogPending::Search))
-        && catalog.query.trim() != catalog.searched;
-    let can_search =
-        (enabled || can_replace_query) && app.desktop.is_some() && !catalog.query.trim().is_empty();
-    let search = text_input("Artist, album, or song", &catalog.query)
+    let can_edit = !catalog.youtube_music_active
+        || (!catalog.confirm_replace
+            && !matches!(catalog.pending, Some(CatalogPending::YouTubeMusicAlbum)));
+    let can_replace_query = matches!(
+        catalog.pending,
+        Some(CatalogPending::Search | CatalogPending::YouTubeMusicSearch)
+    ) && catalog.query.trim() != catalog.searched;
+    let can_search = (enabled || can_replace_query)
+        && can_edit
+        && app.desktop.is_some()
+        && !catalog.query.trim().is_empty();
+    let placeholder = if catalog.youtube_music_active {
+        "Album or artist"
+    } else {
+        "Artist, album, or song"
+    };
+    let heading = if catalog.youtube_music_active {
+        "Find albums"
+    } else {
+        "Find music"
+    };
+    let search = text_input(placeholder, &catalog.query)
         .id("album-search")
-        .on_input(|query| Message::Catalog(Action::Query(query)))
+        .on_input_maybe(can_edit.then_some(|query| Message::Catalog(Action::Query(query))))
         .on_submit_maybe(can_search.then_some(Message::Catalog(Action::Search)))
         .size(16)
         .padding([11, 13])
         .style(p.input());
-    let top = column![
+    let mut top = column![
         row![
-            text("Find music")
+            text(heading)
                 .size(27)
                 .font(style::semibold())
                 .width(Length::Fill),
@@ -62,7 +79,7 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
                     "clear-music-search",
                     "Clear",
                     Action::ClearSearch,
-                    true,
+                    can_edit,
                     false,
                 )
             },
@@ -77,10 +94,47 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
         ]
         .spacing(8)
         .align_y(Alignment::Center),
-        catalog_search::filters(app, false),
     ]
     .spacing(14);
-    let body = if catalog.choosing_edition {
+    if catalog.youtube_music_available {
+        let source_choice = |label, youtube| {
+            super::focus_button::wrap(
+                if youtube {
+                    "catalog-youtube-music"
+                } else {
+                    "catalog-musicbrainz"
+                },
+                button(label)
+                    .padding([6, 12])
+                    .style(p.choice(catalog.youtube_music_active == youtube)),
+                (enabled && can_edit).then_some(Message::Catalog(Action::UseYouTubeMusic(youtube))),
+                p.colors.accent,
+            )
+        };
+        let mut sources = row![
+            source_choice("YouTube Music", true),
+            source_choice("MusicBrainz", false)
+        ]
+        .spacing(7)
+        .align_y(Alignment::Center);
+        if catalog.youtube_music_active && !catalog.query.trim().is_empty() {
+            sources = sources.push(space::horizontal()).push(action(
+                app,
+                "search-in-browser",
+                "Search on YouTube Music",
+                Action::OpenYouTubeMusicSearch,
+                app.desktop.is_some(),
+                false,
+            ));
+        }
+        top = top.push(sources);
+    }
+    if !catalog.youtube_music_active {
+        top = top.push(catalog_search::filters(app, false));
+    }
+    let body = if catalog.youtube_music_active {
+        catalog_search::youtube_music(app)
+    } else if catalog.choosing_edition {
         editions(app)
     } else if let Some(release) = &catalog.release {
         release_detail(app, release, compact)
@@ -147,6 +201,8 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
         } else {
             match pending {
                 CatalogPending::Search => "Searching MusicBrainz…",
+                CatalogPending::YouTubeMusicSearch => "Searching YouTube Music…",
+                CatalogPending::YouTubeMusicAlbum => "Loading the YouTube Music album…",
                 CatalogPending::Song => "Loading recording…",
                 CatalogPending::SongMatch => "Checking the recording…",
                 CatalogPending::Editions => "Looking up editions…",
@@ -628,7 +684,9 @@ pub(super) fn card<'a>(
         .width(Length::Fill)
         .padding([9, 12])
         .style(p.secondary()),
-        (!app.busy() || may_open_result).then_some(Message::Catalog(select)),
+        ((!app.busy() || may_open_result)
+            && !(app.catalog.youtube_music_active && app.catalog.confirm_replace))
+            .then_some(Message::Catalog(select)),
         p.colors.accent,
     )
 }

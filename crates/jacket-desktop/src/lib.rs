@@ -11,6 +11,7 @@ pub mod musicbrainz;
 pub mod recovery;
 pub mod reviews;
 mod worker;
+pub mod youtube_music;
 
 pub use desktop::{Desktop, SessionAction};
 pub use worker::{CatalogEvent, Event, Job};

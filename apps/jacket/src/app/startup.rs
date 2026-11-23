@@ -71,10 +71,13 @@ impl App {
                 }
             }
         }
+        let mut catalog = super::catalog::Catalog::new(!isolated);
+        catalog.youtube_music_available = !isolated && jacket_desktop::youtube_music::enabled();
+        catalog.youtube_music_active = catalog.youtube_music_available;
         let mut app = Self {
             desktop: None,
             review: None,
-            catalog: super::catalog::Catalog::new(!isolated),
+            catalog,
             job: None,
             url: String::new(),
             intent: SourceIntent::Song,
@@ -207,6 +210,7 @@ impl App {
                         scenario @ ("catalog"
                         | "catalog-results"
                         | "catalog-media"
+                        | "catalog-youtube-music"
                         | "catalog-partial"
                         | "catalog-unavailable"
                         | "catalog-editions"
