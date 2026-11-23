@@ -51,6 +51,10 @@ pub fn preview(desktop: &Desktop, url: &str, scale: f32) -> Result<Raster, Strin
     Raster::decode(&bytes, scale)
 }
 
+pub fn thumbnail(desktop: &Desktop, url: &str) -> Result<iced::widget::image::Handle, String> {
+    raster::thumbnail(&desktop.artwork_thumbnail(url)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{example_cover, preview_url, source_url, Raster};

@@ -16,7 +16,8 @@ import tempfile
 import tomllib
 from xml.etree import ElementTree
 
-from native_package import (LINUX_DESKTOP_ID, ROOT, copy_notices, digest,
+from native_package import (LINUX_DESKTOP_ID, ROOT, copy_catalog_runtime, copy_notices, digest,
+                            verify_catalog_runtime,
                             verify_dependencies, verify_linux_sources, verify_runtime,
                             verify_runtime_platform, write_sources)
 
@@ -96,6 +97,7 @@ def stage(options, version):
         raise ValueError('The release executable version does not match Cargo.toml')
     runtime = verify_runtime(RUNTIME_DIR / 'audio-tools')
     verify_runtime_platform(runtime, 'linux')
+    catalog = verify_catalog_runtime(RUNTIME_DIR / 'catalog-tools', 'linux')
     verify_linux_sources(RUNTIME_DIR / RUNTIME_SOURCES, runtime)
     verify_glibc_baseline([executable, *[runtime / 'bin' / name for name in ('ffmpeg', 'ffprobe', 'node')]])
     dependencies = verify_dependencies(ROOT / 'target/native-dependencies', 'linux')
@@ -115,6 +117,7 @@ def stage(options, version):
         (payload / 'usr/bin').mkdir(parents=True)
         (payload / 'usr/bin/jacket').symlink_to('../libexec/jacket/bin/jacket')
         shutil.copytree(runtime, app / 'resources/audio-tools', symlinks=True)
+        copy_catalog_runtime(catalog, app / 'resources', 'linux')
         copy_notices(app / 'resources', dependencies)
         licenses = payload / 'usr/share/licenses/jacket'
         licenses.mkdir(parents=True)

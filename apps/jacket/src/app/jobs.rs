@@ -5,7 +5,7 @@ use iced::{window, Task};
 use jacket_core::SourceLink;
 use jacket_desktop::downloader_updates;
 use jacket_desktop::{Event, Job};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 impl App {
     pub(super) fn tick(&mut self) -> Task<Message> {
@@ -30,6 +30,7 @@ impl App {
                         }
                     }
                 }
+                Event::Catalog(event) => tasks.push(self.catalog_finished(Ok(event))),
                 Event::Progress(progress) => self.progress = Some(progress),
                 Event::Inspected(inspection) => {
                     tasks.push(self.finish_inspection(inspection));
@@ -38,6 +39,10 @@ impl App {
                     tasks.push(self.finish_export(result));
                 }
                 Event::Failed(error) => {
+                    if self.catalog.pending.is_some() {
+                        tasks.push(self.catalog_finished(Err(error)));
+                        continue;
+                    }
                     if let Some(intake) = self.intake.take() {
                         if intake.cancelling {
                             self.notice = Some("Lookup cancelled.".into());
@@ -99,6 +104,10 @@ impl App {
             self.raster_refresh_pending = false;
             tasks.push(self.display_scale_changed(self.display_scale));
         }
+        if self.catalog.visible && tasks.is_empty() {
+            tasks.push(self.tick_catalog_search(Instant::now()));
+        }
+        tasks.push(self.tick_catalog_media());
         tasks.push(self.sync_album_scan());
         if self.screenshot.is_some() && self.started.elapsed() > Duration::from_secs(2) {
             tasks.push(
@@ -168,6 +177,7 @@ impl App {
         match SourceLink::parse(&self.url) {
             Ok(link) => {
                 self.source_error = None;
+                self.catalog.visible = false;
                 self.admit(desktop.inspect(link.target(self.intent).to_owned(), self.auth.clone()));
                 if let Some(job) = &self.job {
                     self.intake = Some(super::intake::Intake::new(

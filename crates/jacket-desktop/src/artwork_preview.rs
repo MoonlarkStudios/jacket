@@ -6,17 +6,38 @@ use std::time::Duration;
 const MAX_BYTES: u64 = 10 * 1024 * 1024;
 
 pub(crate) fn fetch(url: &str) -> Result<Vec<u8>, String> {
-    if !audio_engine::source::valid_artwork_url(url) {
+    load(
+        url,
+        MAX_BYTES,
+        Duration::from_secs(15),
+        audio_engine::source::valid_artwork_url,
+    )
+}
+
+pub(crate) fn thumbnail(url: &str) -> Result<Vec<u8>, String> {
+    load(
+        url,
+        1024 * 1024,
+        Duration::from_secs(6),
+        audio_engine::source::valid_artwork_url,
+    )
+}
+
+fn load(
+    url: &str,
+    max_bytes: u64,
+    timeout: Duration,
+    valid_url: fn(&str) -> bool,
+) -> Result<Vec<u8>, String> {
+    if !valid_url(url) {
         return Err("The source cover address is unsupported.".into());
     }
     let client = reqwest::blocking::Client::builder()
         .user_agent("Jacket-cover-preview")
-        .connect_timeout(Duration::from_secs(5))
-        .timeout(Duration::from_secs(15))
-        .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            if attempt.previous().len() >= 3
-                || !audio_engine::source::valid_artwork_url(attempt.url().as_str())
-            {
+        .connect_timeout(timeout.min(Duration::from_secs(5)))
+        .timeout(timeout)
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() >= 3 || !valid_url(attempt.url().as_str()) {
                 attempt.stop()
             } else {
                 attempt.follow()
@@ -31,21 +52,21 @@ pub(crate) fn fetch(url: &str) -> Result<Vec<u8>, String> {
         .map_err(|_| "The source cover could not be loaded.")?;
     if response
         .content_length()
-        .is_some_and(|size| size > MAX_BYTES)
+        .is_some_and(|size| size > max_bytes)
     {
         return Err("The source cover is too large to preview.".into());
     }
     let mut bytes = Vec::new();
     response
-        .take(MAX_BYTES + 1)
+        .take(max_bytes + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| "The source cover could not be loaded.")?;
-    validate(&bytes)?;
+    validate(&bytes, max_bytes)?;
     Ok(bytes)
 }
 
-fn validate(bytes: &[u8]) -> Result<(), String> {
-    if bytes.len() as u64 > MAX_BYTES {
+fn validate(bytes: &[u8], max_bytes: u64) -> Result<(), String> {
+    if bytes.len() as u64 > max_bytes {
         return Err("The source cover is too large to preview.".into());
     }
     artwork_assets::dimensions(bytes)?;
@@ -79,7 +100,7 @@ mod tests {
             image::DynamicImage::new_rgb8(544, 544)
                 .write_to(&mut bytes, format)
                 .expect("encoded cover");
-            validate(bytes.get_ref()).expect("supported source cover");
+            validate(bytes.get_ref(), super::MAX_BYTES).expect("supported source cover");
         }
     }
 
@@ -88,7 +109,7 @@ mod tests {
         let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
         png.extend_from_slice(&20_000_u32.to_be_bytes());
         png.extend_from_slice(&20_000_u32.to_be_bytes());
-        assert!(validate(&png).is_err());
-        assert!(validate(b"not an image").is_err());
+        assert!(validate(&png, super::MAX_BYTES).is_err());
+        assert!(validate(b"not an image", super::MAX_BYTES).is_err());
     }
 }

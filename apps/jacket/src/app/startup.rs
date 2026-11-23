@@ -71,9 +71,11 @@ impl App {
                 }
             }
         }
+        let catalog = super::catalog::Catalog::new(!isolated);
         let mut app = Self {
             desktop: None,
             review: None,
+            catalog,
             job: None,
             url: String::new(),
             intent: SourceIntent::Song,
@@ -202,6 +204,16 @@ impl App {
                         }
                         Err(error) => app.error = Some(error.to_string()),
                     },
+                    Some(
+                        scenario @ ("catalog"
+                        | "catalog-results"
+                        | "catalog-artist"
+                        | "catalog-album"
+                        | "catalog-editions"
+                        | "catalog-unavailable"),
+                    ) => {
+                        app.catalog_snapshot(scenario);
+                    }
                     Some("settings") => app.panel = Panel::Settings,
                     Some("appearance") => app.panel = Panel::Appearance,
                     Some("options") => app.panel = Panel::Options,

@@ -1,5 +1,7 @@
 //! Native application state, controllers, and persistence orchestration.
 mod artwork;
+mod catalog;
+mod catalog_media;
 mod controller;
 mod destination;
 mod destination_dialog;
@@ -14,6 +16,9 @@ mod state;
 #[cfg(test)]
 mod tests;
 
+pub use catalog::{
+    artist_credit_id, edition_id, result_id, song_album_id, CatalogAction, CatalogPending,
+};
 pub use intake::SourceKind;
 pub use receipt::Receipt;
 pub use state::{App, Message, Panel, ProfileChoice};

@@ -1,12 +1,16 @@
 use crate::artwork_assets::{self, Asset, Crop};
 use crate::auth_session::{self, Control, Keychain};
 use crate::browser_sessions::{self, Catalog, Locations};
+use crate::catalog::SearchRequest;
 use crate::downloader_updates::{self, Channel, Preferences};
 use crate::export_completion;
 use crate::recovery::{self, Recovery};
 use crate::reviews::{self, CompletionIdentity, ReviewDraft};
 use crate::worker::{Admission, Event, Job, Lease};
-use audio_engine::{AuthOptions, Browser, ExportPlan, ExportResult, OutputKind, Toolchain};
+use crate::youtube_music::{self, Runtime as YouTubeMusicRuntime};
+use audio_engine::{
+    AuthOptions, Browser, Cancellation, ExportPlan, ExportResult, OutputKind, Toolchain,
+};
 use directories::BaseDirs;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -78,6 +82,7 @@ struct Services {
     reviews: reviews::Store,
     session: Control,
     admission: Admission,
+    youtube_music: Option<YouTubeMusicRuntime>,
     exported: Mutex<HashMap<PathBuf, PublishedExport>>,
 }
 
@@ -193,6 +198,10 @@ impl Desktop {
         // A crashed development session can leave a plaintext handoff behind.
         // Cleanup owns the instance lock; a failure must not block public use.
         let _ = auth_session::startup(&data.join("auth-prototype"));
+        let youtube_music = YouTubeMusicRuntime::discover(
+            &resources,
+            std::env::var_os("JACKET_YOUTUBE_MUSIC_PYTHON").map(PathBuf::from),
+        );
         Ok(Self(Arc::new(Services {
             _instance: instance,
             data,
@@ -202,6 +211,7 @@ impl Desktop {
             reviews: reviews::Store::default(),
             session: Control::default(),
             admission: Arc::new(Mutex::new(None)),
+            youtube_music,
             exported: Mutex::new(HashMap::new()),
         })))
     }
@@ -286,7 +296,114 @@ impl Desktop {
         }
         artwork_assets::prune(&self.artwork_root(), &retained)
     }
+    pub fn search_catalog(&self, request: SearchRequest) -> Result<Job, String> {
+        self.youtube_music_job(move |runtime, cancel| {
+            youtube_music::search(runtime, &request.query, request.filter, cancel).map(|hits| {
+                crate::CatalogEvent::Results {
+                    filter: request.filter,
+                    hits,
+                }
+            })
+        })
+    }
+
+    pub fn open_youtube_music_artist(&self, id: String) -> Result<Job, String> {
+        self.youtube_music_job(move |runtime, cancel| {
+            youtube_music::artist(runtime, &id, false, cancel).map(crate::CatalogEvent::Artist)
+        })
+    }
+
+    pub fn youtube_music_artist_releases(&self, id: String) -> Result<Job, String> {
+        self.youtube_music_job(move |runtime, cancel| {
+            youtube_music::artist(runtime, &id, true, cancel)
+                .map(|page| crate::CatalogEvent::ArtistReleases(page.hits))
+        })
+    }
+
+    pub fn open_youtube_music_album(&self, id: String) -> Result<Job, String> {
+        self.youtube_music_job(move |runtime, cancel| {
+            youtube_music::album(runtime, &id, cancel)
+                .map(|album| crate::CatalogEvent::Album(Box::new(album)))
+        })
+    }
+
+    pub fn youtube_music_editions(&self, id: String) -> Result<Job, String> {
+        self.youtube_music_job(move |runtime, cancel| {
+            youtube_music::editions(runtime, &id, cancel).map(crate::CatalogEvent::Editions)
+        })
+    }
+
+    pub fn open_youtube_music_song_album(&self, song: youtube_music::Song) -> Result<Job, String> {
+        self.youtube_music_job(move |runtime, cancel| {
+            youtube_music::song_album(runtime, song, cancel)
+                .map(|album| crate::CatalogEvent::Album(Box::new(album)))
+        })
+    }
+
+    pub fn open_youtube_music_song(&self, song: youtube_music::Song) -> Result<Job, String> {
+        self.youtube_music_job(move |runtime, cancel| {
+            youtube_music::song(runtime, song, cancel)
+                .map(|song| crate::CatalogEvent::Song(Box::new(song)))
+        })
+    }
+
+    pub fn open_youtube_music_search(&self, query: &str) -> Result<(), String> {
+        let mut url = reqwest::Url::parse("https://music.youtube.com/search")
+            .expect("constant YouTube Music search URL");
+        url.query_pairs_mut().append_pair("q", query);
+        match open_command(Path::new(url.as_str())) {
+            Ok(status) if status.success() => Ok(()),
+            _ => Err("Could not open YouTube Music in your browser.".into()),
+        }
+    }
+
+    fn youtube_music_job(
+        &self,
+        run: impl FnOnce(&YouTubeMusicRuntime, &Cancellation) -> Result<crate::CatalogEvent, String>
+            + Send
+            + 'static,
+    ) -> Result<Job, String> {
+        let runtime = self
+            .0
+            .youtube_music
+            .clone()
+            .ok_or("YouTube Music is unavailable in this build of Jacket.")?;
+        self.catalog_job(move |cancel| run(&runtime, cancel))
+    }
+
+    fn catalog_job(
+        &self,
+        run: impl FnOnce(&Cancellation) -> Result<crate::CatalogEvent, String> + Send + 'static,
+    ) -> Result<Job, String> {
+        Job::spawn(operation_id(), &self.0.admission, move |cancel, _| {
+            run(cancel).map(Event::Catalog)
+        })
+    }
+
     pub fn inspect(&self, url: String, auth: AuthOptions) -> Result<Job, String> {
+        self.inspection_job(auth, move |tools, auth, cancel, events| {
+            audio_engine::inspect_streaming(tools, &url, auth, cancel, |update| {
+                if events.send(Event::Track(Box::new(update))).is_err() {
+                    cancel.cancel();
+                }
+            })
+            .map(Event::Inspected)
+            .map_err(|error| error.to_string())
+        })
+    }
+
+    fn inspection_job(
+        &self,
+        auth: AuthOptions,
+        inspect: impl FnOnce(
+                &Toolchain,
+                &AuthOptions,
+                &Cancellation,
+                &std::sync::mpsc::SyncSender<Event>,
+            ) -> Result<Event, String>
+            + Send
+            + 'static,
+    ) -> Result<Job, String> {
         let desktop = self.clone();
         Job::spawn(operation_id(), &self.0.admission, move |cancel, events| {
             let _guard = desktop
@@ -299,22 +416,11 @@ impl Desktop {
             let auth = desktop.resolve_auth(&auth)?;
             let handoff = auth_session::materialize(&desktop.session_root(), &Keychain, &auth)?;
             let runtime_auth = handoff.as_ref().map_or(&auth, |handoff| &handoff.auth);
-            let inspection = audio_engine::inspect_streaming(
-                &desktop.tools()?,
-                &url,
-                runtime_auth,
-                cancel,
-                |update| {
-                    if events.send(Event::Track(Box::new(update))).is_err() {
-                        cancel.cancel();
-                    }
-                },
-            )
-            .map_err(|error| error.to_string())?;
+            let result = inspect(&desktop.tools()?, runtime_auth, cancel, events)?;
             if let Some(handoff) = handoff {
                 handoff.persist(&desktop.session_root(), &Keychain)?;
             }
-            Ok(Event::Inspected(inspection))
+            Ok(result)
         })
     }
 
@@ -507,6 +613,10 @@ impl Desktop {
 
     pub fn artwork_preview(&self, url: &str) -> Result<Vec<u8>, String> {
         crate::artwork_preview::fetch(url)
+    }
+
+    pub fn artwork_thumbnail(&self, url: &str) -> Result<Vec<u8>, String> {
+        crate::artwork_preview::thumbnail(url)
     }
 
     /// Own a bounded public source cover before allowing a crop to modify it.

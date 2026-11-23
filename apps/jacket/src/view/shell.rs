@@ -18,14 +18,15 @@ fn view_at(app: &App, size: iced::Size) -> Element<'_, Message> {
     let p = app.presentation();
     let content: Element<'_, Message> =
         if app.panel == Panel::Workspace || app.panel.review_tool() {
-            let mut body = column![
-                header(app, compact),
-                rule::horizontal(1).style(p.line()),
-                source(app, compact),
-                rule::horizontal(1).style(p.line())
-            ]
-            .spacing(0)
-            .height(Length::Fill);
+            let show_catalog = app.catalog.visible && app.panel == Panel::Workspace;
+            let mut body = column![header(app, compact), rule::horizontal(1).style(p.line())]
+                .spacing(0)
+                .height(Length::Fill);
+            if !show_catalog {
+                body = body
+                    .push(source(app, compact))
+                    .push(rule::horizontal(1).style(p.line()));
+            }
             if let Some(error) = &app.error {
                 body = body.push(notice(app, error, true));
             } else if let Some(note) = &app.notice {
@@ -69,8 +70,13 @@ fn view_at(app: &App, size: iced::Size) -> Element<'_, Message> {
                     .style(move |_| p.surface(p.colors.panel)),
                 );
             }
-            body = body.push(workspace::view(app, compact));
-            body.push(status(app)).into()
+            if show_catalog {
+                body.push(super::catalog::view(app, compact)).into()
+            } else {
+                body.push(workspace::view(app, compact))
+                    .push(status(app))
+                    .into()
+            }
         } else {
             let body = panel_body(app, compact);
 
@@ -196,6 +202,13 @@ fn panel_body(app: &App, compact: bool) -> Element<'_, Message> {
             "This removes the saved edits for this review. Your exported files stay in their destination.",
             "Discard review",
             Message::ConfirmReset,
+        ),
+        Panel::Close if app.catalog.pending.is_some() => confirmation(
+            app,
+            "Stop this lookup and close?",
+            "Any saved review will be available when you reopen Jacket.",
+            "Stop and close",
+            Message::ConfirmClose,
         ),
         Panel::Close if app.intake.is_some() => confirmation(
             app,
@@ -325,7 +338,13 @@ fn source(app: &App, _compact: bool) -> Element<'_, Message> {
         ),
     ]
     .spacing(10)
-    .align_y(Alignment::Center)]
+    .align_y(Alignment::Center)
+    .push(super::focus_button::wrap(
+        "browse-albums",
+        button("Find music").padding([8, 10]).style(p.secondary()),
+        (enabled && !app.example).then_some(Message::Catalog(crate::app::CatalogAction::Browse)),
+        p.colors.accent,
+    ))]
     .spacing(10);
     if link.is_some_and(|link| link.has_playlist_context()) {
         let choice = |id, label, intent| {

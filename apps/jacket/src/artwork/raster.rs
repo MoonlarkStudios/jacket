@@ -30,38 +30,8 @@ impl PartialEq for Raster {
 impl Raster {
     /// Decode once with explicit encoded, dimension and allocation bounds.
     pub fn decode(bytes: &[u8], scale: f32) -> Result<Self, String> {
-        if bytes.len() > MAX_ENCODED_BYTES {
-            return Err("Cover images must be 10 MiB or smaller.".into());
-        }
-        let mut reader = image::ImageReader::new(Cursor::new(bytes))
-            .with_guessed_format()
-            .map_err(|_| "The cover image could not be read.")?;
-        let mut limits = image::Limits::default();
-        limits.max_alloc = Some(MAX_DECODED_BYTES);
-        limits.max_image_width = Some(MAX_DIMENSION);
-        limits.max_image_height = Some(MAX_DIMENSION);
-        reader.limits(limits);
-        let decoded = reader
-            .decode()
-            .map_err(|_| "The cover image could not be decoded within its size limits.")?;
-        let (width, height) = decoded.dimensions();
-        // Grayscale inputs can meet decoder limits while exceeding the RGBA
-        // budget. Check before allocating the retained four-channel image.
-        if width == 0
-            || height == 0
-            || width > MAX_DIMENSION
-            || height > MAX_DIMENSION
-            || u64::from(width) * u64::from(height) > MAX_DECODED_BYTES / 4
-        {
-            return Err("The decoded cover image exceeds its size limits.".into());
-        }
-        let rgba = decoded.into_rgba8();
-        let (width, height) = fit_dimensions(width, height, SOURCE_EDGE, SOURCE_EDGE);
-        let source = if rgba.dimensions() == (width, height) {
-            to_handle(rgba)
-        } else {
-            to_handle(resize(&rgba, width, height))
-        };
+        let rgba = decode_rgba(bytes, MAX_DIMENSION)?;
+        let source = fit_handle(rgba, SOURCE_EDGE);
         Ok(Self::prepare(source, normalized_scale(scale)))
     }
 
@@ -162,6 +132,57 @@ impl Raster {
             crop,
             scale,
         }
+    }
+}
+
+/// Catalog cards use square artwork, including providers' wide artist photos.
+pub(crate) fn thumbnail(bytes: &[u8]) -> Result<Handle, String> {
+    let rgba = decode_rgba(bytes, 1024)?;
+    let (width, height) = rgba.dimensions();
+    let edge = width.min(height);
+    let square = if width == height {
+        rgba
+    } else {
+        image::imageops::crop_imm(&rgba, (width - edge) / 2, (height - edge) / 2, edge, edge)
+            .to_image()
+    };
+    Ok(fit_handle(square, 250))
+}
+
+fn decode_rgba(bytes: &[u8], max_edge: u32) -> Result<RgbaImage, String> {
+    if bytes.len() > MAX_ENCODED_BYTES {
+        return Err("Cover images must be 10 MiB or smaller.".into());
+    }
+    let mut reader = image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|_| "The cover image could not be read.")?;
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(MAX_DECODED_BYTES);
+    limits.max_image_width = Some(max_edge);
+    limits.max_image_height = Some(max_edge);
+    reader.limits(limits);
+    let decoded = reader
+        .decode()
+        .map_err(|_| "The cover image could not be decoded within its size limits.")?;
+    let (width, height) = decoded.dimensions();
+    // Grayscale inputs can meet decoder limits while exceeding the RGBA budget.
+    if width == 0
+        || height == 0
+        || width > max_edge
+        || height > max_edge
+        || u64::from(width) * u64::from(height) > MAX_DECODED_BYTES / 4
+    {
+        return Err("The decoded cover image exceeds its size limits.".into());
+    }
+    Ok(decoded.into_rgba8())
+}
+
+fn fit_handle(rgba: RgbaImage, edge: u32) -> Handle {
+    let (width, height) = fit_dimensions(rgba.width(), rgba.height(), edge, edge);
+    if rgba.dimensions() == (width, height) {
+        to_handle(rgba)
+    } else {
+        to_handle(resize(&rgba, width, height))
     }
 }
 

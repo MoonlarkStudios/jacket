@@ -203,9 +203,22 @@ pub fn valid_artwork_url(input: &str) -> bool {
             && url.password().is_none()
             && url.port().is_none()
             && url.host_str().is_some_and(|host| {
-                ["ytimg.com", "googleusercontent.com", "ggpht.com"]
+                let youtube = ["ytimg.com", "googleusercontent.com", "ggpht.com"]
                     .iter()
-                    .any(|allowed| host == *allowed || host.ends_with(&format!(".{allowed}")))
+                    .any(|allowed| host == *allowed || host.ends_with(&format!(".{allowed}")));
+                let path = url.path();
+                let cover_archive = host == "coverartarchive.org"
+                    && (path.starts_with("/release/")
+                        && ["/front-250", "/front-500", "/front-1200"]
+                            .iter()
+                            .any(|suffix| path.ends_with(suffix))
+                        || path.starts_with("/release-group/") && path.ends_with("/front-250"));
+                let archive_image = (host == "archive.org" || host.ends_with(".archive.org"))
+                    && (path.starts_with("/download/mbid-") || path.contains("/items/mbid-"))
+                    && [".jpg", ".png", ".webp"]
+                        .iter()
+                        .any(|suffix| path.ends_with(suffix));
+                youtube || cover_archive || archive_image
             })
     })
 }
@@ -790,6 +803,28 @@ mod tests {
         assert_eq!(preview.tracks.len(), 2);
         assert_eq!(preview.suggested_mode, CollectionMode::Collection);
         assert!(preview.warnings[0].contains("1 unavailable"));
+    }
+
+    #[test]
+    fn cover_art_archive_accepts_its_release_images_and_redirect_hosts() {
+        for url in [
+            "https://coverartarchive.org/release/e65fcfb0-02dc-407c-ab28-8168dafcb999/front-500",
+            "https://coverartarchive.org/release/e65fcfb0-02dc-407c-ab28-8168dafcb999/front-250",
+            "https://coverartarchive.org/release-group/e65fcfb0-02dc-407c-ab28-8168dafcb999/front-250",
+            "https://archive.org/download/mbid-e65fcfb0-02dc-407c-ab28-8168dafcb999/cover_thumb500.jpg",
+            "https://dn710000.ca.archive.org/0/items/mbid-e65fcfb0-02dc-407c-ab28-8168dafcb999/cover_thumb500.jpg",
+        ] {
+            assert!(valid_artwork_url(url), "{url}");
+        }
+        for url in [
+            "https://coverartarchive.org/admin/front-500",
+            "https://archive.org/download/unrelated/cover.jpg",
+            "http://archive.org/download/mbid-test/cover.jpg",
+            "https://archive.org.invalid/download/mbid-test/cover.jpg",
+            "https://archive.org/download/mbid-test/audio.flac",
+        ] {
+            assert!(!valid_artwork_url(url), "{url}");
+        }
     }
 
     #[test]

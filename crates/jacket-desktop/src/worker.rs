@@ -1,6 +1,7 @@
 //! One admitted operation owns its cancellation token until its worker exits.
 use crate::auth_session;
 use crate::browser_sessions::AccessCheck;
+use crate::catalog::SearchKind;
 use crate::downloader_updates::Status;
 use audio_engine::{Cancellation, ExportResult, Inspection, InspectionUpdate, ProgressEvent};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
@@ -8,8 +9,22 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 #[derive(Clone, Debug)]
+pub enum CatalogEvent {
+    Results {
+        filter: Option<SearchKind>,
+        hits: Vec<crate::youtube_music::SearchHit>,
+    },
+    Artist(crate::youtube_music::ArtistPage),
+    ArtistReleases(Vec<crate::youtube_music::SearchHit>),
+    Album(Box<crate::youtube_music::AlbumPage>),
+    Editions(Vec<crate::youtube_music::AlbumEdition>),
+    Song(Box<Inspection>),
+}
+
+#[derive(Clone, Debug)]
 pub enum Event {
     Track(Box<InspectionUpdate>),
+    Catalog(CatalogEvent),
     Progress(ProgressEvent),
     Inspected(Inspection),
     Exported(ExportResult),

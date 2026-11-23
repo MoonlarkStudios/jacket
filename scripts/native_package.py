@@ -23,6 +23,8 @@ MACOS_BUNDLE_IDENTIFIER = 'com.moonlarkstudios.jacket'
 LINUX_DESKTOP_ID = 'com.moonlark.audio-dl'
 MACOS_ICON = Path('apps/jacket/packaging/macos/Jacket.icns')
 REQUIRED_TOOLS = ('yt-dlp', 'ffmpeg', 'ffprobe', 'node')
+CATALOG_LOCK = ROOT / 'scripts/youtube-music-runtime.lock.json'
+CATALOG_HELPER = ROOT / 'crates/jacket-desktop/src/youtube_music.py'
 
 
 def digest(path):
@@ -43,7 +45,7 @@ def verify_macos_minimum(minimum, root=ROOT):
         raise ValueError(f'Bundled tools require macOS {minimum}. The deployment target is macOS {target}.')
 
 
-def verify_runtime(directory):
+def verify_runtime(directory, required_tools=REQUIRED_TOOLS):
     directory = directory.resolve(strict=True)
     manifest = json.loads((directory / 'manifest.json').read_text())
     files = manifest['files']
@@ -65,11 +67,42 @@ def verify_runtime(directory):
     for name, expected in files.items():
         if digest(directory / name) != expected:
             raise ValueError(f'Audio runtime checksum changed: {name}')
-    for name in REQUIRED_TOOLS:
+    for name in required_tools:
         executable = directory / 'bin' / name
         if not executable.is_file() or not os.access(executable, os.X_OK):
             raise ValueError(f'Bundled {name} is missing or not executable')
     return directory
+
+
+def verify_catalog_runtime(directory, target):
+    directory = verify_runtime(directory, ('youtube-music',))
+    manifest = json.loads((directory / 'manifest.json').read_text())
+    if manifest.get('platform') != target or manifest.get('lockSha256') != digest(CATALOG_LOCK):
+        raise ValueError('Catalog tools belong to a different platform or lockfile')
+    if digest(directory / 'youtube_music.py') != digest(CATALOG_HELPER):
+        raise ValueError('The packaged YouTube Music helper is stale')
+    for item in json.loads(CATALOG_LOCK.read_text())['packages'].values():
+        source = item['source']
+        if digest(directory / 'sources' / source['filename']) != source['sha256']:
+            raise ValueError(f'Catalog dependency source changed: {source["filename"]}')
+    return directory
+
+
+def check_catalog_launcher(directory):
+    version = json.loads(CATALOG_LOCK.read_text())['packages']['ytmusicapi']['version']
+    actual = subprocess.check_output(
+        [directory / 'bin/youtube-music', '--version'], text=True,
+        env={'PATH': '/usr/bin:/bin', 'HOME': '/var/empty', 'LANG': 'C'},
+    ).strip()
+    if actual != version:
+        raise ValueError('The packaged YouTube Music helper loaded an unexpected version')
+
+
+def copy_catalog_runtime(runtime, resources, target):
+    destination = resources / 'catalog-tools'
+    shutil.copytree(runtime, destination)
+    verify_catalog_runtime(destination, target)
+    check_catalog_launcher(destination)
 
 
 def verify_runtime_platform(directory, target_platform):
@@ -184,6 +217,7 @@ def build_candidate(options):
         raise ValueError('The Linux bundle must be built on Linux')
     runtime = verify_runtime(options.runtime)
     verify_runtime_platform(runtime, options.platform)
+    catalog = verify_catalog_runtime(runtime.with_name('catalog-tools'), options.platform)
     dependencies = verify_dependencies(options.dependencies, options.platform)
     companion = ROOT / 'target/native-runtime/linux/jacket-linux-runtime-sources.tar.gz'
     if options.platform == 'linux':
@@ -235,7 +269,7 @@ def build_candidate(options):
             shutil.copy2(ROOT / 'apps/jacket/packaging/linux' / f'{LINUX_DESKTOP_ID}.desktop', staged)
             (staged / 'README.txt').write_text(
                 'Run bin/jacket in a graphical Linux session.\n'
-                'The audio runtime is bundled; system Python 3, CA certificates, '
+                'The audio and YouTube Music libraries are bundled; system Python 3.10 or later, CA certificates, '
                 'X11/Wayland, xdg-utils, Zenity and GPU/display drivers remain system dependencies.\n'
                 'This is a local qualification candidate, not an installer.\n'
                 'The .desktop file is a template: install bin/jacket and the icon '
@@ -244,6 +278,7 @@ def build_candidate(options):
         shutil.copy2(executable, binaries / 'jacket')
         shutil.copytree(runtime, resources / 'audio-tools', symlinks=True)
         verify_runtime(resources / 'audio-tools')
+        copy_catalog_runtime(catalog, resources, options.platform)
         copy_notices(resources, dependencies)
         if options.platform == 'macos':
             subprocess.run(['/usr/bin/codesign', '--force', '--sign', '-', str(staged)], check=True)
