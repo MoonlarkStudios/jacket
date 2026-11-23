@@ -2,7 +2,7 @@ use super::{catalog_media::CatalogMedia, persistence, App, Message, Panel};
 use audio_engine::Inspection;
 use iced::{widget::operation, Task};
 use jacket_desktop::catalog::{SearchKind, SearchRequest};
-use jacket_desktop::youtube_music::{AlbumPage, ArtistPage, SearchHit, SearchItem};
+use jacket_desktop::youtube_music::{AlbumEdition, AlbumPage, ArtistPage, SearchHit, SearchItem};
 use jacket_desktop::{CatalogEvent, Job};
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -25,6 +25,8 @@ pub enum CatalogAction {
     OpenResult(SearchKind, String),
     OpenSongAlbum(String),
     OpenAlbumArtist(usize),
+    ToggleEditions,
+    OpenEdition(String),
     OpenInBrowser,
     Scrolled(f32),
     Back,
@@ -37,6 +39,7 @@ pub enum CatalogPending {
     Search,
     Artist,
     Album,
+    Editions,
     Song,
 }
 
@@ -46,15 +49,25 @@ enum CatalogPage {
         page: ArtistPage,
         all_releases: bool,
     },
-    Album(Box<AlbumPage>),
+    Album(Box<AlbumPage>, EditionShelf),
+}
+
+#[derive(Default)]
+pub struct EditionShelf {
+    pub open: bool,
+    pub rows: Option<Vec<AlbumEdition>>,
 }
 
 impl CatalogPage {
+    fn album(page: Box<AlbumPage>) -> Self {
+        Self::Album(page, EditionShelf::default())
+    }
+
     fn initial_focus(&self) -> &'static str {
         match self {
             Self::Search => "album-search",
             Self::Artist { .. } => "artist-back",
-            Self::Album(_) => "review-album",
+            Self::Album(..) => "review-album",
         }
     }
 }
@@ -140,7 +153,14 @@ impl Catalog {
 
     pub fn album(&self) -> Option<&AlbumPage> {
         match &self.page {
-            CatalogPage::Album(album) => Some(album),
+            CatalogPage::Album(album, _) => Some(album),
+            _ => None,
+        }
+    }
+
+    pub fn edition_shelf(&self) -> Option<&EditionShelf> {
+        match &self.page {
+            CatalogPage::Album(_, shelf) => Some(shelf),
             _ => None,
         }
     }
@@ -148,7 +168,7 @@ impl Catalog {
     pub fn back_label(&self) -> &'static str {
         match self.history.last().map(|entry| &entry.page) {
             Some(CatalogPage::Artist { .. }) => "Back to artist",
-            Some(CatalogPage::Album(_)) => "Back to album",
+            Some(CatalogPage::Album(..)) => "Back to album",
             _ => "Back to results",
         }
     }
@@ -157,7 +177,7 @@ impl Catalog {
         match &self.page {
             CatalogPage::Search => self.results.get(&self.filter).map_or(&[], Vec::as_slice),
             CatalogPage::Artist { page, .. } => &page.hits,
-            CatalogPage::Album(_) => &[],
+            CatalogPage::Album(..) => &[],
         }
     }
 
@@ -439,6 +459,39 @@ impl App {
                     }
                 }
             }
+            CatalogAction::ToggleEditions => {
+                if !self.catalog.confirm_replace {
+                    if let CatalogPage::Album(album, shelf) = &mut self.catalog.page {
+                        shelf.open = !shelf.open;
+                        self.catalog.error = None;
+                        if shelf.open {
+                            if let Some(desktop) = desktop.filter(|_| shelf.rows.is_none()) {
+                                let job = desktop.youtube_music_editions(album.id.clone());
+                                self.start_catalog(CatalogPending::Editions, job);
+                            }
+                            return self.catalog_scroll(0.0);
+                        }
+                    }
+                }
+            }
+            CatalogAction::OpenEdition(id) => {
+                if !self.catalog.confirm_replace {
+                    let known = self.catalog.edition_shelf().is_some_and(|shelf| {
+                        shelf.open
+                            && shelf
+                                .rows
+                                .as_ref()
+                                .is_some_and(|rows| rows.iter().any(|row| row.id == id))
+                    });
+                    if let Some(desktop) = desktop.filter(|_| known) {
+                        self.start_navigation(
+                            CatalogPending::Album,
+                            edition_id(&id),
+                            desktop.open_youtube_music_album(id),
+                        );
+                    }
+                }
+            }
             CatalogAction::Search => {
                 let catalog = &mut self.catalog;
                 catalog.search_due = None;
@@ -612,6 +665,12 @@ impl App {
             self.catalog.song_focus = None;
         }
         if std::mem::take(&mut self.catalog.cancelling) {
+            if matches!(pending, Some(CatalogPending::Editions)) {
+                if let CatalogPage::Album(_, shelf) = &mut self.catalog.page {
+                    shelf.open = false;
+                }
+                return operation::focus("toggle-editions");
+            }
             return self
                 .catalog
                 .queued_action
@@ -637,7 +696,17 @@ impl App {
                 );
             }
             Ok(CatalogEvent::Album(album)) => {
-                return self.finish_navigation(CatalogPage::Album(album), origin);
+                return self.finish_navigation(CatalogPage::album(album), origin);
+            }
+            Ok(CatalogEvent::Editions(rows)) => {
+                if let CatalogPage::Album(_, shelf) = &mut self.catalog.page {
+                    let focus = rows.first().map_or_else(
+                        || "toggle-editions".into(),
+                        |edition| edition_id(&edition.id),
+                    );
+                    shelf.rows = Some(rows);
+                    return operation::focus(focus);
+                }
             }
             Ok(CatalogEvent::Song(song)) => {
                 self.catalog.song = Some(song);
@@ -657,6 +726,10 @@ impl App {
 
 pub fn result_id(kind: SearchKind, id: &str) -> String {
     format!("catalog-{}-{id}", kind.label())
+}
+
+pub fn edition_id(id: &str) -> String {
+    format!("other-edition-{id}")
 }
 
 pub fn artist_credit_id(index: usize) -> String {
@@ -723,7 +796,7 @@ impl App {
             None,
             serde_json::from_value(json!(hits)).expect("fictional search results"),
         );
-        if scenario == "catalog-album" {
+        if matches!(scenario, "catalog-album" | "catalog-editions") {
             let mut album = crate::example::album();
             album.title = releases[0].1.into();
             album.artwork_url = Some(COVER.into());
@@ -732,16 +805,27 @@ impl App {
                 track.metadata.album.clone_from(&album.title);
                 track.source_metadata.album.clone_from(&album.title);
             }
-            self.catalog.page = CatalogPage::Album(Box::new(AlbumPage {
+            self.catalog.page = CatalogPage::album(Box::new(AlbumPage {
+                id: releases[0].0.into(),
                 inspection: album,
                 artists: vec![serde_json::from_value(artist).expect("fictional artist credit")],
             }));
+            if scenario == "catalog-editions" {
+                if let CatalogPage::Album(_, shelf) = &mut self.catalog.page {
+                    shelf.open = true;
+                    shelf.rows = Some(serde_json::from_value(json!([
+                        {"id": "MPREb_ed1", "title": "Room to breathe", "year": 2018, "track_count": 10, "artwork_url": COVER},
+                        {"id": "MPREb_ed2", "title": "Room to breathe (Deluxe Edition)", "year": 2024, "track_count": 20, "artwork_url": COVER},
+                        {"id": "MPREb_ed3", "title": "Room to breathe (Remastered)", "year": 2025, "artwork_url": COVER}
+                    ])).expect("fictional album editions"));
+                }
+            }
         }
         let focus = match &self.catalog.page {
             CatalogPage::Artist { page, .. } => {
                 Some(result_id(SearchKind::Artists, &page.artist.id))
             }
-            CatalogPage::Album(_) => Some(result_id(SearchKind::Albums, releases[0].0)),
+            CatalogPage::Album(..) => Some(result_id(SearchKind::Albums, releases[0].0)),
             CatalogPage::Search => None,
         };
         if let Some(focus) = focus {
@@ -780,6 +864,7 @@ mod tests {
         let track = album.tracks[0].clone();
         album.tracks = vec![track; 20];
         let _ = app.catalog_finished(Ok(CatalogEvent::Album(Box::new(AlbumPage {
+            id: "MPREb_fixture".into(),
             inspection: album,
             artists: Vec::new(),
         }))));

@@ -320,6 +320,12 @@ impl Desktop {
         })
     }
 
+    pub fn youtube_music_editions(&self, id: String) -> Result<Job, String> {
+        self.youtube_music_job(move |runtime, cancel| {
+            youtube_music::editions(runtime, &id, cancel).map(crate::CatalogEvent::Editions)
+        })
+    }
+
     pub fn open_youtube_music_song_album(&self, song: youtube_music::Song) -> Result<Job, String> {
         self.youtube_music_job(move |runtime, cancel| {
             youtube_music::song_album(runtime, song, cancel)

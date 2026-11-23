@@ -49,7 +49,21 @@ impl App {
             return Task::none();
         };
         let urls: Vec<_> = if let Some(album) = catalog.album() {
-            album.inspection.artwork_url.iter().cloned().collect()
+            album
+                .inspection
+                .artwork_url
+                .iter()
+                .cloned()
+                .chain(
+                    catalog
+                        .edition_shelf()
+                        .filter(|shelf| shelf.open)
+                        .and_then(|shelf| shelf.rows.as_ref())
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|edition| edition.artwork_url.clone()),
+                )
+                .collect()
         } else {
             catalog
                 .featured()

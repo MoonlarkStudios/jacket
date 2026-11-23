@@ -209,6 +209,7 @@ impl App {
                         | "catalog-results"
                         | "catalog-artist"
                         | "catalog-album"
+                        | "catalog-editions"
                         | "catalog-unavailable"),
                     ) => {
                         app.catalog_snapshot(scenario);

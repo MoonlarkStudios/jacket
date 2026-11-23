@@ -152,8 +152,18 @@ pub struct ArtistCredit {
     pub id: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub struct AlbumEdition {
+    pub id: String,
+    pub title: String,
+    pub year: Option<u32>,
+    pub track_count: Option<usize>,
+    pub artwork_url: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct AlbumPage {
+    pub id: String,
     pub inspection: Inspection,
     pub artists: Vec<ArtistCredit>,
 }
@@ -300,9 +310,31 @@ pub(crate) fn album(
         !artist.name.trim().is_empty()
     });
     Ok(AlbumPage {
+        id: id.into(),
         inspection: inspection(id, detail)?,
         artists,
     })
+}
+
+pub(crate) fn editions(
+    runtime: &Runtime,
+    id: &str,
+    cancel: &Cancellation,
+) -> Result<Vec<AlbumEdition>, String> {
+    if !valid_album_id(id) {
+        return Err("YouTube Music returned an invalid album identifier.".into());
+    }
+    let mut editions: Vec<AlbumEdition> = request(runtime, "editions", id, None, cancel)?;
+    let mut seen = HashSet::new();
+    editions.retain_mut(|edition| {
+        discard_untrusted_artwork(&mut edition.artwork_url);
+        edition.track_count = edition.track_count.filter(|&count| count > 0);
+        edition.id != id
+            && valid_album_id(&edition.id)
+            && !edition.title.trim().is_empty()
+            && seen.insert(edition.id.clone())
+    });
+    Ok(editions)
 }
 
 pub(crate) fn song_album(

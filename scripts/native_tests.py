@@ -18,8 +18,8 @@ import native_installers as installers
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def load_script(name):
-    spec = importlib.util.spec_from_file_location(name, ROOT / 'scripts' / f'{name}.py')
+def load_script(name, path=None):
+    spec = importlib.util.spec_from_file_location(name, path or ROOT / 'scripts' / f'{name}.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -28,6 +28,54 @@ def load_script(name):
 packaging = load_script('native_package')
 doctor = load_script('native_doctor')
 licenses = load_script('native_licenses')
+
+
+class EditionMatching(unittest.TestCase):
+    def setUp(self):
+        self.bridge = load_script('youtube_music', packaging.CATALOG_HELPER)
+        self.client = mock.Mock()
+
+    def test_explicit_versions_get_metadata_and_keep_partial_rows(self):
+        main = {'title': 'Album', 'other_versions': [
+            {'browseId': 'MPREb_main', 'title': 'Album'},
+            {'browseId': 'MPREb_deluxe', 'title': 'Album (Deluxe Edition)'},
+            {'browseId': 'MPREb_deluxe', 'title': 'Duplicate'},
+            {'browseId': 'MPREb_partial', 'title': 'Album (Remastered)', 'year': '2024'},
+        ]}
+        albums = {
+            'MPREb_main': main,
+            'MPREb_deluxe': {'title': 'Album (Deluxe Edition)', 'year': '2023', 'trackCount': 18},
+        }
+        self.client.get_album.side_effect = albums.__getitem__
+        rows = self.bridge.album_editions(self.client, 'MPREb_main', (KeyError,))
+        self.assertEqual([(r['title'], r['year'], r['track_count']) for r in rows], [
+            ('Album (Deluxe Edition)', 2023, 18), ('Album (Remastered)', 2024, None),
+        ])
+        self.client.search.assert_not_called()
+
+    def test_album_search_rejects_a_similarly_named_single_and_unrelated_tracks(self):
+        credits = [{'name': 'Stevie Ray Vaughan', 'id': 'stevie'},
+                   {'name': 'Double Trouble', 'id': 'band'}]
+        base = {'title': 'Texas Flood (Legacy Edition)', 'artists': credits, 'type': 'Album',
+                'tracks': [{'title': 'Love Struck Baby'}, {'title': 'Pride and Joy'}]}
+        single = {'browseId': 'MPREb_single', 'title': 'Texas Flood (Remastered 2024)',
+                  'artists': credits[:1] + [{'name': 'Albert King', 'id': 'albert'}],
+                  'type': 'Single'}
+        unrelated = {'browseId': 'MPREb_other', 'title': 'Texas Flood',
+                     'artists': credits, 'type': 'Album', 'tracks': [{'title': 'Different song'}]}
+        alternate = {**unrelated, 'browseId': 'MPREb_match', 'year': 1999, 'trackCount': 2,
+                     'tracks': [{'title': 'Pride and Joy (Remastered)'}, {'title': 'Love Struck Baby'}]}
+        self.client.get_album.side_effect = {
+            'MPREb_main': base, 'MPREb_other': unrelated, 'MPREb_match': alternate,
+        }.__getitem__
+        self.client.search.return_value = [single, unrelated, alternate]
+
+        rows = self.bridge.album_editions(self.client, 'MPREb_main', (KeyError,))
+        self.assertEqual([(r['id'], r['year'], r['track_count']) for r in rows], [
+            ('MPREb_match', 1999, 2),
+        ])
+        self.client.search.assert_called_once_with('Texas Flood Stevie Ray Vaughan', filter='albums', limit=12)
+        self.assertNotIn(mock.call('MPREb_single'), self.client.get_album.call_args_list)
 
 
 class DependencyBoundaries(unittest.TestCase):

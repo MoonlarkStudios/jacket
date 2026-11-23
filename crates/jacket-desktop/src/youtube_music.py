@@ -1,7 +1,9 @@
 """Emit only the public music metadata needed by Jacket's native app."""
 
 import json
+import re
 import sys
+import time
 
 
 def artists(item):
@@ -132,16 +134,126 @@ def album_detail(client, album_id):
     }
 
 
+EDITION_SUFFIX = re.compile(
+    r"\s*[\[(](?:(?:\d{4} )?remaster(?:ed)?(?: \d{4})?|"
+    r"(?:legacy|deluxe|super deluxe|expanded|anniversary|special|standard|\d+(?:st|nd|rd|th) anniversary) edition)"
+    r"[\])]\s*$",
+    re.IGNORECASE,
+)
+
+
+def title_key(title):
+    return " ".join(re.findall(r"[^\W_]+", title.casefold()))
+
+
+def artist_ids(item):
+    credits = item.get("artists") or []
+    if all(credit.get("id") for credit in credits):
+        return {credit["id"] for credit in credits}
+    return set()
+
+
+def same_album(source, candidate):
+    ids = artist_ids(source)
+    kind = source.get("type")
+    return (
+        ids
+        and ids == artist_ids(candidate)
+        and kind
+        and kind == candidate.get("type")
+        and title_key(EDITION_SUFFIX.sub("", source.get("title") or ""))
+        == title_key(EDITION_SUFFIX.sub("", candidate.get("title") or ""))
+    )
+
+
+def shared_track_list(source, candidate):
+    def track_titles(album):
+        return {
+            title_key(EDITION_SUFFIX.sub("", track["title"]))
+            for track in album.get("tracks") or [] if track.get("title")
+        }
+    left = track_titles(source)
+    right = track_titles(candidate)
+    return len(left & right) * 2 > min(len(left), len(right))
+
+
+def edition_summary(item, browse_id):
+    count = item.get("trackCount")
+    return {
+        "id": browse_id,
+        "title": item.get("title") or "",
+        "year": year(item),
+        "track_count": count if type(count) is int and count > 0 else None,
+        "artwork_url": artwork(item, 160),
+    }
+
+
+def edition_candidates(items, album_id):
+    seen = {album_id}
+    for item in items:
+        browse_id = item.get("browseId") or ""
+        if browse_id not in seen and re.fullmatch(r"MPRE[A-Za-z0-9_-]{1,96}", browse_id):
+            seen.add(browse_id)
+            yield item, browse_id
+
+
+def album_editions(client, album_id, lookup_errors):
+    deadline = time.monotonic() + 8
+    source = client.get_album(album_id)
+    candidates = list(edition_candidates(source.get("other_versions") or [], album_id))
+    linked = bool(candidates)
+    if not linked:
+        artist = next((credit["name"] for credit in source.get("artists") or [] if credit.get("name")), "")
+        if not artist or not artist_ids(source) or not source.get("title"):
+            return []
+        title = EDITION_SUFFIX.sub("", source["title"])
+        hits = client.search(f"{title} {artist}", filter="albums", limit=12)
+        candidates = edition_candidates((hit for hit in hits if same_album(source, hit)), album_id)
+
+    editions = []
+    for item, browse_id in candidates:
+        summary = edition_summary(item, browse_id)
+        if time.monotonic() < deadline and (not linked or None in (summary["year"], summary["track_count"])):
+            try:
+                detail = client.get_album(browse_id)
+            except lookup_errors:
+                detail = None
+            if detail is not None:
+                if not linked and not (same_album(source, detail) and shared_track_list(source, detail)):
+                    continue
+                values = edition_summary(detail, browse_id)
+                summary.update({key: value for key, value in values.items() if value not in (None, "")})
+            elif not linked:
+                continue
+        elif not linked:
+            break
+        if summary["title"]:
+            editions.append(summary)
+    return editions
+
+
 def main():
     from ytmusicapi import YTMusic
 
-    client = YTMusic(language="en")
     if sys.argv[1:] == ["--version"]:
         from importlib.metadata import version
 
+        YTMusic(language="en")
         print(version("ytmusicapi"))
         return
     operation, value, category = sys.argv[1:]
+    if operation == "editions":
+        from functools import partial
+        from requests import RequestException, Session
+        from ytmusicapi.exceptions import YTMusicError
+
+        with Session() as session:
+            session.request = partial(session.request, timeout=2.5)
+            client = YTMusic(language="en", requests_session=session)
+            result = album_editions(client, value, (YTMusicError, RequestException))
+        print(json.dumps(result))
+        return
+    client = YTMusic(language="en")
     if operation == "search":
         result = search_hits(client, value, category or None)
     elif operation == "album":

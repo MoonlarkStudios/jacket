@@ -1,5 +1,7 @@
 use super::{catalog_search, components};
-use crate::app::{artist_credit_id, App, CatalogAction as Action, CatalogPending, Message};
+use crate::app::{
+    artist_credit_id, edition_id, App, CatalogAction as Action, CatalogPending, Message,
+};
 use crate::icons::{self, Icon};
 use crate::style;
 use audio_engine::Inspection;
@@ -21,7 +23,12 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
     }
 
     let body = if let Some(album) = catalog.album() {
-        album_tracks(app, &album.inspection)
+        let tracks = album_tracks(app, &album.inspection);
+        if catalog.edition_shelf().is_some_and(|shelf| shelf.open) {
+            column![other_editions(app), tracks].spacing(24).into()
+        } else {
+            tracks
+        }
     } else {
         catalog_search::view(app, compact)
     };
@@ -185,14 +192,31 @@ fn album_header<'a>(app: &'a App, page: &'a AlbumPage, compact: bool) -> Element
                 text(details.join("  ·  "))
                     .size(13)
                     .color(p.colors.text_muted),
-                action(
-                    app,
-                    "review-album",
-                    "Review download",
-                    Action::Review,
-                    !app.busy() && !app.catalog.confirm_replace,
-                    true,
-                ),
+                row![
+                    action(
+                        app,
+                        "review-album",
+                        "Review download",
+                        Action::Review,
+                        !app.busy() && !app.catalog.confirm_replace,
+                        true,
+                    ),
+                    action(
+                        app,
+                        "toggle-editions",
+                        if app.catalog.edition_shelf().is_some_and(|shelf| shelf.open) {
+                            "Hide editions"
+                        } else {
+                            "Other editions"
+                        },
+                        Action::ToggleEditions,
+                        !app.busy() && !app.catalog.confirm_replace,
+                        false,
+                    ),
+                ]
+                .spacing(8)
+                .wrap()
+                .vertical_spacing(6),
             ]
             .spacing(8)
             .width(Length::Fill),
@@ -238,6 +262,50 @@ fn album_artist_credits<'a>(app: &'a App, page: &'a AlbumPage) -> Element<'a, Me
         }
     }
     credits.wrap().vertical_spacing(2).into()
+}
+
+fn other_editions(app: &App) -> Element<'_, Message> {
+    let p = app.presentation();
+    let mut section = column![text("Other editions").size(18).font(style::semibold())].spacing(8);
+    if let Some(rows) = app
+        .catalog
+        .edition_shelf()
+        .and_then(|shelf| shelf.rows.as_ref())
+    {
+        if rows.is_empty() {
+            section = section.push(
+                text("No other editions found on YouTube Music.")
+                    .size(14)
+                    .color(p.colors.text_muted),
+            );
+        }
+        section = section.extend(rows.iter().map(|edition| {
+            let mut details = Vec::new();
+            if let Some(year) = edition.year {
+                details.push(year.to_string());
+            }
+            if let Some(count) = edition.track_count {
+                details.push(if count == 1 {
+                    "1 track".into()
+                } else {
+                    format!("{count} tracks")
+                });
+            }
+            let cover = edition
+                .artwork_url
+                .as_deref()
+                .and_then(|url| app.catalog.media.get(url));
+            card(
+                app,
+                edition_id(&edition.id),
+                edition.title.clone(),
+                details.join(" · "),
+                Some(catalog_search::thumbnail(app, cover, None, 48.0)),
+                Action::OpenEdition(edition.id.clone()),
+            )
+        }));
+    }
+    section.into()
 }
 
 fn album_tracks<'a>(app: &'a App, album: &'a Inspection) -> Element<'a, Message> {
@@ -314,6 +382,7 @@ fn status(app: &App) -> Element<'_, Message> {
                 CatalogPending::Search => "Searching YouTube Music…",
                 CatalogPending::Artist => "Loading artist…",
                 CatalogPending::Album => "Loading album…",
+                CatalogPending::Editions => "Looking for other editions…",
                 CatalogPending::Song => "Loading recording details…",
             }
         };
@@ -377,12 +446,12 @@ pub(super) fn card<'a>(
     select: Action,
 ) -> Element<'a, Message> {
     let p = app.presentation();
-    let labels = column![
-        text(title).size(15).font(style::semibold()),
-        text(subtitle).size(12).color(p.colors.text_muted),
-    ]
-    .spacing(4)
-    .width(Length::Fill);
+    let mut labels = column![text(title).size(15).font(style::semibold())]
+        .spacing(4)
+        .width(Length::Fill);
+    if !subtitle.is_empty() {
+        labels = labels.push(text(subtitle).size(12).color(p.colors.text_muted));
+    }
     let mut item = row![].spacing(10).align_y(Alignment::Center);
     if let Some(thumbnail) = thumbnail {
         item = item.push(thumbnail);

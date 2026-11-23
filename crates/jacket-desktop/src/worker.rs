@@ -16,6 +16,7 @@ pub enum CatalogEvent {
     },
     Artist(crate::youtube_music::ArtistPage),
     Album(Box<crate::youtube_music::AlbumPage>),
+    Editions(Vec<crate::youtube_music::AlbumEdition>),
     Song(Box<Inspection>),
 }
 

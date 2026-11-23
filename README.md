@@ -53,6 +53,8 @@ to choose tracks and edit tags before saving. You can also open a song directly
 from search or paste a YouTube link. **View album** on a song opens its linked edition.
 Select a credited artist on an album to browse their catalog. Back returns to the
 previous page and restores your filter, scroll position, and focused result.
+Use **Other editions** on an album to compare release names, years, and track
+counts where YouTube Music supplies them.
 
 ## Prepare your audio
 
