@@ -206,6 +206,8 @@ impl App {
                     Some(
                         scenario @ ("catalog"
                         | "catalog-results"
+                        | "catalog-partial"
+                        | "catalog-unavailable"
                         | "catalog-editions"
                         | "catalog-album"
                         | "catalog-match"

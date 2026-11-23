@@ -2,11 +2,15 @@
 use super::{request, validate_id, Album};
 use audio_engine::Cancellation;
 use serde::Deserialize;
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 const PAGE_SIZE: usize = 24;
 const MAX_RESULTS: usize = 240;
 const ALBUM_TYPES: &str = "(primarytype:album^8 OR primarytype:ep^3 OR primarytype:single)";
+const CACHE_CAPACITY: usize = 64;
+const CACHE_LIFETIME: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum SearchKind {
@@ -35,7 +39,7 @@ impl SearchKind {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SearchScope {
     Text(String),
     Artist(String),
@@ -218,7 +222,74 @@ struct SearchResponse {
     recordings: Vec<Song>,
 }
 
+#[derive(Default)]
+pub(crate) struct SearchCache {
+    entries: VecDeque<CachedPage>,
+}
+
+struct CachedPage {
+    scope: SearchScope,
+    kind: SearchKind,
+    offset: usize,
+    fetched: Instant,
+    page: SearchPage,
+}
+
+impl SearchCache {
+    fn get(
+        &mut self,
+        scope: &SearchScope,
+        kind: SearchKind,
+        offset: usize,
+        now: Instant,
+    ) -> Option<SearchPage> {
+        let index = self.entries.iter().position(|entry| {
+            &entry.scope == scope && entry.kind == kind && entry.offset == offset
+        })?;
+        let entry = self.entries.remove(index)?;
+        if now.duration_since(entry.fetched) >= CACHE_LIFETIME {
+            return None;
+        }
+        let page = entry.page.clone();
+        self.entries.push_back(entry);
+        Some(page)
+    }
+
+    fn insert(&mut self, entry: CachedPage) {
+        if self.entries.len() == CACHE_CAPACITY {
+            self.entries.pop_front();
+        }
+        self.entries.push_back(entry);
+    }
+}
+
 pub(crate) fn search(
+    cache: &Mutex<SearchCache>,
+    scope: &SearchScope,
+    kind: SearchKind,
+    offset: usize,
+    cancel: &Cancellation,
+) -> Result<SearchPage, String> {
+    cancel.check().map_err(|error| error.to_string())?;
+    if let Ok(mut cache) = cache.lock() {
+        if let Some(page) = cache.get(scope, kind, offset, Instant::now()) {
+            return Ok(page);
+        }
+    }
+    let page = fetch(scope, kind, offset, cancel)?;
+    if let Ok(mut cache) = cache.lock() {
+        cache.insert(CachedPage {
+            scope: scope.clone(),
+            kind,
+            offset,
+            fetched: Instant::now(),
+            page: page.clone(),
+        });
+    }
+    Ok(page)
+}
+
+fn fetch(
     scope: &SearchScope,
     kind: SearchKind,
     offset: usize,
@@ -432,8 +503,78 @@ fn search_key(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{expression, prioritize, SearchHit, SearchKind, SearchPage, SearchScope};
+    use super::{
+        expression, prioritize, search, CachedPage, SearchCache, SearchHit, SearchKind, SearchPage,
+        SearchScope, CACHE_CAPACITY, CACHE_LIFETIME,
+    };
+    use audio_engine::Cancellation;
     use serde_json::json;
+    use std::{sync::Mutex, time::Instant};
+
+    #[test]
+    fn search_reuses_successful_pages_for_the_same_scope_kind_and_offset() {
+        let mut cache = SearchCache::default();
+        let scope = SearchScope::Artist("cached".into());
+        let kind = SearchKind::Songs;
+        let now = Instant::now();
+        cache.insert(CachedPage {
+            scope: scope.clone(),
+            kind,
+            offset: 24,
+            fetched: now,
+            page: SearchPage {
+                hits: vec![],
+                next_offset: Some(48),
+            },
+        });
+        assert!(cache.get(&scope, kind, 0, now).is_none());
+        assert!(cache.get(&scope, SearchKind::Albums, 24, now).is_none());
+        assert!(cache
+            .get(&SearchScope::Text("cached".into()), kind, 24, now)
+            .is_none());
+        let cache = Mutex::new(cache);
+        let cancel = Cancellation::default();
+        // This fixture has no valid artist ID, so it can only succeed from the cache.
+        assert_eq!(
+            search(&cache, &scope, kind, 24, &cancel)
+                .unwrap()
+                .next_offset,
+            Some(48)
+        );
+        cancel.cancel();
+        assert!(search(&cache, &scope, kind, 24, &cancel).is_err());
+        assert!(cache
+            .lock()
+            .unwrap()
+            .get(&scope, kind, 24, now + CACHE_LIFETIME)
+            .is_none());
+    }
+
+    #[test]
+    fn cache_evicts_the_least_recently_used_page_at_capacity() {
+        let mut cache = SearchCache::default();
+        let scope = SearchScope::Text("Artist".into());
+        let kind = SearchKind::Albums;
+        let now = Instant::now();
+        let entry = |offset| CachedPage {
+            scope: scope.clone(),
+            kind,
+            offset,
+            fetched: now,
+            page: SearchPage {
+                hits: vec![],
+                next_offset: None,
+            },
+        };
+        for offset in 0..CACHE_CAPACITY {
+            cache.insert(entry(offset));
+        }
+        assert!(cache.get(&scope, kind, 0, now).is_some());
+        cache.insert(entry(CACHE_CAPACITY));
+        assert!(cache.get(&scope, kind, 1, now).is_none());
+        assert!(cache.get(&scope, kind, 0, now).is_some());
+        assert_eq!(cache.entries.len(), CACHE_CAPACITY);
+    }
 
     #[test]
     fn exact_credited_song_and_album_beat_title_overlap() {

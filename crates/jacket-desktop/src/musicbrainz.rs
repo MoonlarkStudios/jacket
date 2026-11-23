@@ -3,7 +3,7 @@ mod discovery;
 mod recording;
 
 use audio_engine::Cancellation;
-pub(crate) use discovery::search;
+pub(crate) use discovery::{search, SearchCache};
 pub use discovery::{Artist, SearchHit, SearchKind, SearchPage, SearchScope, Song};
 use jacket_core::{AlbumRelease, ReleaseTrack, SourceLink};
 pub(crate) use recording::recording_details;
@@ -12,10 +12,42 @@ use reqwest::blocking::Client;
 use serde::{de::DeserializeOwned, Deserialize};
 use std::io::Read;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
-static NEXT_REQUEST: Mutex<Option<Instant>> = Mutex::new(None);
+const REQUEST_INTERVAL: Duration = Duration::from_secs(1);
+const BUSY: &str = "MusicBrainz is busy. Try again shortly.";
+const DEFAULT_COOLDOWN: Duration = Duration::from_secs(3);
+static REQUEST_SCHEDULE: Mutex<RequestSchedule> = Mutex::new(RequestSchedule {
+    next_request: None,
+    retry_after: None,
+});
+
+struct RequestSchedule {
+    next_request: Option<Instant>,
+    retry_after: Option<Instant>,
+}
+
+impl RequestSchedule {
+    fn reserve(&mut self, now: Instant) -> Result<Duration, String> {
+        if self.retry_after.is_some_and(|deadline| now < deadline) {
+            return Err(BUSY.into());
+        }
+        if let Some(next) = self.next_request.filter(|&next| now < next) {
+            return Ok(next - now);
+        }
+        self.next_request = Some(now + REQUEST_INTERVAL);
+        Ok(Duration::ZERO)
+    }
+
+    fn pause(&mut self, now: Instant, delay: Duration) {
+        let deadline = now.checked_add(delay).unwrap_or(now + DEFAULT_COOLDOWN);
+        self.retry_after = Some(
+            self.retry_after
+                .map_or(deadline, |current| current.max(deadline)),
+        );
+    }
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -446,29 +478,29 @@ fn request<T: DeserializeOwned>(
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| "Could not start a MusicBrainz request.")?;
-    let send = || {
-        wait_for_request(cancel)?;
-        let response = client
-            .get(format!("https://musicbrainz.org/ws/2/{path}"))
-            .query(&[("fmt", "json")])
-            .query(params)
-            .send()
-            .map_err(|_| "Could not reach MusicBrainz. Check your connection and try again.")?;
-        cancel.check().map_err(|error| error.to_string())?;
-        Ok::<_, String>(response)
-    };
-    let initial = send()?;
-    let response = if initial.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE
-        && !initial.headers().contains_key(reqwest::header::RETRY_AFTER)
-    {
-        drop(initial);
-        send()?
-    } else {
-        initial
-    };
+    wait_for_request(cancel)?;
+    let response = client
+        .get(format!("https://musicbrainz.org/ws/2/{path}"))
+        .query(&[("fmt", "json")])
+        .query(params)
+        .send()
+        .map_err(|_| "Could not reach MusicBrainz. Check your connection and try again.")?;
+    if matches!(response.status().as_u16(), 429 | 503) {
+        let delay = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| retry_delay(value, SystemTime::now()))
+            .unwrap_or(DEFAULT_COOLDOWN);
+        REQUEST_SCHEDULE
+            .lock()
+            .map_err(|_| "MusicBrainz request scheduling failed.")?
+            .pause(Instant::now(), delay);
+        return Err(BUSY.into());
+    }
+    cancel.check().map_err(|error| error.to_string())?;
     match response.status().as_u16() {
         200 => (),
-        429 | 503 => return Err("MusicBrainz is busy. Wait a moment and try again.".into()),
         404 => return Err("MusicBrainz could not find that edition.".into()),
         _ => return Err("MusicBrainz could not complete this request. Try again.".into()),
     }
@@ -485,23 +517,72 @@ fn request<T: DeserializeOwned>(
         .map_err(|_| "MusicBrainz returned unexpected release data.".into())
 }
 
-fn wait_for_request(cancel: &Cancellation) -> Result<(), String> {
-    let mut last = NEXT_REQUEST
-        .lock()
-        .map_err(|_| "MusicBrainz request scheduling failed.")?;
-    while last.is_some_and(|time| time.elapsed() < Duration::from_secs(1)) {
-        cancel.check().map_err(|error| error.to_string())?;
-        std::thread::sleep(Duration::from_millis(50));
+fn retry_delay(value: &str, now: SystemTime) -> Option<Duration> {
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
     }
-    cancel.check().map_err(|error| error.to_string())?;
-    *last = Some(Instant::now());
-    Ok(())
+    let date = httpdate::parse_http_date(value).ok()?;
+    Some(date.duration_since(now).unwrap_or_default())
+}
+
+fn wait_for_request(cancel: &Cancellation) -> Result<(), String> {
+    loop {
+        cancel.check().map_err(|error| error.to_string())?;
+        let delay = REQUEST_SCHEDULE
+            .lock()
+            .map_err(|_| "MusicBrainz request scheduling failed.")?
+            .reserve(Instant::now())?;
+        if delay.is_zero() {
+            return Ok(());
+        }
+        std::thread::sleep(delay.min(Duration::from_millis(50)));
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{download_store, linked_album, release_from_response};
+    use super::{
+        download_store, linked_album, release_from_response, retry_delay, RequestSchedule,
+        DEFAULT_COOLDOWN, REQUEST_INTERVAL,
+    };
     use serde_json::json;
+    use std::time::{Duration, Instant, SystemTime};
+
+    #[test]
+    fn provider_cooldown_blocks_attempts_until_the_deadline() {
+        let mut schedule = RequestSchedule {
+            next_request: None,
+            retry_after: None,
+        };
+        let now = Instant::now();
+        assert_eq!(schedule.reserve(now).unwrap(), Duration::ZERO);
+        assert_eq!(schedule.reserve(now).unwrap(), REQUEST_INTERVAL);
+        schedule.pause(now, DEFAULT_COOLDOWN);
+        schedule.pause(now + Duration::from_secs(1), Duration::ZERO);
+        assert!(schedule.reserve(now + REQUEST_INTERVAL).is_err());
+        assert_eq!(
+            schedule.reserve(now + DEFAULT_COOLDOWN).unwrap(),
+            Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn retry_after_accepts_seconds_and_http_dates() {
+        let now = SystemTime::UNIX_EPOCH;
+        assert_eq!(retry_delay("8", now), Some(Duration::from_secs(8)));
+        assert_eq!(
+            retry_delay("Thu, 01 Jan 1970 00:00:05 GMT", now),
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(
+            retry_delay(
+                "Thu, 01 Jan 1970 00:00:00 GMT",
+                now + Duration::from_secs(1)
+            ),
+            Some(Duration::ZERO)
+        );
+        assert_eq!(retry_delay("later", now), None);
+    }
 
     #[test]
     fn a_release_preserves_track_credit_and_only_exposes_eligible_source_links() {

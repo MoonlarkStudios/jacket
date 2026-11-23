@@ -351,8 +351,15 @@ impl App {
                 self.catalog.clear_album();
                 self.catalog.artist = None;
                 self.catalog.song = None;
-                self.catalog.results = SearchSections::default();
-                self.catalog.searched = query;
+                if self.catalog.searched == query {
+                    let sections = &mut self.catalog.results;
+                    sections
+                        .errors
+                        .retain(|kind, _| sections.pages.contains_key(kind));
+                } else {
+                    self.catalog.results = SearchSections::default();
+                    self.catalog.searched = query;
+                }
                 return Task::batch([
                     reset_scroll(),
                     Task::done(Message::Catalog(CatalogAction::LoadVisible)),
@@ -743,6 +750,13 @@ impl App {
         }
         self.catalog.query = "The Paper Trails".into();
         self.catalog.searched = self.catalog.query.clone();
+        if scenario == "catalog-unavailable" {
+            self.catalog.results.errors = SearchKind::ALL
+                .into_iter()
+                .map(|kind| (kind, "MusicBrainz is busy. Try again shortly.".into()))
+                .collect();
+            return;
+        }
         let album = group(
             "50de827a-6631-4099-bd85-23dd6cb69d66",
             "Room to breathe",
@@ -805,6 +819,14 @@ impl App {
             .insert(SearchKind::Songs, songs.clone());
         match scenario {
             "catalog-results" => return,
+            "catalog-partial" => {
+                self.catalog.results.pages.remove(&SearchKind::Songs);
+                self.catalog.results.errors.insert(
+                    SearchKind::Songs,
+                    "MusicBrainz is busy. Try again shortly.".into(),
+                );
+                return;
+            }
             "catalog-artist" => {
                 self.catalog.artist = Some(ArtistPage {
                     artist,
@@ -1045,6 +1067,23 @@ mod tests {
         );
         assert!(app.catalog.pending.is_none());
         assert!(app.catalog.queued_action.is_none());
+    }
+
+    #[test]
+    fn resubmitting_a_search_keeps_loaded_pages_and_reopens_failed_sections() {
+        let (mut app, _) = App::new();
+        app.loading = false;
+        app.catalog_snapshot("catalog-results");
+        let results = &mut app.catalog.results;
+        results.pages.remove(&SearchKind::Artists);
+        results.errors.insert(SearchKind::Artists, "Busy".into());
+        results.errors.insert(SearchKind::Songs, "Busy".into());
+        let _ = app.update(Message::Catalog(CatalogAction::Search));
+        let results = &app.catalog.results;
+        assert!(results.pages.contains_key(&SearchKind::Albums));
+        assert_eq!(results.pages[&SearchKind::Songs].next_offset, Some(24));
+        assert!(!results.errors.contains_key(&SearchKind::Artists));
+        assert!(results.errors.contains_key(&SearchKind::Songs));
     }
 
     #[test]

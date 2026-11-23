@@ -3,6 +3,7 @@ use crate::auth_session::{self, Control, Keychain};
 use crate::browser_sessions::{self, Catalog, Locations};
 use crate::downloader_updates::{self, Channel, Preferences};
 use crate::export_completion;
+use crate::musicbrainz::{self, SearchCache};
 use crate::recovery::{self, Recovery};
 use crate::reviews::{self, CompletionIdentity, ReviewDraft};
 use crate::worker::{Admission, Event, Job, Lease};
@@ -80,6 +81,7 @@ struct Services {
     reviews: reviews::Store,
     session: Control,
     admission: Admission,
+    catalog_search: Mutex<SearchCache>,
     exported: Mutex<HashMap<PathBuf, PublishedExport>>,
 }
 
@@ -204,6 +206,7 @@ impl Desktop {
             reviews: reviews::Store::default(),
             session: Control::default(),
             admission: Arc::new(Mutex::new(None)),
+            catalog_search: Mutex::default(),
             exported: Mutex::new(HashMap::new()),
         })))
     }
@@ -293,12 +296,14 @@ impl Desktop {
         scope: crate::musicbrainz::SearchScope,
         pages: Vec<(crate::musicbrainz::SearchKind, usize)>,
     ) -> Result<Job, String> {
+        let services = Arc::clone(&self.0);
         Job::spawn(operation_id(), &self.0.admission, move |cancel, events| {
             for (kind, offset) in pages {
                 if cancel.check().is_err() {
                     break;
                 }
-                let result = crate::musicbrainz::search(&scope, kind, offset, cancel);
+                let result =
+                    musicbrainz::search(&services.catalog_search, &scope, kind, offset, cancel);
                 if cancel.check().is_err() {
                     break;
                 }

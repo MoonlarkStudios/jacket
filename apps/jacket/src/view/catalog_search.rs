@@ -72,6 +72,25 @@ pub(super) fn results(app: &App, compact: bool) -> Element<'_, Message> {
                 .color(p.colors.text_muted),
         );
     }
+    if let Some(error) = catalog.results.errors.get(&SearchKind::Artists) {
+        if catalog.results.pages.is_empty()
+            && SearchKind::ALL
+                .iter()
+                .all(|kind| catalog.results.errors.get(kind) == Some(error))
+        {
+            return body
+                .push(text(error).size(14).color(p.colors.danger))
+                .push(action(
+                    app,
+                    "retry-catalog-search",
+                    "Retry search",
+                    Action::Search,
+                    !app.busy(),
+                    true,
+                ))
+                .into();
+        }
+    }
     if SearchKind::ALL.iter().all(|kind| {
         catalog
             .results
