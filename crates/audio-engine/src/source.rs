@@ -208,10 +208,11 @@ pub fn valid_artwork_url(input: &str) -> bool {
                     .any(|allowed| host == *allowed || host.ends_with(&format!(".{allowed}")));
                 let path = url.path();
                 let cover_archive = host == "coverartarchive.org"
-                    && path.starts_with("/release/")
-                    && ["/front-500", "/front-1200"]
-                        .iter()
-                        .any(|suffix| path.ends_with(suffix));
+                    && (path.starts_with("/release/")
+                        && ["/front-250", "/front-500", "/front-1200"]
+                            .iter()
+                            .any(|suffix| path.ends_with(suffix))
+                        || path.starts_with("/release-group/") && path.ends_with("/front-250"));
                 let archive_image = (host == "archive.org" || host.ends_with(".archive.org"))
                     && (path.starts_with("/download/mbid-") || path.contains("/items/mbid-"))
                     && [".jpg", ".png", ".webp"]
@@ -890,6 +891,8 @@ printf '%s\n' \
     fn cover_art_archive_accepts_its_release_images_and_redirect_hosts() {
         for url in [
             "https://coverartarchive.org/release/e65fcfb0-02dc-407c-ab28-8168dafcb999/front-500",
+            "https://coverartarchive.org/release/e65fcfb0-02dc-407c-ab28-8168dafcb999/front-250",
+            "https://coverartarchive.org/release-group/e65fcfb0-02dc-407c-ab28-8168dafcb999/front-250",
             "https://archive.org/download/mbid-e65fcfb0-02dc-407c-ab28-8168dafcb999/cover_thumb500.jpg",
             "https://dn710000.ca.archive.org/0/items/mbid-e65fcfb0-02dc-407c-ab28-8168dafcb999/cover_thumb500.jpg",
         ] {

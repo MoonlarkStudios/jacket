@@ -1,11 +1,14 @@
 //! Public catalog search and edition lookup from MusicBrainz.
 mod discovery;
+mod portraits;
 mod recording;
 
 use audio_engine::Cancellation;
 pub(crate) use discovery::{search, SearchCache};
 pub use discovery::{Artist, SearchHit, SearchKind, SearchPage, SearchScope, Song};
 use jacket_core::{AlbumRelease, ReleaseTrack, SourceLink};
+pub(crate) use portraits::{artist_portraits, valid_credit_url};
+pub use portraits::{ArtistPortrait, PortraitCredit};
 pub(crate) use recording::recording_details;
 pub use recording::SongDetails;
 use reqwest::blocking::Client;
@@ -69,6 +72,17 @@ impl Album {
     pub fn artist(&self) -> String {
         artist(&self.artist_credit)
     }
+
+    pub fn cover_thumbnail(&self) -> Option<String> {
+        cover_thumbnail("release-group", &self.id)
+    }
+}
+
+fn cover_thumbnail(entity: &str, id: &str) -> Option<String> {
+    validate_id(id).ok()?;
+    Some(format!(
+        "https://coverartarchive.org/{entity}/{id}/front-250"
+    ))
 }
 
 #[derive(Clone, Debug, Deserialize)]

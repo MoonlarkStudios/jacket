@@ -2,8 +2,8 @@ use super::catalog::{action, card};
 use crate::app::{search_result_id, App, CatalogAction as Action, CatalogPending, Message};
 use crate::icons::{self, Icon};
 use crate::style;
-use iced::widget::{button, column, container, row, space, text, text_input};
-use iced::{Alignment, Element, Length};
+use iced::widget::{button, column, container, image, row, space, text, text_input, tooltip};
+use iced::{Alignment, ContentFit, Element, Length};
 use jacket_desktop::musicbrainz::{Album, Artist, SearchHit, SearchKind, Song};
 
 pub(super) fn filters(app: &App, artist: bool) -> Element<'_, Message> {
@@ -138,10 +138,20 @@ pub(super) fn artist<'a>(app: &'a App, artist: &'a Artist) -> Element<'a, Messag
         .map_or(SearchKind::Albums, |page| page.filter);
     column![
         back(app, "Back to results"),
-        text(&artist.name).size(28).font(style::semibold()),
-        text(artist_description(artist))
-            .size(14)
-            .color(p.colors.text_muted),
+        row![
+            artist_thumbnail(app, artist, 64.0),
+            column![
+                text(&artist.name).size(28).font(style::semibold()),
+                text(artist_description(artist))
+                    .size(14)
+                    .color(p.colors.text_muted),
+            ]
+            .spacing(4)
+            .width(Length::Fill),
+            photo_credit(app, artist, "artist-page").unwrap_or_else(|| space().width(0).into()),
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center),
         filters(app, true),
         section(app, kind, None, None),
     ]
@@ -322,7 +332,23 @@ fn section<'a>(
         .take(preview.unwrap_or(page.hits.len()))
     {
         let (_, title, description, select) = hit_display(hit);
-        body = body.push(card(app, search_result_id(hit), title, description, select));
+        let card = card(
+            app,
+            search_result_id(hit),
+            title,
+            description,
+            Some(result_thumbnail(app, hit, 36.0)),
+            select,
+        );
+        let credit = match hit {
+            SearchHit::Artist(artist) => photo_credit(app, artist, "artist-result"),
+            _ => None,
+        };
+        body = if let Some(credit) = credit {
+            body.push(row![card, credit].spacing(8).align_y(Alignment::Center))
+        } else {
+            body.push(card)
+        };
     }
     if preview.is_none() && page.next_offset.is_some() && !section.errors.contains_key(&kind) {
         body = body.push(action(
@@ -346,9 +372,7 @@ fn top_result<'a>(app: &'a App, hit: &SearchHit) -> Element<'a, Message> {
         format!("{kind} · {description}")
     };
     let tile = row![
-        container(icons::view(Icon::Music, p.colors.accent, 25.0))
-            .center(48)
-            .style(move |_| p.panel()),
+        result_thumbnail(app, hit, 56.0),
         column![
             text(title).size(21).font(style::semibold()),
             text(subtitle).size(13).color(p.colors.text_muted),
@@ -361,8 +385,18 @@ fn top_result<'a>(app: &'a App, hit: &SearchHit) -> Element<'a, Message> {
     .align_y(Alignment::Center);
     let enabled = !app.busy()
         || (matches!(app.catalog.pending, Some(CatalogPending::Search)) && !app.catalog.cancelling);
-    column![
+    let mut heading = row![
         text("Top result").size(17).font(style::semibold()),
+        space::horizontal()
+    ]
+    .align_y(Alignment::Center);
+    if let SearchHit::Artist(artist) = hit {
+        if let Some(credit) = photo_credit(app, artist, "top-result") {
+            heading = heading.push(credit);
+        }
+    }
+    column![
+        heading,
         super::focus_button::wrap(
             "catalog-top-result",
             button(tile)
@@ -375,6 +409,92 @@ fn top_result<'a>(app: &'a App, hit: &SearchHit) -> Element<'a, Message> {
     ]
     .spacing(8)
     .into()
+}
+
+fn result_thumbnail<'a>(app: &'a App, hit: &SearchHit, edge: f32) -> Element<'a, Message> {
+    match hit {
+        SearchHit::Artist(artist) => artist_thumbnail(app, artist, edge),
+        _ => cover_thumbnail(app, hit.cover_thumbnail(), edge),
+    }
+}
+
+fn cover_thumbnail(app: &App, url: Option<String>, edge: f32) -> Element<'static, Message> {
+    thumbnail(
+        app,
+        url.as_deref().and_then(|url| app.catalog.media.get(url)),
+        None,
+        edge,
+    )
+}
+
+fn artist_thumbnail(app: &App, artist: &Artist, edge: f32) -> Element<'static, Message> {
+    let picture = app
+        .catalog
+        .media
+        .portrait(&artist.id)
+        .map(|portrait| &portrait.image);
+    thumbnail(app, picture, Some(&artist.name), edge)
+}
+
+fn photo_credit<'a>(app: &'a App, artist: &Artist, context: &str) -> Option<Element<'a, Message>> {
+    let p = app.presentation();
+    let credit = &app.catalog.media.portrait(&artist.id)?.credit;
+    let caption = if credit.author.is_empty() {
+        format!("{} · Wikimedia Commons", credit.license)
+    } else {
+        format!("{} · {} · Wikimedia Commons", credit.author, credit.license)
+    };
+    Some(
+        tooltip(
+            action(
+                app,
+                format!("photo-credit-{context}-{}", artist.id),
+                "Photo credit",
+                Action::OpenPortraitCredit(credit.file.clone()),
+                true,
+                false,
+            ),
+            container(text(caption).size(12)).max_width(280),
+            tooltip::Position::Top,
+        )
+        .style(move |_| p.panel())
+        .into(),
+    )
+}
+
+fn thumbnail(
+    app: &App,
+    picture: Option<&image::Handle>,
+    artist: Option<&str>,
+    edge: f32,
+) -> Element<'static, Message> {
+    let p = app.presentation();
+    let radius = if artist.is_some() { edge / 2.0 } else { 5.0 };
+    if let Some(handle) = picture {
+        return image(handle.clone())
+            .width(edge)
+            .height(edge)
+            .content_fit(ContentFit::Cover)
+            .border_radius(radius)
+            .into();
+    }
+    let initial = artist.and_then(|name| name.chars().find(|c| c.is_alphanumeric()));
+    let placeholder = match initial {
+        Some(letter) => text(letter.to_uppercase().collect::<String>())
+            .size(edge * 0.44)
+            .font(style::semibold())
+            .color(p.colors.accent)
+            .into(),
+        None => icons::view(Icon::Music, p.colors.accent, edge * 0.46),
+    };
+    container(placeholder)
+        .center(edge)
+        .style(move |_| {
+            let mut surface = p.panel();
+            surface.border.radius = radius.into();
+            surface
+        })
+        .into()
 }
 
 fn hit_display(hit: &SearchHit) -> (&'static str, String, String, Action) {
@@ -430,6 +550,7 @@ fn album_card<'a>(app: &'a App, album: &'a Album) -> Element<'a, Message> {
         format!("album-{}", album.id),
         album.title.clone(),
         album_description(album),
+        Some(cover_thumbnail(app, album.cover_thumbnail(), 36.0)),
         Action::Album(album.clone()),
     )
 }

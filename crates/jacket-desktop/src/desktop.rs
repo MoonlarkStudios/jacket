@@ -404,6 +404,23 @@ impl Desktop {
         }
     }
 
+    pub fn open_portrait_credit(&self, url: &str) -> Result<(), String> {
+        if !musicbrainz::valid_credit_url(url) {
+            return Err("This portrait credit link is unsupported.".into());
+        }
+        match open_command(Path::new(url)) {
+            Ok(status) if status.success() => Ok(()),
+            _ => Err("Could not open the portrait credit in your browser.".into()),
+        }
+    }
+
+    pub fn artist_portraits(
+        &self,
+        ids: &[String],
+    ) -> Result<HashMap<String, musicbrainz::ArtistPortrait>, String> {
+        musicbrainz::artist_portraits(ids)
+    }
+
     pub fn inspect(&self, url: String, auth: AuthOptions) -> Result<Job, String> {
         self.inspection_job(auth, move |tools, auth, cancel, events| {
             audio_engine::inspect_streaming(tools, &url, auth, cancel, |update| {
@@ -637,6 +654,10 @@ impl Desktop {
 
     pub fn artwork_preview(&self, url: &str) -> Result<Vec<u8>, String> {
         crate::artwork_preview::fetch(url)
+    }
+
+    pub fn artwork_thumbnail(&self, url: &str) -> Result<Vec<u8>, String> {
+        crate::artwork_preview::thumbnail(url)
     }
 
     /// Own a bounded public source cover before allowing a crop to modify it.

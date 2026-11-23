@@ -1,6 +1,7 @@
 //! Native application state, controllers, and persistence orchestration.
 mod artwork;
 mod catalog;
+mod catalog_media;
 mod controller;
 mod destination;
 mod destination_dialog;

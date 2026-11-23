@@ -3,6 +3,7 @@ use audio_engine::{ArtworkMode, ExportPlan};
 mod raster;
 use jacket_core::Review;
 use jacket_desktop::Desktop;
+pub(crate) use raster::thumbnail as decode_thumbnail;
 pub use raster::{normalized_scale, Raster};
 use std::sync::OnceLock;
 
@@ -49,6 +50,10 @@ pub fn example_cover() -> Raster {
 pub fn preview(desktop: &Desktop, url: &str, scale: f32) -> Result<Raster, String> {
     let bytes = desktop.artwork_preview(url)?;
     Raster::decode(&bytes, scale)
+}
+
+pub fn thumbnail(desktop: &Desktop, url: &str) -> Result<iced::widget::image::Handle, String> {
+    raster::thumbnail(&desktop.artwork_thumbnail(url)?)
 }
 
 #[cfg(test)]

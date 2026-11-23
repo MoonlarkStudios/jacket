@@ -237,6 +237,10 @@ impl App {
             }
             Message::Tick => return self.tick(),
             Message::Catalog(action) => return self.update_catalog(action),
+            Message::CatalogThumbnail(url, image) => self.catalog.media.complete(url, image),
+            Message::CatalogPortraits(ids, images) => {
+                self.catalog.media.complete_portraits(ids, images)
+            }
             Message::CatalogCover(url, Ok(raster)) => {
                 if self
                     .catalog

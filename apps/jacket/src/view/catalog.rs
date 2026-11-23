@@ -291,6 +291,7 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
             .center_x(Length::Fill),
         )
         .id("album-browser")
+        .on_scroll(|viewport| Message::Catalog(Action::Scrolled(viewport.absolute_offset().y)))
         .height(Length::Fill)
         .width(Length::Fill)
         .style(p.scrollbar())
@@ -339,6 +340,7 @@ fn editions(app: &App) -> Element<'_, Message> {
                 format!("edition-{}", edition.id),
                 edition.display_title(),
                 description,
+                None,
                 Action::Edition(edition.id.clone()),
             ));
         }
@@ -598,6 +600,7 @@ pub(super) fn card<'a>(
     id: String,
     title: String,
     subtitle: String,
+    thumbnail: Option<Element<'a, Message>>,
     select: Action,
 ) -> Element<'a, Message> {
     let p = app.presentation();
@@ -612,15 +615,15 @@ pub(super) fn card<'a>(
         Action::Artist(_) | Action::Album(_) | Action::Song(_)
     ) && matches!(app.catalog.pending, Some(CatalogPending::Search))
         && !app.catalog.cancelling;
+    let mut item = row![].spacing(10).align_y(Alignment::Center);
+    if let Some(thumbnail) = thumbnail {
+        item = item.push(thumbnail);
+    }
     super::focus_button::wrap(
         id,
         button(
-            row![
-                labels,
-                icons::view(Icon::ArrowRight, p.colors.text_muted, 16.0)
-            ]
-            .spacing(10)
-            .align_y(Alignment::Center),
+            item.push(labels)
+                .push(icons::view(Icon::ArrowRight, p.colors.text_muted, 16.0)),
         )
         .width(Length::Fill)
         .padding([9, 12])

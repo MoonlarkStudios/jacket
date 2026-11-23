@@ -107,6 +107,7 @@ impl App {
         if self.catalog.visible && tasks.is_empty() {
             tasks.push(self.tick_catalog_search(Instant::now()));
         }
+        tasks.push(self.tick_catalog_media());
         tasks.push(self.sync_album_scan());
         if self.screenshot.is_some() && self.started.elapsed() > Duration::from_secs(2) {
             tasks.push(

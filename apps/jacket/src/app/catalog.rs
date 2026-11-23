@@ -1,4 +1,4 @@
-use super::{persistence, App, Message, Panel};
+use super::{catalog_media::CatalogMedia, persistence, App, Message, Panel};
 use crate::artwork::Raster;
 use audio_engine::Inspection;
 use iced::{widget::operation, Task};
@@ -25,6 +25,7 @@ pub enum CatalogAction {
     Query(String),
     Search,
     Filter(Option<SearchKind>),
+    Scrolled(f32),
     LoadVisible,
     Retry(SearchKind),
     More(SearchKind),
@@ -42,6 +43,7 @@ pub enum CatalogAction {
     CheckAudio(Option<String>),
     AcceptTrack(usize),
     OpenStore(String),
+    OpenPortraitCredit(String),
     Review,
     ConfirmReview,
 }
@@ -53,6 +55,7 @@ pub struct Catalog {
     search_due: Option<Instant>,
     pub filter: Option<SearchKind>,
     pub results: SearchSections,
+    pub media: CatalogMedia,
     queued_action: Option<CatalogAction>,
     pub artist: Option<ArtistPage>,
     pub song: Option<SongPage>,
@@ -109,6 +112,7 @@ impl Catalog {
             search_due: None,
             filter: None,
             results: SearchSections::default(),
+            media: CatalogMedia::default(),
             queued_action: None,
             artist: None,
             song: None,
@@ -235,6 +239,19 @@ impl App {
             self.catalog.queued_action = None;
             return self.update(Message::Cancel);
         }
+        if let CatalogAction::Scrolled(offset) = action {
+            self.catalog.media.scroll_y = offset;
+            return Task::none();
+        }
+        if let CatalogAction::OpenPortraitCredit(url) = action {
+            if let Some(desktop) = self.desktop.clone() {
+                return persistence::background(
+                    move || desktop.open_portrait_credit(&url),
+                    Message::Opened,
+                );
+            }
+            return Task::none();
+        }
         if matches!(action, CatalogAction::ClearSearch) {
             return Task::batch([
                 self.update_catalog(CatalogAction::Query(String::new())),
@@ -280,6 +297,7 @@ impl App {
             return operation::focus("album-search");
         }
         if let CatalogAction::Filter(filter) = action {
+            self.catalog.media.scroll_y = 0.0;
             if let Some(artist) = &mut self.catalog.artist {
                 if let Some(kind @ (SearchKind::Albums | SearchKind::Songs)) = filter {
                     artist.filter = kind;
@@ -342,8 +360,13 @@ impl App {
             }
             CatalogAction::Query(_) => unreachable!("search entry is handled before busy actions"),
             CatalogAction::Filter(_) => unreachable!("filters are handled before busy actions"),
+            CatalogAction::Scrolled(_) => unreachable!("scrolling is handled before busy actions"),
+            CatalogAction::OpenPortraitCredit(_) => {
+                unreachable!("photo credits are handled before busy actions")
+            }
             CatalogAction::Search => {
                 self.catalog.search_due = None;
+                self.catalog.media.scroll_y = 0.0;
                 let query = self.catalog.query.trim().to_owned();
                 if query.is_empty() {
                     return operation::focus("album-search");
@@ -407,6 +430,7 @@ impl App {
                 }
             }
             CatalogAction::Artist(artist) => {
+                self.catalog.media.scroll_y = 0.0;
                 self.catalog.search_due = None;
                 self.catalog.artist = Some(ArtistPage {
                     artist,
@@ -419,6 +443,7 @@ impl App {
                 return reset_scroll();
             }
             CatalogAction::Song(song) => {
+                self.catalog.media.scroll_y = 0.0;
                 self.catalog.search_due = None;
                 let Some(desktop) = desktop else {
                     return Task::none();
@@ -485,6 +510,7 @@ impl App {
                 self.start_catalog(CatalogPending::Release, desktop.album_release(id));
             }
             CatalogAction::Back => {
+                self.catalog.media.scroll_y = 0.0;
                 self.catalog.error = None;
                 if self.catalog.confirm_replace {
                     self.catalog.confirm_replace = false;
@@ -819,6 +845,13 @@ impl App {
             .insert(SearchKind::Songs, songs.clone());
         match scenario {
             "catalog-results" => return,
+            "catalog-media" => {
+                self.catalog.media.complete(
+                    album.cover_thumbnail().expect("fictional album identifier"),
+                    Some(crate::artwork::example_cover().source().clone()),
+                );
+                return;
+            }
             "catalog-partial" => {
                 self.catalog.results.pages.remove(&SearchKind::Songs);
                 self.catalog.results.errors.insert(

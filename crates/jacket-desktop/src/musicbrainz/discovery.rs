@@ -60,6 +60,22 @@ impl SearchHit {
             Self::Song(song) => &song.id,
         }
     }
+
+    pub fn cover_thumbnail(&self) -> Option<String> {
+        match self {
+            Self::Artist(_) => None,
+            Self::Album(album) => album.cover_thumbnail(),
+            Self::Song(song) => {
+                let release = song.preferred_release()?;
+                release
+                    .release_group
+                    .as_ref()
+                    .and_then(Album::cover_thumbnail)
+                    .or_else(|| super::cover_thumbnail("release", release.id.as_deref()?))
+            }
+        }
+    }
+
     pub fn relevance(&self, query: &str) -> u8 {
         self.rank(&search_key(query))
     }
@@ -168,6 +184,15 @@ impl Song {
     }
 
     pub fn album_hint(&self) -> Option<&str> {
+        self.preferred_release().map(|release| {
+            release
+                .release_group
+                .as_ref()
+                .map_or(release.title.as_str(), |group| group.title.as_str())
+        })
+    }
+
+    fn preferred_release(&self) -> Option<&SongRelease> {
         self.releases
             .iter()
             .filter(|release| {
@@ -192,18 +217,13 @@ impl Song {
                     release.date.as_deref(),
                 )
             })
-            .map(|release| {
-                release
-                    .release_group
-                    .as_ref()
-                    .map_or(release.title.as_str(), |group| group.title.as_str())
-            })
     }
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct SongRelease {
+    id: Option<String>,
     pub title: String,
     pub status: Option<String>,
     pub date: Option<String>,
@@ -613,6 +633,32 @@ mod tests {
             ["one", "two"]
         );
         assert_eq!(page.next_offset, Some(48));
+    }
+
+    #[test]
+    fn recording_thumbnail_uses_the_same_album_as_its_label() {
+        let original = "50de827a-6631-4099-bd85-23dd6cb69d66";
+        let song: super::Song = serde_json::from_value(json!({
+            "id": "song",
+            "title": "Recording",
+            "releases": [
+                {"title":"Hits","date":"1990","release-group":{
+                    "id":"6c9ecc1f-ce5a-40ba-ac4c-afef3ab7a2d9","title":"Hits",
+                    "primary-type":"Album","secondary-types":["Compilation"]
+                }},
+                {"title":"Original","date":"2000","release-group":{
+                    "id":original,"title":"Original","primary-type":"Album"
+                }}
+            ]
+        }))
+        .unwrap();
+        assert_eq!(song.album_hint(), Some("Original"));
+        assert_eq!(
+            SearchHit::Song(song).cover_thumbnail(),
+            Some(format!(
+                "https://coverartarchive.org/release-group/{original}/front-250"
+            ))
+        );
     }
 
     #[test]
