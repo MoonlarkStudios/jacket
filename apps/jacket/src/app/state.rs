@@ -81,12 +81,7 @@ pub enum Message {
     RetryStartup,
     Booted(Result<Box<Boot>, String>),
     Catalog(CatalogAction),
-    CatalogCover(String, Result<crate::artwork::Raster, String>),
     CatalogThumbnail(String, Option<iced::widget::image::Handle>),
-    CatalogPortraits(
-        Vec<String>,
-        std::collections::HashMap<String, super::catalog_media::Portrait>,
-    ),
     Url(String),
     Pasted(String),
     Intent(SourceIntent),

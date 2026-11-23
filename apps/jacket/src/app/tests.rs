@@ -1545,27 +1545,16 @@ fn restoring_a_suspended_remote_cover_refreshes_for_the_current_display_density(
 }
 
 #[test]
-fn an_incomplete_catalog_match_replaces_a_review_only_after_confirmation() {
+fn a_catalog_album_replaces_a_review_only_after_confirmation() {
     use super::CatalogAction;
     use audio_engine::{AuthOptions, CollectionMode};
-    use jacket_core::TrackMatch;
 
     let (_root, desktop) = desktop();
     let mut app = app(desktop);
     let previous = app.review.take().unwrap();
     let identity = previous.identity();
-    app.catalog_snapshot("catalog-match");
+    app.catalog_snapshot("catalog-album");
     app.review = Some(previous);
-
-    let matched = app.catalog.matched.as_ref().unwrap();
-    assert_eq!(
-        matched
-            .tracks
-            .iter()
-            .filter(|status| **status == TrackMatch::Missing)
-            .count(),
-        2
-    );
 
     let _ = app.update(Message::Catalog(CatalogAction::Review));
     assert!(app.catalog.confirm_replace);
@@ -1586,12 +1575,8 @@ fn an_incomplete_catalog_match_replaces_a_review_only_after_confirmation() {
     assert_eq!(plan.tracks.len(), 5);
     assert_eq!(
         plan.tracks[0].metadata.album,
-        "Room to breathe (Expanded edition)"
+        "Room to breathe (Expanded Edition)"
     );
     assert_eq!(plan.tracks[0].metadata.release_year, Some(2026));
-    assert_ne!(
-        plan.tracks[0].source_metadata.album,
-        plan.tracks[0].metadata.album
-    );
     assert!(audio_engine::preview_export(&plan).is_ok());
 }

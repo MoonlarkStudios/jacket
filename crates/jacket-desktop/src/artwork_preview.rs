@@ -23,10 +23,6 @@ pub(crate) fn thumbnail(url: &str) -> Result<Vec<u8>, String> {
     )
 }
 
-pub(crate) fn portrait(url: &str, valid_url: fn(&str) -> bool) -> Result<Vec<u8>, String> {
-    load(url, 1024 * 1024, Duration::from_secs(5), valid_url)
-}
-
 fn load(
     url: &str,
     max_bytes: u64,

@@ -8,7 +8,6 @@ pub mod catalog;
 mod desktop;
 pub mod downloader_updates;
 mod export_completion;
-pub mod musicbrainz;
 pub mod recovery;
 pub mod reviews;
 mod worker;

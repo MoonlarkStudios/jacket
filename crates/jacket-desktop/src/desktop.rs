@@ -1,10 +1,9 @@
 use crate::artwork_assets::{self, Asset, Crop};
 use crate::auth_session::{self, Control, Keychain};
 use crate::browser_sessions::{self, Catalog, Locations};
-use crate::catalog::{SearchKind, SearchProvider, SearchRequest};
+use crate::catalog::SearchRequest;
 use crate::downloader_updates::{self, Channel, Preferences};
 use crate::export_completion;
-use crate::musicbrainz::{self, SearchCache};
 use crate::recovery::{self, Recovery};
 use crate::reviews::{self, CompletionIdentity, ReviewDraft};
 use crate::worker::{Admission, Event, Job, Lease};
@@ -83,7 +82,6 @@ struct Services {
     reviews: reviews::Store,
     session: Control,
     admission: Admission,
-    catalog_search: Mutex<SearchCache>,
     youtube_music: Option<YouTubeMusicRuntime>,
     exported: Mutex<HashMap<PathBuf, PublishedExport>>,
 }
@@ -213,7 +211,6 @@ impl Desktop {
             reviews: reviews::Store::default(),
             session: Control::default(),
             admission: Arc::new(Mutex::new(None)),
-            catalog_search: Mutex::default(),
             youtube_music,
             exported: Mutex::new(HashMap::new()),
         })))
@@ -299,113 +296,34 @@ impl Desktop {
         }
         artwork_assets::prune(&self.artwork_root(), &retained)
     }
-    pub fn default_search_provider(&self) -> SearchProvider {
-        if self.0.youtube_music.is_some() {
-            SearchProvider::YouTubeMusic
-        } else {
-            SearchProvider::MusicBrainz
-        }
-    }
-
     pub fn search_catalog(&self, request: SearchRequest) -> Result<Job, String> {
-        match request {
-            SearchRequest::YouTubeMusic { query, filter } => {
-                self.youtube_music_job(move |runtime, cancel| {
-                    youtube_music::search(runtime, &query, filter, cancel)
-                        .map(|hits| crate::CatalogEvent::YouTubeMusicResults { filter, hits })
-                })
-            }
-            SearchRequest::MusicBrainz { scope, pages } => self.search_musicbrainz(scope, pages),
-        }
-    }
-
-    fn search_musicbrainz(
-        &self,
-        scope: musicbrainz::SearchScope,
-        pages: Vec<(SearchKind, usize)>,
-    ) -> Result<Job, String> {
-        let services = Arc::clone(&self.0);
-        Job::spawn(operation_id(), &self.0.admission, move |cancel, events| {
-            for (kind, offset) in pages {
-                if cancel.check().is_err() {
-                    break;
+        self.youtube_music_job(move |runtime, cancel| {
+            youtube_music::search(runtime, &request.query, request.filter, cancel).map(|hits| {
+                crate::CatalogEvent::Results {
+                    filter: request.filter,
+                    hits,
                 }
-                let result =
-                    musicbrainz::search(&services.catalog_search, &scope, kind, offset, cancel);
-                if cancel.check().is_err() {
-                    break;
-                }
-                if events
-                    .send(Event::Catalog(crate::CatalogEvent::SearchPage {
-                        kind,
-                        append: offset > 0,
-                        result,
-                    }))
-                    .is_err()
-                {
-                    break;
-                }
-            }
-            Ok(Event::Catalog(crate::CatalogEvent::SearchFinished))
-        })
-    }
-
-    pub fn catalog_song(&self, song: crate::musicbrainz::Song) -> Result<Job, String> {
-        self.catalog_job(move |cancel| {
-            crate::musicbrainz::recording_details(song, cancel)
-                .map(|details| crate::CatalogEvent::SongDetails(Box::new(details)))
-        })
-    }
-
-    pub fn match_catalog_song(
-        &self,
-        song: crate::musicbrainz::SongDetails,
-        url: String,
-        auth: AuthOptions,
-    ) -> Result<Job, String> {
-        let url = jacket_core::SourceLink::parse(&url)?
-            .song_url
-            .ok_or("Paste a YouTube link for a single song.")?;
-        self.inspection_job(auth, move |tools, auth, cancel, _| {
-            let inspection = audio_engine::inspect(tools, &url, auth, cancel)
-                .map_err(|error| error.to_string())?;
-            song.match_source(inspection).map(|inspection| {
-                Event::Catalog(crate::CatalogEvent::SongMatched(Box::new(inspection)))
             })
-        })
-    }
-
-    pub fn album_editions(&self, group: crate::musicbrainz::Album) -> Result<Job, String> {
-        self.catalog_job(move |cancel| {
-            crate::musicbrainz::editions(&group.id, &group, cancel)
-                .map(crate::CatalogEvent::Editions)
-        })
-    }
-
-    pub fn album_release(&self, id: String) -> Result<Job, String> {
-        self.catalog_job(move |cancel| {
-            crate::musicbrainz::release(&id, cancel)
-                .map(|release| crate::CatalogEvent::Released(Box::new(release)))
         })
     }
 
     pub fn open_youtube_music_artist(&self, id: String) -> Result<Job, String> {
         self.youtube_music_job(move |runtime, cancel| {
-            youtube_music::artist(runtime, &id, cancel).map(crate::CatalogEvent::YouTubeMusicArtist)
+            youtube_music::artist(runtime, &id, cancel).map(crate::CatalogEvent::Artist)
         })
     }
 
     pub fn open_youtube_music_album(&self, id: String) -> Result<Job, String> {
         self.youtube_music_job(move |runtime, cancel| {
             youtube_music::album(runtime, &id, cancel)
-                .map(|album| crate::CatalogEvent::YouTubeMusicReview(Box::new(album)))
+                .map(|album| crate::CatalogEvent::Album(Box::new(album)))
         })
     }
 
     pub fn open_youtube_music_song(&self, song: youtube_music::Song) -> Result<Job, String> {
         self.youtube_music_job(move |runtime, cancel| {
             youtube_music::song(runtime, song, cancel)
-                .map(|song| crate::CatalogEvent::YouTubeMusicReview(Box::new(song)))
+                .map(|song| crate::CatalogEvent::Song(Box::new(song)))
         })
     }
 
@@ -440,57 +358,6 @@ impl Desktop {
         Job::spawn(operation_id(), &self.0.admission, move |cancel, _| {
             run(cancel).map(Event::Catalog)
         })
-    }
-
-    pub fn match_album(
-        &self,
-        release: &crate::musicbrainz::Release,
-        url: String,
-        auth: AuthOptions,
-    ) -> Result<Job, String> {
-        let link = jacket_core::SourceLink::parse(&url)?;
-        let playlist = link
-            .playlist_url
-            .ok_or("Paste a YouTube album or playlist link.")?;
-        let linked = release.sources.contains(&playlist);
-        let album = release.album.clone();
-        self.inspection_job(auth, move |tools, auth, cancel, _| {
-            let inspect = if linked {
-                audio_engine::source::list_linked_album
-            } else {
-                audio_engine::inspect
-            };
-            let inspection =
-                inspect(tools, &playlist, auth, cancel).map_err(|error| error.to_string())?;
-            album
-                .match_source(inspection)
-                .map(|matched| Event::Catalog(crate::CatalogEvent::Matched(Box::new(matched))))
-        })
-    }
-
-    pub fn open_album_store(&self, url: &str) -> Result<(), String> {
-        crate::musicbrainz::download_store(url).ok_or("This download store is unsupported.")?;
-        match open_command(Path::new(url)) {
-            Ok(status) if status.success() => Ok(()),
-            _ => Err("Could not open the download store in your browser.".into()),
-        }
-    }
-
-    pub fn open_portrait_credit(&self, url: &str) -> Result<(), String> {
-        if !musicbrainz::valid_credit_url(url) {
-            return Err("This portrait credit link is unsupported.".into());
-        }
-        match open_command(Path::new(url)) {
-            Ok(status) if status.success() => Ok(()),
-            _ => Err("Could not open the portrait credit in your browser.".into()),
-        }
-    }
-
-    pub fn artist_portraits(
-        &self,
-        ids: &[String],
-    ) -> Result<HashMap<String, musicbrainz::ArtistPortrait>, String> {
-        musicbrainz::artist_portraits(ids)
     }
 
     pub fn inspect(&self, url: String, auth: AuthOptions) -> Result<Job, String> {

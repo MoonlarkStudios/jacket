@@ -1,21 +1,4 @@
-//! Search routing and categories shared by the catalog providers.
-
-use crate::musicbrainz::SearchScope;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SearchProvider {
-    YouTubeMusic,
-    MusicBrainz,
-}
-
-impl SearchProvider {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::YouTubeMusic => "YouTube Music",
-            Self::MusicBrainz => "MusicBrainz",
-        }
-    }
-}
+//! Search requests and categories for the desktop catalog.
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
 pub enum SearchKind {
@@ -36,14 +19,8 @@ impl SearchKind {
     }
 }
 
-/// Each adapter owns the search options and identifiers its catalog supports.
-pub enum SearchRequest {
-    YouTubeMusic {
-        query: String,
-        filter: Option<SearchKind>,
-    },
-    MusicBrainz {
-        scope: SearchScope,
-        pages: Vec<(SearchKind, usize)>,
-    },
+/// A text search through the configured music catalog.
+pub struct SearchRequest {
+    pub query: String,
+    pub filter: Option<SearchKind>,
 }

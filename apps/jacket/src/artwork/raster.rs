@@ -135,10 +135,18 @@ impl Raster {
     }
 }
 
-/// List artwork needs a single small texture. Keep its decoded dimensions
-/// and retained pixels independent of the full-size review cover.
+/// Catalog cards use square artwork, including providers' wide artist photos.
 pub(crate) fn thumbnail(bytes: &[u8]) -> Result<Handle, String> {
-    Ok(fit_handle(decode_rgba(bytes, 1024)?, 250))
+    let rgba = decode_rgba(bytes, 1024)?;
+    let (width, height) = rgba.dimensions();
+    let edge = width.min(height);
+    let square = if width == height {
+        rgba
+    } else {
+        image::imageops::crop_imm(&rgba, (width - edge) / 2, (height - edge) / 2, edge, edge)
+            .to_image()
+    };
+    Ok(fit_handle(square, 250))
 }
 
 fn decode_rgba(bytes: &[u8], max_edge: u32) -> Result<RgbaImage, String> {

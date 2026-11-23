@@ -207,17 +207,9 @@ impl App {
                     Some(
                         scenario @ ("catalog"
                         | "catalog-results"
-                        | "catalog-media"
-                        | "catalog-youtube-music"
-                        | "catalog-partial"
-                        | "catalog-unavailable"
-                        | "catalog-editions"
-                        | "catalog-album"
-                        | "catalog-match"
-                        | "catalog-variant"
                         | "catalog-artist"
-                        | "catalog-song"
-                        | "catalog-song-matched"),
+                        | "catalog-album"
+                        | "catalog-unavailable"),
                     ) => {
                         app.catalog_snapshot(scenario);
                     }

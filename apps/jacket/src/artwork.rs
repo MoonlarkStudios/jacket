@@ -3,7 +3,6 @@ use audio_engine::{ArtworkMode, ExportPlan};
 mod raster;
 use jacket_core::Review;
 use jacket_desktop::Desktop;
-pub(crate) use raster::thumbnail as decode_thumbnail;
 pub use raster::{normalized_scale, Raster};
 use std::sync::OnceLock;
 

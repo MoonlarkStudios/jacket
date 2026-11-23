@@ -44,16 +44,13 @@ review; real downloads require an inspected source.
 
 ## Find music
 
-Search MusicBrainz for artists, albums, or songs as you type. Press Ctrl+K
+Search YouTube Music for artists, albums, or songs as you type. Press Ctrl+K
 (Command+K on macOS) to return to search, or Down to focus the first result.
-Filter the results or open an
-artist to browse their releases and recordings. Song results show the credited
-artist, release context, and recording details when available.
+Open an artist to browse their releases and top songs.
 
-Choose an album edition or a specific recording, then check a linked YouTube
-source or paste a link. Review the matched audio before saving. For albums, Jacket
-shows which tracks are missing or uncertain and offers purchase links when
-MusicBrainz lists a supported store.
+Choose an album to see its artwork, edition, and track list. Select **Review download**
+to choose tracks and edit tags before saving. You can also open a song directly
+from search or paste a YouTube link.
 
 ## Prepare your audio
 

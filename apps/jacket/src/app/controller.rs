@@ -223,8 +223,6 @@ impl App {
                                 self.cover = Some((asset, path));
                             }
                         }
-                        self.catalog.provider = boot.desktop.default_search_provider();
-                        self.catalog.youtube_music_available = self.catalog.youtube_music_active();
                         self.desktop = Some(boot.desktop);
                         // Update checks retain the existing explicit preference and run outside the UI thread.
                         if !self.close_after_job {
@@ -240,20 +238,6 @@ impl App {
             Message::Tick => return self.tick(),
             Message::Catalog(action) => return self.update_catalog(action),
             Message::CatalogThumbnail(url, image) => self.catalog.media.complete(url, image),
-            Message::CatalogPortraits(ids, images) => {
-                self.catalog.media.complete_portraits(ids, images)
-            }
-            Message::CatalogCover(url, Ok(raster)) => {
-                if self
-                    .catalog
-                    .release
-                    .as_ref()
-                    .and_then(|release| release.cover.as_ref())
-                    == Some(&url)
-                {
-                    self.catalog.cover = Some(raster);
-                }
-            }
             Message::ThemeShortcut(preset) if self.panel == Panel::Appearance => {
                 return self.update(Message::ThemePreset(preset))
             }

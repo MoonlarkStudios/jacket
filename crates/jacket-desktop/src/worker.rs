@@ -3,32 +3,20 @@ use crate::auth_session;
 use crate::browser_sessions::AccessCheck;
 use crate::catalog::SearchKind;
 use crate::downloader_updates::Status;
-use crate::musicbrainz::{Edition, Release, SearchPage, SongDetails};
 use audio_engine::{Cancellation, ExportResult, Inspection, InspectionUpdate, ProgressEvent};
-use jacket_core::AlbumMatch;
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 #[derive(Clone, Debug)]
 pub enum CatalogEvent {
-    SearchPage {
-        kind: SearchKind,
-        append: bool,
-        result: Result<SearchPage, String>,
-    },
-    SearchFinished,
-    SongDetails(Box<SongDetails>),
-    SongMatched(Box<Inspection>),
-    Editions(Vec<Edition>),
-    Released(Box<Release>),
-    Matched(Box<AlbumMatch>),
-    YouTubeMusicResults {
+    Results {
         filter: Option<SearchKind>,
         hits: Vec<crate::youtube_music::SearchHit>,
     },
-    YouTubeMusicArtist(crate::youtube_music::ArtistPage),
-    YouTubeMusicReview(Box<Inspection>),
+    Artist(crate::youtube_music::ArtistPage),
+    Album(Box<Inspection>),
+    Song(Box<Inspection>),
 }
 
 #[derive(Clone, Debug)]

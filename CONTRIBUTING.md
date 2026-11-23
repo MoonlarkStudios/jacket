@@ -53,7 +53,7 @@ The first dependency fetch and runtime staging need network access. Native unit
 tests do not contact YouTube, access real browser databases or need an account.
 Media integration tests synthesize their own recordings.
 
-Packaged Jacket builds default to YouTube Music search. The catalog tools
+Packaged Jacket builds use YouTube Music search. The catalog tools
 include the pinned Python libraries and use the bundled macOS interpreter or
 the Linux package's system Python dependency. For development,
 `mise run setup:youtube-music` prepares the interpreter used by the
