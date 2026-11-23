@@ -44,7 +44,9 @@ review; real downloads require an inspected source.
 
 ## Find music
 
-Search MusicBrainz for artists, albums, or songs. Filter the results or open an
+Search MusicBrainz for artists, albums, or songs as you type. Press Ctrl+K
+(Command+K on macOS) to return to search, or Down to focus the first result.
+Filter the results or open an
 artist to browse their releases and recordings. Song results show the credited
 artist, release context, and recording details when available.
 

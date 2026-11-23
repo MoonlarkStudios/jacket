@@ -5,7 +5,7 @@ use iced::{window, Task};
 use jacket_core::SourceLink;
 use jacket_desktop::downloader_updates;
 use jacket_desktop::{Event, Job};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 impl App {
     pub(super) fn tick(&mut self) -> Task<Message> {
@@ -103,6 +103,9 @@ impl App {
         if self.raster_refresh_pending {
             self.raster_refresh_pending = false;
             tasks.push(self.display_scale_changed(self.display_scale));
+        }
+        if self.catalog.visible && tasks.is_empty() {
+            tasks.push(self.tick_catalog_search(Instant::now()));
         }
         tasks.push(self.sync_album_scan());
         if self.screenshot.is_some() && self.started.elapsed() > Duration::from_secs(2) {

@@ -54,6 +54,18 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
         .align_y(Alignment::Center),
         row![
             search,
+            if catalog.query.is_empty() {
+                space().into()
+            } else {
+                action(
+                    app,
+                    "clear-music-search",
+                    "Clear",
+                    Action::ClearSearch,
+                    true,
+                    false,
+                )
+            },
             action(
                 app,
                 "search-albums",
@@ -117,7 +129,7 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
     } else if let Some(artist) = &catalog.artist {
         catalog_search::artist(app, &artist.artist)
     } else {
-        catalog_search::results(app)
+        catalog_search::results(app, compact)
     };
     let edge = if compact { 18 } else { 32 };
     let mut footer = column![].spacing(9);
@@ -151,7 +163,7 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
                 super::focus_button::wrap(
                     "cancel-catalog",
                     button("Cancel").padding([7, 12]).style(p.secondary()),
-                    (!catalog.cancelling).then_some(Message::Cancel),
+                    (!catalog.cancelling).then_some(Message::Catalog(Action::Cancel)),
                     p.colors.accent,
                 )
             ]

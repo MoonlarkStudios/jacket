@@ -1,7 +1,8 @@
 use super::catalog::{action, card};
-use crate::app::{App, CatalogAction as Action, Message};
+use crate::app::{search_result_id, App, CatalogAction as Action, CatalogPending, Message};
+use crate::icons::{self, Icon};
 use crate::style;
-use iced::widget::{button, column, row, space, text, text_input};
+use iced::widget::{button, column, container, row, space, text, text_input};
 use iced::{Alignment, Element, Length};
 use jacket_desktop::musicbrainz::{Album, Artist, SearchHit, SearchKind, Song};
 
@@ -38,7 +39,7 @@ pub(super) fn filters(app: &App, artist: bool) -> Element<'_, Message> {
         .into()
 }
 
-pub(super) fn results(app: &App) -> Element<'_, Message> {
+pub(super) fn results(app: &App, compact: bool) -> Element<'_, Message> {
     let p = app.presentation();
     let catalog = &app.catalog;
     if catalog.searched.is_empty() {
@@ -61,7 +62,7 @@ pub(super) fn results(app: &App) -> Element<'_, Message> {
         return start.into();
     }
     if let Some(kind) = catalog.filter {
-        return section(app, kind, false);
+        return section(app, kind, None, None);
     }
     let mut body = column![].spacing(20);
     if catalog.query.trim() != catalog.searched {
@@ -86,23 +87,24 @@ pub(super) fn results(app: &App) -> Element<'_, Message> {
     {
         return empty(app, "Search again to see results");
     }
-    let mut kinds = SearchKind::ALL;
-    kinds.sort_by_key(|kind| {
-        catalog
-            .results
-            .pages
-            .get(kind)
-            .and_then(|page| page.hits.first())
-            .map_or(3, |hit| hit.relevance(&catalog.searched))
-    });
-    for kind in kinds {
-        let has_results = catalog
-            .results
-            .pages
-            .get(&kind)
-            .is_some_and(|page| !page.hits.is_empty());
+    let top = catalog.top_result();
+    if let Some(hit) = top {
+        body = body.push(top_result(app, hit));
+    }
+    for kind in catalog.result_order() {
+        let has_results = catalog.results.pages.get(&kind).is_some_and(|page| {
+            page.hits
+                .iter()
+                .any(|hit| top.is_none_or(|best| best.id() != hit.id()))
+                || page.next_offset.is_some()
+        });
         if has_results || catalog.results.errors.contains_key(&kind) {
-            body = body.push(section(app, kind, true));
+            body = body.push(section(
+                app,
+                kind,
+                Some(if compact { 2 } else { 4 }),
+                top.map(SearchHit::id),
+            ));
         }
     }
     body.into()
@@ -122,7 +124,7 @@ pub(super) fn artist<'a>(app: &'a App, artist: &'a Artist) -> Element<'a, Messag
             .size(14)
             .color(p.colors.text_muted),
         filters(app, true),
-        section(app, kind, false),
+        section(app, kind, None, None),
     ]
     .spacing(14)
     .into()
@@ -218,8 +220,12 @@ pub(super) fn song(app: &App) -> Element<'_, Message> {
     body.into()
 }
 
-fn section(app: &App, kind: SearchKind, preview: bool) -> Element<'_, Message> {
-    const PREVIEW: usize = 4;
+fn section<'a>(
+    app: &'a App,
+    kind: SearchKind,
+    preview: Option<usize>,
+    exclude: Option<&str>,
+) -> Element<'a, Message> {
     let p = app.presentation();
     let enabled = !app.busy();
     let section = app.catalog.sections();
@@ -247,7 +253,7 @@ fn section(app: &App, kind: SearchKind, preview: bool) -> Element<'_, Message> {
     }
     let Some(page) = page else { return body.into() };
     if page.hits.is_empty() {
-        if !preview {
+        if preview.is_none() {
             return empty(
                 app,
                 match kind {
@@ -259,13 +265,20 @@ fn section(app: &App, kind: SearchKind, preview: bool) -> Element<'_, Message> {
         }
         return body.into();
     }
-    if preview {
+    if let Some(limit) = preview {
         let mut heading = row![
             text(kind.label()).size(17).font(style::semibold()),
             space::horizontal()
         ]
         .align_y(Alignment::Center);
-        if page.hits.len() > PREVIEW || page.next_offset.is_some() {
+        if page
+            .hits
+            .iter()
+            .filter(|hit| exclude != Some(hit.id()))
+            .count()
+            > limit
+            || page.next_offset.is_some()
+        {
             heading = heading.push(action(
                 app,
                 format!("see-all-{}", kind.label()),
@@ -283,27 +296,16 @@ fn section(app: &App, kind: SearchKind, preview: bool) -> Element<'_, Message> {
                 .color(p.colors.text_muted),
         );
     }
-    let max = if preview { PREVIEW } else { page.hits.len() };
-    for hit in page.hits.iter().take(max) {
-        body = body.push(match hit {
-            SearchHit::Artist(artist) => card(
-                app,
-                format!("artist-{}", artist.id),
-                artist.name.clone(),
-                artist_description(artist),
-                Action::Artist(artist.clone()),
-            ),
-            SearchHit::Album(album) => album_card(app, album),
-            SearchHit::Song(song) => card(
-                app,
-                format!("song-{}", song.id),
-                song.title.clone(),
-                song_description(song),
-                Action::Song(song.clone()),
-            ),
-        });
+    for hit in page
+        .hits
+        .iter()
+        .filter(|hit| exclude != Some(hit.id()))
+        .take(preview.unwrap_or(page.hits.len()))
+    {
+        let (_, title, description, select) = hit_display(hit);
+        body = body.push(card(app, search_result_id(hit), title, description, select));
     }
-    if !preview && page.next_offset.is_some() && !section.errors.contains_key(&kind) {
+    if preview.is_none() && page.next_offset.is_some() && !section.errors.contains_key(&kind) {
         body = body.push(action(
             app,
             format!("more-{}", kind.label()),
@@ -314,6 +316,69 @@ fn section(app: &App, kind: SearchKind, preview: bool) -> Element<'_, Message> {
         ));
     }
     body.into()
+}
+
+fn top_result<'a>(app: &'a App, hit: &SearchHit) -> Element<'a, Message> {
+    let p = app.presentation();
+    let (kind, title, description, action) = hit_display(hit);
+    let subtitle = if description.is_empty() {
+        kind.to_owned()
+    } else {
+        format!("{kind} · {description}")
+    };
+    let tile = row![
+        container(icons::view(Icon::Music, p.colors.accent, 25.0))
+            .center(48)
+            .style(move |_| p.panel()),
+        column![
+            text(title).size(21).font(style::semibold()),
+            text(subtitle).size(13).color(p.colors.text_muted),
+        ]
+        .spacing(4)
+        .width(Length::Fill),
+        icons::view(Icon::ArrowRight, p.colors.text_muted, 17.0),
+    ]
+    .spacing(12)
+    .align_y(Alignment::Center);
+    let enabled = !app.busy()
+        || (matches!(app.catalog.pending, Some(CatalogPending::Search)) && !app.catalog.cancelling);
+    column![
+        text("Top result").size(17).font(style::semibold()),
+        super::focus_button::wrap(
+            "catalog-top-result",
+            button(tile)
+                .width(Length::Fill)
+                .padding([11, 13])
+                .style(p.secondary()),
+            enabled.then_some(Message::Catalog(action)),
+            p.colors.accent,
+        ),
+    ]
+    .spacing(8)
+    .into()
+}
+
+fn hit_display(hit: &SearchHit) -> (&'static str, String, String, Action) {
+    match hit {
+        SearchHit::Artist(artist) => (
+            "Artist",
+            artist.name.clone(),
+            artist_description(artist),
+            Action::Artist(artist.clone()),
+        ),
+        SearchHit::Album(album) => (
+            "Album",
+            album.title.clone(),
+            album_description(album),
+            Action::Album(album.clone()),
+        ),
+        SearchHit::Song(song) => (
+            "Song",
+            song.title.clone(),
+            song_description(song),
+            Action::Song(song.clone()),
+        ),
+    }
 }
 
 fn empty<'a>(app: &App, label: &'static str) -> Element<'a, Message> {
@@ -341,7 +406,17 @@ fn back<'a>(app: &App, label: &'static str) -> Element<'a, Message> {
 }
 
 fn album_card<'a>(app: &'a App, album: &'a Album) -> Element<'a, Message> {
-    let desc = [
+    card(
+        app,
+        format!("album-{}", album.id),
+        album.title.clone(),
+        album_description(album),
+        Action::Album(album.clone()),
+    )
+}
+
+fn album_description(album: &Album) -> String {
+    [
         album.artist(),
         year(album.first_release_date.as_deref()),
         album
@@ -359,14 +434,7 @@ fn album_card<'a>(app: &'a App, album: &'a Album) -> Element<'a, Message> {
     .into_iter()
     .filter(|field| !field.is_empty())
     .collect::<Vec<_>>()
-    .join(" · ");
-    card(
-        app,
-        format!("album-{}", album.id),
-        album.title.clone(),
-        desc,
-        Action::Album(album.clone()),
-    )
+    .join(" · ")
 }
 
 fn artist_description(artist: &Artist) -> String {

@@ -103,6 +103,16 @@ impl App {
                 else {
                     return None;
                 };
+                if modifiers.command()
+                    && matches!(&key, keyboard::Key::Character(value) if value.eq_ignore_ascii_case("k"))
+                {
+                    return Some(Message::Catalog(super::CatalogAction::FocusSearch));
+                }
+                if !modifiers.command()
+                    && matches!(&key, keyboard::Key::Named(keyboard::key::Named::ArrowDown))
+                {
+                    return Some(Message::Catalog(super::CatalogAction::FocusResult));
+                }
                 if status == iced::event::Status::Captured {
                     return matches!(key, keyboard::Key::Named(keyboard::key::Named::Escape))
                         .then_some(Message::CapturedEscape);
@@ -1424,6 +1434,8 @@ impl App {
                 }
                 if self.panel != Panel::Workspace {
                     return self.update(Message::ClosePanel);
+                } else if self.catalog.pending.is_some() {
+                    return self.update_catalog(super::CatalogAction::Cancel);
                 } else if self.job.is_some() {
                     return self.update(Message::Cancel);
                 } else if self.catalog.visible {

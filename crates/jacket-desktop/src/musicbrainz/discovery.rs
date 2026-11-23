@@ -71,8 +71,10 @@ impl SearchHit {
                     .any(|alias| search_key(&alias.name) == query)
                 {
                     1
-                } else {
+                } else if is_prefix(query, &search_key(&artist.name)) {
                     2
+                } else {
+                    3
                 }
             }
             Self::Album(album) => title_rank(
@@ -300,9 +302,9 @@ fn expression(scope: &SearchScope, kind: SearchKind) -> Result<String, String> {
         return Err("Enter an artist, album, or song name up to 200 characters.".into());
     }
     let quoted = |text: &str| text.replace('\\', "\\\\").replace('"', "\\\"");
-    let phrase = quoted(query);
+    let phrase = quoted(&query.to_lowercase());
     let fields: &[&str] = match kind {
-        SearchKind::Artists => &["artist", "alias", "sortname"],
+        SearchKind::Artists => &["artist", "alias"],
         SearchKind::Albums => &["releasegroup", "artist", "alias", "comment"],
         SearchKind::Songs => &["recording", "artist", "alias", "comment"],
     };
@@ -312,18 +314,55 @@ fn expression(scope: &SearchScope, kind: SearchKind) -> Result<String, String> {
         .map(|(field, boost)| format!("{field}:\"{phrase}\"^{boost}"))
         .collect::<Vec<_>>()
         .join(" OR ");
-    let terms = query
+    let words: Vec<_> = query
         .split_whitespace()
         .filter(|word| word.chars().any(char::is_alphanumeric))
         .take(24)
-        .map(|word| {
-            let word = quoted(word);
-            let clause = fields
+        .collect();
+    let terms = words
+        .iter()
+        .enumerate()
+        .map(|(index, &word)| {
+            let exact = quoted(word);
+            let lower = word.to_lowercase();
+            let count = word.chars().count();
+            let plain = word.chars().all(char::is_alphanumeric);
+            let last = index + 1 == words.len();
+            let prefix = plain && last && (count >= 3 || (count == 2 && words.len() > 1));
+            let fuzzy = plain && count >= 5 && words.len() <= 6;
+            let token = if prefix {
+                format!("{lower}*")
+            } else if fuzzy {
+                format!("{lower}~1")
+            } else if plain {
+                lower.clone()
+            } else {
+                format!("\"{exact}\"")
+            };
+            // Keep partial queries small. Phrase clauses above still use
+            // aliases and version comments, and longer searches may combine them.
+            let primary = if kind == SearchKind::Artists { 1 } else { 2 };
+            let mut clauses: Vec<_> = fields[..primary]
                 .iter()
-                .map(|field| format!("{field}:\"{word}\""))
-                .collect::<Vec<_>>()
-                .join(" OR ");
-            format!("({clause})")
+                .map(|field| format!("{field}:{token}"))
+                .collect();
+            if prefix && fuzzy {
+                clauses.push(format!("{}:{lower}~1", fields[0]));
+            }
+            if words.len() > 2 {
+                clauses.extend(
+                    fields[primary..]
+                        .iter()
+                        .map(|field| format!("{field}:\"{exact}\"")),
+                );
+            }
+            if clauses.len() == 1 {
+                clauses
+                    .pop()
+                    .expect("the primary search field supplies a term")
+            } else {
+                format!("({})", clauses.join(" OR "))
+            }
         })
         .collect::<Vec<_>>()
         .join(" AND ");
@@ -346,7 +385,12 @@ fn prioritize(query: &str, hits: &mut [SearchHit]) {
                 .count(),
             _ => 0,
         };
-        (hit.rank(&query), std::cmp::Reverse(credits))
+        let rank = hit.rank(&query);
+        let length = match hit {
+            SearchHit::Artist(artist) if rank == 2 => artist.name.chars().count(),
+            _ => 0,
+        };
+        (rank, std::cmp::Reverse(credits), length)
     });
 }
 
@@ -364,9 +408,18 @@ fn title_rank(query: &str, title: &str, artist: &str, note: Option<&str>) -> u8 
         0
     } else if query == title {
         1
-    } else {
+    } else if is_prefix(query, &title)
+        || (query.len() > artist.len() && is_prefix(query, &format!("{artist}{title}")))
+        || (query.len() > title.len() && is_prefix(query, &format!("{title}{artist}")))
+    {
         2
+    } else {
+        3
     }
+}
+
+fn is_prefix(query: &str, value: &str) -> bool {
+    query.chars().take(5).count() == 5 && value.starts_with(query)
 }
 
 fn search_key(value: &str) -> String {
@@ -422,13 +475,51 @@ mod tests {
     }
 
     #[test]
+    fn a_shorter_artist_name_wins_over_a_tribute_with_the_same_prefix() {
+        let artist = |id, name| {
+            SearchHit::Artist(serde_json::from_value(json!({"id":id,"name":name})).unwrap())
+        };
+        let mut hits = [
+            artist("tribute", "Daft Punk Tribute"),
+            artist("original", "Daft Punk"),
+        ];
+        prioritize("Daft Pun", &mut hits);
+        assert_eq!(hits[0].id(), "original");
+        assert_eq!(hits[0].relevance("Daft Pun"), 2);
+    }
+
+    #[test]
+    fn a_short_artist_prefix_uses_only_name_terms_and_exact_aliases() {
+        let query = expression(&SearchScope::Text("Daft Pun".into()), SearchKind::Artists).unwrap();
+        assert_eq!(
+            query,
+            r#"(artist:"daft pun"^6 OR alias:"daft pun"^4 OR (artist:daft AND artist:pun*))"#
+        );
+    }
+
+    #[test]
+    fn search_expands_plain_prefixes_and_one_edit_misspellings() {
+        let query = expression(
+            &SearchScope::Text("RadIohed CRee".into()),
+            SearchKind::Songs,
+        )
+        .unwrap();
+        assert!(query.contains("artist:radiohed~1"));
+        assert!(query.contains("recording:cree*"));
+        assert!(!query.contains("artist:radiohed*"));
+        let punctuation =
+            expression(&SearchScope::Text("album:foo".into()), SearchKind::Albums).unwrap();
+        assert!(!punctuation.contains("album:foo*"));
+    }
+
+    #[test]
     fn search_literals_remain_quoted_and_artist_browsing_uses_the_id() {
         let text = expression(
             &SearchScope::Text("Title \"part\"".into()),
             SearchKind::Songs,
         )
         .unwrap();
-        assert!(text.contains(r#"recording:"Title \"part\"""#));
+        assert!(text.contains(r#"recording:"title \"part\"""#));
         let id = "50de827a-6631-4099-bd85-23dd6cb69d66";
         let artist = SearchScope::Artist(id.into());
         assert_eq!(

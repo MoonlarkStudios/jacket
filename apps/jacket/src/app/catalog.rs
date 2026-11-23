@@ -9,10 +9,17 @@ use jacket_desktop::musicbrainz::{
 };
 use jacket_desktop::{CatalogEvent, Job};
 use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
+
+const SEARCH_DELAY: Duration = Duration::from_millis(450);
 
 #[derive(Clone, Debug)]
 pub enum CatalogAction {
     Browse,
+    FocusSearch,
+    FocusResult,
+    ClearSearch,
+    Cancel,
     PasteLink,
     ReturnToReview,
     Query(String),
@@ -43,6 +50,7 @@ pub struct Catalog {
     pub visible: bool,
     pub query: String,
     pub searched: String,
+    search_due: Option<Instant>,
     pub filter: Option<SearchKind>,
     pub results: SearchSections,
     queued_action: Option<CatalogAction>,
@@ -98,6 +106,7 @@ impl Catalog {
             visible,
             query: String::new(),
             searched: String::new(),
+            search_due: None,
             filter: None,
             results: SearchSections::default(),
             queued_action: None,
@@ -120,6 +129,55 @@ impl Catalog {
 
     pub fn search_home(&self) -> bool {
         self.artist.is_none() && self.song.is_none() && self.group.is_none()
+    }
+
+    pub fn result_order(&self) -> [SearchKind; 3] {
+        let mut kinds = SearchKind::ALL;
+        kinds.sort_by_key(|kind| {
+            self.first_result(*kind)
+                .map_or(4, |hit| hit.relevance(&self.searched))
+        });
+        kinds
+    }
+
+    pub fn top_result(&self) -> Option<&SearchHit> {
+        if self.filter.is_some() || self.query.trim() != self.searched {
+            return None;
+        }
+        let [best, second, _] = self.result_order();
+        let hit = self.first_result(best)?;
+        let score = hit.relevance(&self.searched);
+        let tied = self
+            .first_result(second)
+            .is_some_and(|other| other.relevance(&self.searched) == score);
+        let artist_prefix = score == 2 && matches!(hit, SearchHit::Artist(_));
+        let comparable_prefix =
+            artist_prefix || self.results.pages.contains_key(&SearchKind::Artists);
+        (score < 3 && (!tied || artist_prefix) && (score < 2 || comparable_prefix)).then_some(hit)
+    }
+
+    fn first_result(&self, kind: SearchKind) -> Option<&SearchHit> {
+        self.results.pages.get(&kind)?.hits.first()
+    }
+
+    fn edit_query(&mut self, query: String, now: Instant) {
+        self.query = query;
+        self.error = None;
+        let trimmed = self.query.trim();
+        if trimmed.is_empty() {
+            self.searched.clear();
+            self.results = SearchSections::default();
+            self.queued_action = None;
+        }
+        self.search_due = (trimmed != self.searched
+            && trimmed.chars().take(201).count() <= 200
+            && trimmed
+                .chars()
+                .filter(|character| character.is_alphanumeric())
+                .take(2)
+                .count()
+                == 2)
+            .then_some(now + SEARCH_DELAY);
     }
 
     pub fn sections(&self) -> &SearchSections {
@@ -167,14 +225,59 @@ impl Catalog {
 impl App {
     pub(super) fn update_catalog(&mut self, action: CatalogAction) -> Task<Message> {
         if self.panel != Panel::Workspace
-            || (!self.catalog.visible && !matches!(action, CatalogAction::Browse))
+            || (!self.catalog.visible
+                && !matches!(action, CatalogAction::Browse | CatalogAction::FocusSearch))
         {
             return Task::none();
         }
+        if matches!(action, CatalogAction::Cancel) {
+            self.catalog.search_due = None;
+            self.catalog.queued_action = None;
+            return self.update(Message::Cancel);
+        }
+        if matches!(action, CatalogAction::ClearSearch) {
+            return Task::batch([
+                self.update_catalog(CatalogAction::Query(String::new())),
+                operation::focus("album-search"),
+            ]);
+        }
         if let CatalogAction::Query(query) = action {
-            self.catalog.query = query;
-            self.catalog.error = None;
+            if !self.catalog.search_home() {
+                return Task::none();
+            }
+            self.catalog.edit_query(query, Instant::now());
+            if self.catalog.searched.is_empty()
+                && matches!(self.catalog.pending, Some(CatalogPending::Search))
+            {
+                return self.update(Message::Cancel);
+            }
             return Task::none();
+        }
+        if matches!(action, CatalogAction::FocusResult) {
+            if !self.catalog.search_home()
+                || self.catalog.cancelling
+                || self.catalog.query.trim() != self.catalog.searched
+            {
+                return Task::none();
+            }
+            if self.catalog.top_result().is_some() {
+                return operation::focus("catalog-top-result");
+            }
+            let hit = if let Some(kind) = self.catalog.filter {
+                self.catalog.first_result(kind)
+            } else {
+                self.catalog
+                    .result_order()
+                    .into_iter()
+                    .find_map(|kind| self.catalog.first_result(kind))
+            };
+            return hit.map_or_else(Task::none, |hit| operation::focus(search_result_id(hit)));
+        }
+        if matches!(action, CatalogAction::FocusSearch)
+            && self.catalog.visible
+            && self.catalog.search_home()
+        {
+            return operation::focus("album-search");
         }
         if let CatalogAction::Filter(filter) = action {
             if let Some(artist) = &mut self.catalog.artist {
@@ -203,6 +306,7 @@ impl App {
                     CatalogAction::Artist(_) | CatalogAction::Album(_) | CatalogAction::Song(_)
                 ) && !self.catalog.cancelling;
                 if replaces_query || opens_result {
+                    self.catalog.search_due = None;
                     self.catalog.queued_action = Some(action);
                     return self.update(Message::Cancel);
                 }
@@ -215,18 +319,31 @@ impl App {
                 self.catalog.visible = true;
                 return operation::focus("album-search");
             }
+            CatalogAction::FocusSearch => {
+                self.catalog.visible = true;
+                self.catalog.clear_album();
+                self.catalog.artist = None;
+                self.catalog.song = None;
+                return operation::focus("album-search");
+            }
+            CatalogAction::FocusResult | CatalogAction::ClearSearch | CatalogAction::Cancel => {
+                unreachable!("search controls are handled before busy actions")
+            }
             CatalogAction::PasteLink => {
+                self.catalog.search_due = None;
                 self.catalog.visible = false;
                 self.catalog.confirm_replace = false;
                 return self.update(Message::PasteLink);
             }
             CatalogAction::ReturnToReview => {
+                self.catalog.search_due = None;
                 self.catalog.visible = false;
                 self.catalog.confirm_replace = false;
             }
             CatalogAction::Query(_) => unreachable!("search entry is handled before busy actions"),
             CatalogAction::Filter(_) => unreachable!("filters are handled before busy actions"),
             CatalogAction::Search => {
+                self.catalog.search_due = None;
                 let query = self.catalog.query.trim().to_owned();
                 if query.is_empty() {
                     return operation::focus("album-search");
@@ -242,7 +359,11 @@ impl App {
                 ]);
             }
             CatalogAction::LoadVisible => {
-                if self.catalog.song.is_none() && self.catalog.group.is_none() {
+                if self.catalog.song.is_none()
+                    && self.catalog.group.is_none()
+                    && (self.catalog.artist.is_some()
+                        || self.catalog.query.trim() == self.catalog.searched)
+                {
                     let sections = self.catalog.sections();
                     let pages = self
                         .catalog
@@ -279,6 +400,7 @@ impl App {
                 }
             }
             CatalogAction::Artist(artist) => {
+                self.catalog.search_due = None;
                 self.catalog.artist = Some(ArtistPage {
                     artist,
                     filter: SearchKind::Albums,
@@ -290,6 +412,7 @@ impl App {
                 return reset_scroll();
             }
             CatalogAction::Song(song) => {
+                self.catalog.search_due = None;
                 let Some(desktop) = desktop else {
                     return Task::none();
                 };
@@ -327,6 +450,7 @@ impl App {
                 }
             }
             CatalogAction::Album(group) => {
+                self.catalog.search_due = None;
                 let Some(desktop) = desktop else {
                     return Task::none();
                 };
@@ -363,8 +487,7 @@ impl App {
                     self.catalog.clear_album();
                 } else if self.catalog.song.take().is_none() && self.catalog.artist.take().is_none()
                 {
-                    self.catalog.visible = false;
-                    return self.update(Message::FocusSource);
+                    return self.update_catalog(CatalogAction::ClearSearch);
                 }
                 return Task::batch([
                     reset_scroll(),
@@ -445,6 +568,26 @@ impl App {
             }
         }
         Task::none()
+    }
+
+    pub(super) fn tick_catalog_search(&mut self, now: Instant) -> Task<Message> {
+        if self.panel != Panel::Workspace
+            || !self.catalog.visible
+            || !self.catalog.search_home()
+            || self.desktop.is_none()
+            || self.catalog.search_due.is_none_or(|due| now < due)
+        {
+            return Task::none();
+        }
+        if self.busy() {
+            if matches!(self.catalog.pending, Some(CatalogPending::Search))
+                && !self.catalog.cancelling
+            {
+                return self.update(Message::Cancel);
+            }
+            return Task::none();
+        }
+        self.update_catalog(CatalogAction::Search)
     }
 
     fn search_pages(&mut self, pages: Vec<(SearchKind, usize)>) {
@@ -565,6 +708,15 @@ impl App {
     }
 }
 
+pub fn search_result_id(hit: &SearchHit) -> String {
+    let kind = match hit {
+        SearchHit::Artist(_) => "artist",
+        SearchHit::Album(_) => "album",
+        SearchHit::Song(_) => "song",
+    };
+    format!("{kind}-{}", hit.id())
+}
+
 fn reset_scroll() -> Task<Message> {
     operation::scroll_to(
         "album-browser",
@@ -589,7 +741,7 @@ impl App {
         if scenario == "catalog" {
             return;
         }
-        self.catalog.query = "Paper Trails".into();
+        self.catalog.query = "The Paper Trails".into();
         self.catalog.searched = self.catalog.query.clone();
         let album = group(
             "50de827a-6631-4099-bd85-23dd6cb69d66",
@@ -775,6 +927,73 @@ mod tests {
     use jacket_desktop::musicbrainz::{SearchHit, SearchKind, SearchPage};
     use jacket_desktop::CatalogEvent;
     use serde_json::json;
+
+    #[test]
+    fn typing_coalesces_updates_and_clearing_search_drops_old_sections() {
+        use super::{SearchSections, SEARCH_DELAY};
+        use std::time::{Duration, Instant};
+
+        let (mut app, _) = App::new();
+        let now = Instant::now();
+        app.catalog.edit_query("R".into(), now);
+        assert_eq!(app.catalog.search_due, None);
+        app.catalog.edit_query("Ra".into(), now);
+        assert_eq!(app.catalog.search_due, Some(now + SEARCH_DELAY));
+        let more_typing = now + Duration::from_millis(100);
+        app.catalog.edit_query("Radiohead".into(), more_typing);
+        assert_eq!(app.catalog.search_due, Some(more_typing + SEARCH_DELAY));
+        app.catalog.searched = "Radiohead".into();
+        app.catalog.results = SearchSections::default();
+        app.catalog.results.pages.insert(
+            SearchKind::Artists,
+            SearchPage {
+                hits: vec![SearchHit::Artist(
+                    serde_json::from_value(json!({
+                        "id":"artist","name":"Radiohead",
+                    }))
+                    .unwrap(),
+                )],
+                next_offset: None,
+            },
+        );
+        assert!(app.catalog.top_result().is_some());
+        app.catalog
+            .edit_query("Different artist".into(), more_typing);
+        assert!(app.catalog.top_result().is_none());
+        app.catalog.edit_query(String::new(), more_typing);
+        assert_eq!(app.catalog.search_due, None);
+        assert!(app.catalog.searched.is_empty());
+        assert!(app.catalog.results.pages.is_empty());
+    }
+
+    #[test]
+    fn debounce_submits_the_latest_query_once_from_the_workspace() {
+        use super::SEARCH_DELAY;
+        use std::time::{Duration, Instant};
+
+        let root = tempfile::tempdir().unwrap();
+        let (mut app, _) = App::new();
+        app.loading = false;
+        app.catalog.visible = true;
+        app.desktop = Some(
+            jacket_desktop::Desktop::with_directories(
+                root.path().join("data"),
+                root.path().join("cache"),
+                root.path().join("resources"),
+                root.path().join("home"),
+            )
+            .unwrap(),
+        );
+        let now = Instant::now();
+        app.catalog.edit_query("Daf".into(), now);
+        let last_key = now + Duration::from_millis(100);
+        app.catalog.edit_query("Daft Punk".into(), last_key);
+        assert_eq!(app.tick_catalog_search(now + SEARCH_DELAY).units(), 0);
+        assert!(app.catalog.searched.is_empty());
+        assert!(app.tick_catalog_search(last_key + SEARCH_DELAY).units() > 0);
+        assert_eq!(app.catalog.searched, "Daft Punk");
+        assert_eq!(app.tick_catalog_search(last_key + SEARCH_DELAY).units(), 0);
+    }
 
     #[test]
     fn progressive_pages_preserve_other_sections_and_discard_cancelled_results() {
