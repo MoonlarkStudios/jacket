@@ -8,46 +8,201 @@ use crate::style;
 use iced::widget::{button, column, container, image, row, space, text, text_input, tooltip};
 use iced::{Alignment, ContentFit, Element, Length};
 use jacket_desktop::musicbrainz::{Album, Artist, SearchHit, SearchKind, Song};
+use jacket_desktop::youtube_music::{SearchItem as YouTubeItem, SearchKind as YouTubeKind};
 
-pub(super) fn youtube_music(app: &App) -> Element<'_, Message> {
-    let catalog = &app.catalog;
+pub(super) fn youtube_music_filters(app: &App) -> Element<'_, Message> {
     let p = app.presentation();
-    if catalog.searched.is_empty() {
-        return text("Choose an album edition to open its track list in review.")
-            .size(14)
-            .color(p.colors.text_muted)
-            .into();
-    }
-    if catalog.query.trim() != catalog.searched {
+    std::iter::once(None)
+        .chain(YouTubeKind::ALL.into_iter().map(Some))
+        .fold(row![].spacing(7), |bar, filter| {
+            let label = filter.map_or("All", YouTubeKind::label);
+            bar.push(super::focus_button::wrap(
+                format!("youtube-music-filter-{label}"),
+                button(label)
+                    .padding([6, 12])
+                    .style(p.choice(app.catalog.youtube_music_filter == filter)),
+                (!app.busy() && !app.catalog.confirm_replace)
+                    .then_some(Message::Catalog(Action::YouTubeMusicFilter(filter))),
+                p.colors.accent,
+            ))
+        })
+        .into()
+}
+
+pub(super) fn youtube_music(app: &App, compact: bool) -> Element<'_, Message> {
+    let catalog = &app.catalog;
+    let artist_page = catalog.youtube_music_artist.as_ref();
+    if artist_page.is_none()
+        && (catalog.searched.is_empty() || catalog.query.trim() != catalog.searched)
+    {
         return space().into();
     }
-    if catalog.youtube_music_results.is_empty() {
+    let mut body = column![].spacing(18);
+    if let Some(page) = artist_page {
+        body = body
+            .push(action(
+                app,
+                "youtube-music-artist-back",
+                "Back to results",
+                Action::Back,
+                !app.busy(),
+                false,
+            ))
+            .push(
+                row![
+                    thumbnail(
+                        app,
+                        page.artist
+                            .artwork_url
+                            .as_deref()
+                            .and_then(|url| catalog.media.get(url)),
+                        Some(&page.artist.name),
+                        64.0
+                    ),
+                    text(&page.artist.name).size(28).font(style::semibold()),
+                ]
+                .spacing(12)
+                .align_y(Alignment::Center),
+            );
+    }
+    let hits = catalog.youtube_music_hits();
+    if hits.is_empty() {
         if catalog.pending.is_none() && catalog.error.is_none() {
-            return empty(app, "No albums found");
+            let label = match catalog.youtube_music_filter {
+                Some(YouTubeKind::Artists) => "No artists found",
+                Some(YouTubeKind::Albums) => "No albums found",
+                Some(YouTubeKind::Songs) => "No songs found",
+                None => "No results found",
+            };
+            body = body.push(empty(app, label));
         }
-        return space().into();
+        return body.into();
     }
-    column(catalog.youtube_music_results.iter().map(|album| {
-        let subtitle = [
-            album.artist.clone(),
-            album.year.map_or_else(String::new, |year| year.to_string()),
-            album.kind.clone(),
+    if artist_page.is_none() && catalog.youtube_music_filter.is_some() {
+        return column(
+            hits.iter()
+                .map(|hit| youtube_music_card(app, &hit.item, false)),
+        )
+        .spacing(8)
+        .into();
+    }
+    let featured = catalog.youtube_music_featured();
+    if let Some(hit) = featured {
+        body = body.push(
+            column![
+                text("Top result").size(17).font(style::semibold()),
+                youtube_music_card(app, &hit.item, true),
+            ]
+            .spacing(8),
+        );
+    }
+    for kind in catalog.youtube_music_order() {
+        let mut group = hits
+            .iter()
+            .filter(|hit| {
+                hit.item.kind() == kind
+                    && featured.is_none_or(|featured| featured.item.id() != hit.item.id())
+            })
+            .peekable();
+        if group.peek().is_none() {
+            continue;
+        }
+        let label = match (artist_page.is_some(), kind) {
+            (true, YouTubeKind::Albums) => "Albums & singles",
+            (true, YouTubeKind::Songs) => "Top songs",
+            _ => kind.label(),
+        };
+        let mut heading = row![
+            text(label).size(17).font(style::semibold()),
+            space::horizontal()
         ]
+        .align_y(Alignment::Center);
+        if artist_page.is_none() {
+            heading = heading.push(action(
+                app,
+                format!("youtube-music-more-{}", kind.label()),
+                "See all",
+                Action::YouTubeMusicFilter(Some(kind)),
+                !app.busy() && !catalog.confirm_replace,
+                false,
+            ));
+        }
+        let limit = if artist_page.is_some() {
+            hits.len()
+        } else if compact {
+            2
+        } else {
+            3
+        };
+        body = body.push(
+            column![heading]
+                .extend(
+                    group
+                        .take(limit)
+                        .map(|hit| youtube_music_card(app, &hit.item, false)),
+                )
+                .spacing(8),
+        );
+    }
+    body.into()
+}
+
+fn youtube_music_card<'a>(
+    app: &'a App,
+    item: &YouTubeItem,
+    featured: bool,
+) -> Element<'a, Message> {
+    let (title, details, artist) = match item {
+        YouTubeItem::Artist(artist) => (
+            &artist.name,
+            ["Artist".to_owned(), String::new(), String::new()],
+            Some(artist.name.as_str()),
+        ),
+        YouTubeItem::Album(album) => (
+            &album.title,
+            [
+                album.artist.clone(),
+                album.year.map_or_else(String::new, |year| year.to_string()),
+                album.kind.clone(),
+            ],
+            None,
+        ),
+        YouTubeItem::Song(song) => (
+            &song.title,
+            [
+                song.artist.clone(),
+                song.album.clone(),
+                song.duration.map_or_else(String::new, |seconds| {
+                    format!("{}:{:02}", seconds / 60, seconds % 60)
+                }),
+            ],
+            None,
+        ),
+    };
+    let details = details
         .into_iter()
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
         .join(" · ");
-        card(
+    let subtitle = if featured && matches!(item, YouTubeItem::Song(_)) {
+        format!("Song · {details}")
+    } else {
+        details
+    };
+    card(
+        app,
+        youtube_music_result_id(item),
+        title.clone(),
+        subtitle,
+        Some(thumbnail(
             app,
-            youtube_music_result_id(&album.id),
-            album.title.clone(),
-            subtitle,
-            Some(cover_thumbnail(app, album.artwork_url.clone(), 44.0)),
-            Action::OpenYouTubeMusicAlbum(album.id.clone()),
-        )
-    }))
-    .spacing(8)
-    .into()
+            item.artwork_url()
+                .and_then(|url| app.catalog.media.get(url)),
+            artist,
+            if featured { 56.0 } else { 40.0 },
+        )),
+        Action::OpenYouTubeMusicResult(item.kind(), item.id().into()),
+    )
 }
 
 pub(super) fn filters(app: &App, artist: bool) -> Element<'_, Message> {

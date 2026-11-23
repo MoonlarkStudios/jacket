@@ -7,6 +7,10 @@ use jacket_desktop::musicbrainz::{
     Album, Artist, Edition, Release, SearchHit, SearchKind, SearchPage, SearchScope, Song,
     SongDetails,
 };
+use jacket_desktop::youtube_music::{
+    ArtistPage as YouTubeArtistPage, SearchHit as YouTubeHit, SearchItem as YouTubeItem,
+    SearchKind as YouTubeKind,
+};
 use jacket_desktop::{CatalogEvent, Job};
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -25,7 +29,8 @@ pub enum CatalogAction {
     Query(String),
     Search,
     UseYouTubeMusic(bool),
-    OpenYouTubeMusicAlbum(String),
+    YouTubeMusicFilter(Option<YouTubeKind>),
+    OpenYouTubeMusicResult(YouTubeKind, String),
     OpenYouTubeMusicSearch,
     Filter(Option<SearchKind>),
     Scrolled(f32),
@@ -61,8 +66,10 @@ pub struct Catalog {
     pub media: CatalogMedia,
     pub youtube_music_available: bool,
     pub youtube_music_active: bool,
-    pub youtube_music_results: Vec<jacket_desktop::youtube_music::Album>,
-    youtube_music_album: Option<Box<Inspection>>,
+    pub youtube_music_filter: Option<YouTubeKind>,
+    youtube_music_results: BTreeMap<Option<YouTubeKind>, Vec<YouTubeHit>>,
+    pub youtube_music_artist: Option<YouTubeArtistPage>,
+    youtube_music_inspection: Option<Box<Inspection>>,
     queued_action: Option<CatalogAction>,
     pub artist: Option<ArtistPage>,
     pub song: Option<SongPage>,
@@ -84,7 +91,9 @@ pub struct Catalog {
 pub enum CatalogPending {
     Search,
     YouTubeMusicSearch,
+    YouTubeMusicArtist,
     YouTubeMusicAlbum,
+    YouTubeMusicSong,
     Song,
     SongMatch,
     Editions,
@@ -124,8 +133,10 @@ impl Catalog {
             media: CatalogMedia::default(),
             youtube_music_available: false,
             youtube_music_active: false,
-            youtube_music_results: Vec::new(),
-            youtube_music_album: None,
+            youtube_music_filter: None,
+            youtube_music_results: BTreeMap::new(),
+            youtube_music_artist: None,
+            youtube_music_inspection: None,
             queued_action: None,
             artist: None,
             song: None,
@@ -145,7 +156,41 @@ impl Catalog {
     }
 
     pub fn search_home(&self) -> bool {
-        self.artist.is_none() && self.song.is_none() && self.group.is_none()
+        self.artist.is_none()
+            && self.song.is_none()
+            && self.group.is_none()
+            && self.youtube_music_artist.is_none()
+    }
+
+    pub fn youtube_music_hits(&self) -> &[YouTubeHit] {
+        if let Some(artist) = &self.youtube_music_artist {
+            return &artist.hits;
+        }
+        self.youtube_music_results
+            .get(&self.youtube_music_filter)
+            .map_or(&[], Vec::as_slice)
+    }
+
+    pub fn youtube_music_featured(&self) -> Option<&YouTubeHit> {
+        if self.youtube_music_filter.is_some() || self.youtube_music_artist.is_some() {
+            return None;
+        }
+        self.youtube_music_hits().iter().find(|hit| hit.featured)
+    }
+
+    pub fn youtube_music_order(&self) -> [YouTubeKind; 3] {
+        let mut kinds = YouTubeKind::ALL;
+        let featured = self.youtube_music_featured();
+        kinds.sort_by_key(|kind| {
+            self.youtube_music_hits()
+                .iter()
+                .position(|hit| {
+                    hit.item.kind() == *kind
+                        && featured.is_none_or(|first| first.item.id() != hit.item.id())
+                })
+                .unwrap_or(usize::MAX)
+        });
+        kinds
     }
 
     pub fn result_order(&self) -> [SearchKind; 3] {
@@ -300,6 +345,21 @@ impl App {
             return Task::none();
         }
         if matches!(action, CatalogAction::FocusResult) {
+            if self.catalog.youtube_music_active {
+                let catalog = &self.catalog;
+                if self.busy()
+                    || catalog.confirm_replace
+                    || (catalog.search_home() && catalog.query.trim() != catalog.searched)
+                {
+                    return Task::none();
+                }
+                return catalog
+                    .youtube_music_featured()
+                    .or_else(|| catalog.youtube_music_hits().first())
+                    .map_or_else(Task::none, |hit| {
+                        operation::focus(youtube_music_result_id(&hit.item))
+                    });
+            }
             if !self.catalog.search_home()
                 || self.catalog.cancelling
                 || self.catalog.query.trim() != self.catalog.searched
@@ -308,15 +368,6 @@ impl App {
             }
             if self.catalog.top_result().is_some() {
                 return operation::focus("catalog-top-result");
-            }
-            if self.catalog.youtube_music_active {
-                return self
-                    .catalog
-                    .youtube_music_results
-                    .first()
-                    .map_or_else(Task::none, |album| {
-                        operation::focus(youtube_music_result_id(&album.id))
-                    });
             }
             let hit = if let Some(kind) = self.catalog.filter {
                 self.catalog.first_result(kind)
@@ -376,6 +427,9 @@ impl App {
         match action {
             CatalogAction::Browse => {
                 self.catalog.visible = true;
+                if self.catalog.youtube_music_artist.is_some() {
+                    return operation::focus("youtube-music-artist-back");
+                }
                 return operation::focus("album-search");
             }
             CatalogAction::FocusSearch => {
@@ -383,6 +437,7 @@ impl App {
                 self.catalog.clear_album();
                 self.catalog.artist = None;
                 self.catalog.song = None;
+                self.catalog.youtube_music_artist = None;
                 return operation::focus("album-search");
             }
             CatalogAction::FocusResult | CatalogAction::ClearSearch | CatalogAction::Cancel => {
@@ -416,7 +471,9 @@ impl App {
                     self.catalog.clear_album();
                     self.catalog.artist = None;
                     self.catalog.song = None;
-                    self.catalog.youtube_music_album = None;
+                    self.catalog.youtube_music_artist = None;
+                    self.catalog.youtube_music_filter = None;
+                    self.catalog.youtube_music_inspection = None;
                     self.catalog.youtube_music_results.clear();
                     self.catalog.searched.clear();
                     self.catalog.results = SearchSections::default();
@@ -425,21 +482,75 @@ impl App {
                     return Task::batch([operation::focus("album-search"), reset_scroll()]);
                 }
             }
-            CatalogAction::OpenYouTubeMusicAlbum(id) => {
+            CatalogAction::YouTubeMusicFilter(filter) => {
                 if self.catalog.youtube_music_active
-                    && self.catalog.query.trim() == self.catalog.searched
-                    && self
-                        .catalog
-                        .youtube_music_results
-                        .iter()
-                        .any(|album| album.id == id)
+                    && self.catalog.search_home()
+                    && !self.catalog.confirm_replace
+                    && self.catalog.youtube_music_filter != filter
                 {
-                    if let Some(desktop) = desktop {
-                        self.catalog.youtube_music_album = None;
-                        self.start_catalog(
-                            CatalogPending::YouTubeMusicAlbum,
-                            desktop.open_youtube_music_album(id),
-                        );
+                    self.catalog.youtube_music_filter = filter;
+                    self.catalog.media.scroll_y = 0.0;
+                    self.catalog.error = None;
+                    let query = self.catalog.query.trim();
+                    if !query.is_empty()
+                        && (query != self.catalog.searched
+                            || !self.catalog.youtube_music_results.contains_key(&filter))
+                    {
+                        return self.update_catalog(CatalogAction::Search);
+                    }
+                    return reset_scroll();
+                }
+            }
+            CatalogAction::OpenYouTubeMusicResult(kind, id) => {
+                let catalog = &mut self.catalog;
+                if !catalog.youtube_music_active
+                    || catalog.confirm_replace
+                    || (catalog.search_home() && catalog.query.trim() != catalog.searched)
+                {
+                    return Task::none();
+                }
+                let Some(item) = catalog
+                    .youtube_music_hits()
+                    .iter()
+                    .find(|hit| hit.item.kind() == kind && hit.item.id() == id)
+                    .map(|hit| hit.item.clone())
+                else {
+                    return Task::none();
+                };
+                catalog.youtube_music_inspection = None;
+                catalog.error = None;
+                match item {
+                    YouTubeItem::Artist(_) => {
+                        if let Some(desktop) = desktop {
+                            self.start_catalog(
+                                CatalogPending::YouTubeMusicArtist,
+                                desktop.open_youtube_music_artist(id),
+                            );
+                        }
+                    }
+                    YouTubeItem::Album(_) => {
+                        if let Some(desktop) = desktop {
+                            self.start_catalog(
+                                CatalogPending::YouTubeMusicAlbum,
+                                desktop.open_youtube_music_album(id),
+                            );
+                        }
+                    }
+                    YouTubeItem::Song(song) => {
+                        if let Some(desktop) = desktop.filter(|_| song.needs_details()) {
+                            self.start_catalog(
+                                CatalogPending::YouTubeMusicSong,
+                                desktop.open_youtube_music_song(song),
+                            );
+                            return Task::none();
+                        }
+                        match song.inspection() {
+                            Ok(inspection) => {
+                                self.catalog.youtube_music_inspection = Some(Box::new(inspection));
+                                return self.update_catalog(CatalogAction::Review);
+                            }
+                            Err(error) => self.catalog.error = Some(error),
+                        }
                     }
                 }
             }
@@ -451,13 +562,17 @@ impl App {
                     return operation::focus("album-search");
                 }
                 if self.catalog.youtube_music_active {
-                    self.catalog.youtube_music_album = None;
-                    self.catalog.youtube_music_results.clear();
+                    self.catalog.youtube_music_inspection = None;
+                    if self.catalog.searched != query {
+                        self.catalog.youtube_music_results.clear();
+                    }
+                    let filter = self.catalog.youtube_music_filter;
+                    self.catalog.youtube_music_results.remove(&filter);
                     self.catalog.searched = query.clone();
                     if let Some(desktop) = desktop {
                         self.start_catalog(
                             CatalogPending::YouTubeMusicSearch,
-                            desktop.search_youtube_music(query),
+                            desktop.search_youtube_music(query, filter),
                         );
                     }
                     return reset_scroll();
@@ -606,8 +721,11 @@ impl App {
                 self.catalog.error = None;
                 if self.catalog.confirm_replace {
                     self.catalog.confirm_replace = false;
-                    self.catalog.youtube_music_album = None;
+                    self.catalog.youtube_music_inspection = None;
                 } else if self.catalog.youtube_music_active {
+                    if self.catalog.youtube_music_artist.take().is_some() {
+                        return Task::batch([reset_scroll(), operation::focus("album-search")]);
+                    }
                     return self.update_catalog(CatalogAction::ClearSearch);
                 } else if self.catalog.choosing_edition && self.catalog.release.is_some() {
                     self.catalog.choosing_edition = false;
@@ -662,7 +780,10 @@ impl App {
                     return Task::none();
                 }
                 let inspection = if self.catalog.youtube_music_active {
-                    self.catalog.youtube_music_album.take().map(|album| *album)
+                    self.catalog
+                        .youtube_music_inspection
+                        .take()
+                        .map(|inspection| *inspection)
                 } else if self.catalog.group.is_none() {
                     self.catalog
                         .song
@@ -785,15 +906,21 @@ impl App {
             Ok(CatalogEvent::SearchFinished) => {
                 return Task::done(Message::Catalog(CatalogAction::LoadVisible));
             }
-            Ok(CatalogEvent::YouTubeMusicResults(albums)) => {
-                if self.catalog.youtube_music_active
-                    && self.catalog.query.trim() == self.catalog.searched
-                {
-                    self.catalog.youtube_music_results = albums;
+            Ok(CatalogEvent::YouTubeMusicResults { filter, hits }) => {
+                if self.catalog.youtube_music_active && !self.catalog.searched.is_empty() {
+                    self.catalog.youtube_music_results.insert(filter, hits);
                 }
             }
-            Ok(CatalogEvent::YouTubeMusicAlbum(album)) => {
-                self.catalog.youtube_music_album = Some(album);
+            Ok(CatalogEvent::YouTubeMusicArtist(artist)) => {
+                self.catalog.youtube_music_artist = Some(artist);
+                self.catalog.media.scroll_y = 0.0;
+                return Task::batch([
+                    reset_scroll(),
+                    operation::focus("youtube-music-artist-back"),
+                ]);
+            }
+            Ok(CatalogEvent::YouTubeMusicReview(inspection)) => {
+                self.catalog.youtube_music_inspection = Some(inspection);
                 return Task::done(Message::Catalog(CatalogAction::Review));
             }
             Ok(CatalogEvent::SongDetails(details)) => {
@@ -860,8 +987,8 @@ pub fn search_result_id(hit: &SearchHit) -> String {
     format!("{kind}-{}", hit.id())
 }
 
-pub fn youtube_music_result_id(id: &str) -> String {
-    format!("youtube-music-album-{id}")
+pub fn youtube_music_result_id(item: &YouTubeItem) -> String {
+    format!("youtube-music-{}-{}", item.kind().label(), item.id())
 }
 
 fn reset_scroll() -> Task<Message> {
@@ -893,20 +1020,16 @@ impl App {
         if scenario == "catalog-youtube-music" {
             self.catalog.youtube_music_available = true;
             self.catalog.youtube_music_active = true;
-            self.catalog.youtube_music_results = [
-                ("MPREb_example1", "Room to breathe (Expanded Edition)", 2024),
-                ("MPREb_example2", "Room to breathe", 2021),
-            ]
-            .into_iter()
-            .map(|(id, title, year)| jacket_desktop::youtube_music::Album {
-                id: id.into(),
-                title: title.into(),
-                artist: "The Paper Trails".into(),
-                year: Some(year),
-                kind: "Album".into(),
-                artwork_url: Some("https://i.ytimg.com/example.jpg".into()),
-            })
-            .collect();
+            self.catalog.youtube_music_results.insert(None, serde_json::from_value(json!([
+                {"result_type": "artist", "featured": true, "id": "UCtest000000000000000001",
+                    "name": "The Paper Trails"},
+                {"result_type": "album", "featured": false, "id": "MPREb_example1",
+                    "title": "Room to breathe (Expanded Edition)", "artist": "The Paper Trails",
+                    "year": 2024, "kind": "Album", "artwork_url": "https://i.ytimg.com/example.jpg"},
+                {"result_type": "song", "featured": false, "id": "abcdefghijk",
+                    "title": "First Light", "artist": "The Paper Trails", "album": "Room to breathe",
+                    "duration": 192, "available": true, "artwork_url": "https://i.ytimg.com/example.jpg"}
+            ])).expect("fictional YouTube Music search results"));
             self.catalog.media.complete(
                 "https://i.ytimg.com/example.jpg".into(),
                 Some(crate::artwork::example_cover().source().clone()),
@@ -1130,7 +1253,7 @@ mod tests {
         album.title = "Room to breathe (Expanded Edition)".into();
         let track = album.tracks[0].clone();
         album.tracks = vec![track; 20];
-        let _ = app.catalog_finished(Ok(CatalogEvent::YouTubeMusicAlbum(Box::new(album))));
+        let _ = app.catalog_finished(Ok(CatalogEvent::YouTubeMusicReview(Box::new(album))));
         let _ = app.update_catalog(CatalogAction::Review);
         let review = app.review.as_ref().unwrap();
         assert!(!app.catalog.visible);
@@ -1140,6 +1263,27 @@ mod tests {
         );
         assert_eq!(review.inspection.tracks.len(), 20);
         assert_eq!(review.selected.len(), 20);
+    }
+
+    #[test]
+    fn youtube_music_song_opens_the_selected_recording_in_review() {
+        use jacket_desktop::youtube_music::SearchKind;
+
+        let (mut app, _) = App::new();
+        app.loading = false;
+        app.catalog_snapshot("catalog-youtube-music");
+        let _ = app.update_catalog(CatalogAction::OpenYouTubeMusicResult(
+            SearchKind::Songs,
+            "abcdefghijk".into(),
+        ));
+        let review = app.review.as_ref().unwrap();
+        assert!(review.is_song());
+        assert_eq!(review.inspection.title, "First Light");
+        assert_eq!(review.inspection.tracks[0].id, "abcdefghijk");
+        assert_eq!(
+            review.inspection.tracks[0].metadata.album,
+            "Room to breathe"
+        );
     }
 
     #[test]

@@ -361,17 +361,34 @@ impl Desktop {
         })
     }
 
-    pub fn search_youtube_music(&self, query: String) -> Result<Job, String> {
+    pub fn search_youtube_music(
+        &self,
+        query: String,
+        filter: Option<crate::youtube_music::SearchKind>,
+    ) -> Result<Job, String> {
         self.catalog_job(move |cancel| {
-            crate::youtube_music::search(&query, cancel)
-                .map(crate::CatalogEvent::YouTubeMusicResults)
+            crate::youtube_music::search(&query, filter, cancel)
+                .map(|hits| crate::CatalogEvent::YouTubeMusicResults { filter, hits })
+        })
+    }
+
+    pub fn open_youtube_music_artist(&self, id: String) -> Result<Job, String> {
+        self.catalog_job(move |cancel| {
+            crate::youtube_music::artist(&id, cancel).map(crate::CatalogEvent::YouTubeMusicArtist)
         })
     }
 
     pub fn open_youtube_music_album(&self, id: String) -> Result<Job, String> {
         self.catalog_job(move |cancel| {
             crate::youtube_music::album(&id, cancel)
-                .map(|album| crate::CatalogEvent::YouTubeMusicAlbum(Box::new(album)))
+                .map(|album| crate::CatalogEvent::YouTubeMusicReview(Box::new(album)))
+        })
+    }
+
+    pub fn open_youtube_music_song(&self, song: crate::youtube_music::Song) -> Result<Job, String> {
+        self.catalog_job(move |cancel| {
+            crate::youtube_music::song(song, cancel)
+                .map(|song| crate::CatalogEvent::YouTubeMusicReview(Box::new(song)))
         })
     }
 

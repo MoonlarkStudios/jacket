@@ -55,7 +55,7 @@ Media integration tests synthesize their own recordings.
 
 On the album-first branch, `mise run setup:youtube-music` prepares the local
 YouTube Music prototype. The `dev` and `desktop` tasks then open with YouTube
-Music album search selected. Use a fresh `JACKET_DATA_DIR` to test with an
+Music search selected. Use a fresh `JACKET_DATA_DIR` to test with an
 empty library and review history.
 
 CI runs the native quality gate and offline media integrations on Linux and

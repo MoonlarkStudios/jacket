@@ -142,11 +142,19 @@ impl App {
         };
         let urls: Vec<_> = if catalog.youtube_music_active {
             catalog
-                .youtube_music_results
-                .iter()
-                .skip(first)
-                .take(PREFETCH_ROWS)
-                .filter_map(|album| album.artwork_url.clone())
+                .youtube_music_artist
+                .as_ref()
+                .and_then(|page| page.artist.artwork_url.as_deref())
+                .into_iter()
+                .chain(
+                    catalog
+                        .youtube_music_hits()
+                        .iter()
+                        .skip(first)
+                        .take(PREFETCH_ROWS)
+                        .filter_map(|hit| hit.item.artwork_url()),
+                )
+                .map(str::to_owned)
                 .collect()
         } else if let Some(song) = &catalog.song {
             song.details
