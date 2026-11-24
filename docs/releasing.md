@@ -26,7 +26,8 @@ version for a fix after stable.
 
 1. After the release PR merges, create an annotated `v<version>` tag on that
    commit. The **Linux installers** workflow validates the tag and exact commit
-   on `main`, builds both packages, signs the RPM, and exercises the final assets.
+   on `main`, builds the DEB, RPM and Flatpak bundle, signs the RPM, and
+   exercises the final assets.
    Passing artifacts and their provenance go into an unpublished GitHub release.
 2. Install those exact signed assets on clean Ubuntu and Fedora Workstation
    Wayland desktops. Record the package checksums, distro, session, and result.
@@ -37,10 +38,12 @@ version for a fix after stable.
    the remaining tracks, restart Jacket, and resume the save. Verify the existing
    audio is preserved and the finished album has its playlist and manifest.
    Verify the app can reopen a saved draft after upgrading. Verify one permitted
-   public source separately on both desktops.
+   public source separately on both desktops. Install the exact Flatpak bundle
+   per user on Fedora Workstation and check launch, runtime discovery, and an
+   export into Music or Downloads.
 3. Review the [third-party notices](../THIRD_PARTY_NOTICES.md) and retain the
    matching application, Cargo dependencies, and audio-runtime source assets
-   alongside the two installers. Match the draft's assets to the tested manifest.
+   alongside the installers. Match the draft's assets to the tested manifest.
    Publish the draft once the acceptance record passes. The follow-up workflow
    checks immutable release identity, anonymous downloads, checksums, and
    build provenance.

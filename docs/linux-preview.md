@@ -11,6 +11,22 @@ the download directory when using the commands below.
 sha256sum --ignore-missing -c SHA256SUMS
 ```
 
+On an x86-64 desktop with Flatpak, download the `.flatpak` bundle. Open it in
+your software center if it supports Flatpak bundles, or install it for your user.
+Flatpak can fetch the Freedesktop runtime from Flathub when needed.
+
+```sh
+flatpak install --user ./jacket-*-x86_64.flatpak
+```
+
+The Flatpak can write exports to your Music and Downloads folders. It uses its
+own Jacket profile, and browser profiles outside the sandbox are unavailable.
+To update, download a newer bundle and install it over the previous version.
+
+```sh
+flatpak install --user --reinstall ./jacket-*-x86_64.flatpak
+```
+
 On Ubuntu or Debian, use the DEB.
 
 ```sh
@@ -30,7 +46,7 @@ sudo dnf install --setopt=localpkg_gpgcheck=1 ./jacket-*.rpm
 Open Jacket from the app menu. The installer provides FFmpeg, ffprobe, Node,
 and yt-dlp. Install a newer app version the same way to upgrade in place.
 
-## Build DEB and RPM candidates
+## Build Linux candidates
 
 Stage the app, media tools, and matching sources on x86-64 Ubuntu 24.04. The
 build needs the native prerequisites below, plus `dpkg-dev`. Use a fresh
@@ -39,7 +55,10 @@ output directory for each build.
 ```sh
 mise run installers:stage
 mise run installers:deb
+mise run installers:flatpak
 ```
+
+Flatpak assembly uses `flatpak` and the Freedesktop 26.08 Platform runtime.
 
 Run the RPM assembly task on x86-64 Fedora with `rpm-build` installed, using
 the same checkout and staged `target/linux-installers` directory.

@@ -393,7 +393,8 @@ class LinuxReleaseAssets(unittest.TestCase):
     def test_package_versions_preserve_prerelease_ordering_conventions(self):
         self.assertEqual(installers.package_versions('0.2.0-rc.1'), ('0.2.0~rc.1-1', '0.2.0', '0.rc.1'))
         self.assertEqual(installers.package_names('0.2.0-rc.1'),
-                         ('jacket_0.2.0-rc.1_amd64.deb', 'jacket-0.2.0-0.rc.1.x86_64.rpm'))
+                         ('jacket_0.2.0-rc.1_amd64.deb', 'jacket-0.2.0-0.rc.1.x86_64.rpm',
+                          'jacket-0.2.0-rc.1-x86_64.flatpak'))
         self.assertEqual(installers.package_versions('0.2.0'), ('0.2.0-1', '0.2.0', '1'))
         for invalid in ('0.2.0-rc.0', 'v0.2.0', '0.02.0', '0.2.0+build'):
             with self.assertRaises(ValueError):
@@ -421,9 +422,16 @@ class LinuxReleaseAssets(unittest.TestCase):
                 installers.verify_assets(output, version, 'another commit')
             with self.assertRaisesRegex(ValueError, 'Asset set'):
                 installers.verify_assets(output, version, 'candidate', signed=True)
-            (output / names[0]).write_text('changed fixture')
-            with self.assertRaisesRegex(ValueError, 'checksums'):
-                installers.verify_assets(output, version, 'candidate')
+            for installer in installers.package_names(version):
+                with self.subTest(installer=installer):
+                    path = output / installer
+                    path.unlink()
+                    with self.assertRaisesRegex(ValueError, 'Asset set'):
+                        installers.verify_assets(output, version, 'candidate')
+                    path.write_text('changed fixture')
+                    with self.assertRaisesRegex(ValueError, 'checksums'):
+                        installers.verify_assets(output, version, 'candidate')
+                    path.write_text('fixture')
 
 
 class NativeLicenseCollection(unittest.TestCase):
