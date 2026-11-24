@@ -1,10 +1,11 @@
 # Changelog
 
-## [0.2.0-rc.1]
+## [0.1.0-beta.4]
 
-- Native Jacket for Linux, with the refined icon and installable DEB and RPM packages.
+- Native Jacket for Linux, with a refreshed icon and x86-64 DEB and RPM installers.
+- Search YouTube Music by artist, album, or song, browse full artist release lists, and compare album editions before opening a download review.
 - Review songs, albums, and playlists with editable tags, shared artwork, and track order.
-- Save to a music folder using a previewable naming rule, or use Save As for a one-off.
+- Save to a music folder using a previewable naming rule, or use Save As for a one-off. Resume interrupted album saves while preserving tracks already in the folder.
 - Open a native GTK chooser for changing the music folder and saving files on Linux, even if the desktop portal is unavailable.
 
 ## [0.1.0-beta.3](https://github.com/MoonlarkStudios/jacket/compare/v0.1.0-beta.2...v0.1.0-beta.3) (2026-10-17)

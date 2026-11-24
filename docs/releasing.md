@@ -3,7 +3,7 @@
 The workspace version in `Cargo.toml` drives the About screen, `jacket --version`,
 package metadata, and the Git tag. Start with a release PR that updates that version,
 all workspace entries in `Cargo.lock`, and the matching section in `CHANGELOG.md`.
-Use `0.2.0-rc.1` for the first native candidate and `0.2.0` for the stable release.
+Use `0.2.0-rc.1` for the first 0.2.0 release candidate and `0.2.0` for the stable release.
 Increment the prerelease counter for a replacement candidate. Increment the patch
 version for a fix after stable.
 
