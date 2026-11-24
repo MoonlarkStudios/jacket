@@ -30,6 +30,8 @@ METAINFO_FILE = f'{LINUX_DESKTOP_ID}.metainfo.xml'
 APP_HOME = Path('usr/libexec/jacket')
 OUTPUT = ROOT / 'target/linux-installers'
 VERSION = re.compile(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(alpha|beta|rc)\.([1-9]\d*))?')
+FLATPAK_RUNTIME = '26.08'
+FLATPAK_RUNTIME_REPO = 'https://dl.flathub.org/repo/flathub.flatpakrepo'
 
 
 def package_versions(version):
@@ -47,7 +49,8 @@ def package_names(version):
     _, rpm, revision = package_versions(version)
     # GitHub can normalize special characters in uploaded names. The DEB
     # keeps its tilde version in control metadata for correct upgrade sorting.
-    return f'jacket_{version}_amd64.deb', f'jacket-{rpm}-{revision}.x86_64.rpm'
+    return (f'jacket_{version}_amd64.deb', f'jacket-{rpm}-{revision}.x86_64.rpm',
+            f'jacket-{version}-x86_64.flatpak')
 
 
 def check_version(tag=None):
@@ -206,6 +209,30 @@ def build_rpm(output, version):
         (top / 'RPMS/x86_64' / name).replace(output / 'assets' / name)
 
 
+def build_flatpak(output, version):
+    output = output.resolve()
+    branch = 'beta' if '-' in version else 'stable'
+    with tempfile.TemporaryDirectory(dir=output) as directory:
+        work = Path(directory)
+        app, repo = work / 'app', work / 'repo'
+        subprocess.run(['flatpak', 'build-init', '--arch=x86_64', app, LINUX_DESKTOP_ID,
+                        'org.freedesktop.Sdk', 'org.freedesktop.Platform', FLATPAK_RUNTIME],
+                       check=True)
+        shutil.copytree(output / 'root/usr', app / 'files', symlinks=True, dirs_exist_ok=True)
+        # The app uses native file choosers and publishes through temporary
+        # files next to the destination. Limit that access to export folders.
+        subprocess.run(['flatpak', 'build-finish', '--command=jacket',
+                        '--share=network', '--share=ipc', '--socket=wayland',
+                        '--socket=fallback-x11', '--device=dri',
+                        '--filesystem=xdg-music:create', '--filesystem=xdg-download:create', app],
+                       check=True)
+        subprocess.run(['flatpak', 'build-export', repo, app, branch], check=True)
+        bundle = work / package_names(version)[2]
+        subprocess.run(['flatpak', 'build-bundle', f'--runtime-repo={FLATPAK_RUNTIME_REPO}',
+                        repo, bundle, LINUX_DESKTOP_ID, branch], check=True)
+        bundle.replace(output / 'assets' / bundle.name)
+
+
 def verify_assets(directory, version, commit=None, signed=False, *, seal=False):
     expected = {*package_names(version), f'jacket-{version}-source.tar.gz', RUNTIME_SOURCES,
                 CRATE_SOURCES, 'runtime-build-info.json', 'build.json'}
@@ -242,7 +269,7 @@ def verify_assets(directory, version, commit=None, signed=False, *, seal=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('version', 'notes', 'stage', 'deb', 'rpm', 'seal', 'verify'))
+    parser.add_argument('command', choices=('version', 'notes', 'stage', 'deb', 'rpm', 'flatpak', 'seal', 'verify'))
     parser.add_argument('--output', type=Path, default=OUTPUT)
     parser.add_argument('--tag')
     parser.add_argument('--commit')
@@ -266,6 +293,8 @@ def main():
             build_deb(options.output, version)
         elif options.command == 'rpm':
             build_rpm(options.output, version)
+        elif options.command == 'flatpak':
+            build_flatpak(options.output, version)
         else:
             verify_assets(options.output / 'assets', version, options.commit,
                           options.signed, seal=options.command == 'seal')

@@ -12,6 +12,7 @@ on:
       - 'scripts/native_installers.py'
       - 'scripts/native_package.py'
       - 'scripts/stage-catalog-tools.py'
+      - 'scripts/test-flatpak.sh'
       - 'scripts/youtube-music-runtime.lock.json'
       - 'crates/jacket-desktop/src/youtube_music.py'
       - 'rust-toolchain.toml'
@@ -39,7 +40,7 @@ jobs:
       ref: ${{ github.sha }}
 
   build:
-    name: Build DEB and RPM from the Ubuntu 24.04 payload
+    name: Build DEB, RPM and Flatpak from the Ubuntu 24.04 payload
     runs-on: ubuntu-24.04
     timeout-minutes: 65
     env:
@@ -54,7 +55,7 @@ jobs:
       - name: Install the builder and desktop metadata validators
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential pkg-config libx11-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev nasm autoconf automake libtool dpkg-dev desktop-file-utils appstream
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config libx11-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev nasm autoconf automake libtool dpkg-dev desktop-file-utils appstream flatpak xvfb xauth dbus-daemon
       - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
           version: 2026.9.12
@@ -85,6 +86,19 @@ jobs:
           appstreamcli validate --no-net target/linux-installers/root/usr/share/metainfo/*.xml
       - name: Build the Debian package
         run: mise run installers:deb
+      - name: Build and smoke-test the Flatpak bundle
+        run: |
+          export FLATPAK_USER_DIR="$RUNNER_TEMP/jacket-flatpak-installation"
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive flathub org.freedesktop.Platform//26.08 org.freedesktop.Sdk//26.08
+          mise run installers:flatpak
+          version=$(mise exec -- python scripts/native_installers.py version)
+          executable_sha=$(jq -er .executableSha256 target/linux-installers/assets/build.json)
+          export XDG_RUNTIME_DIR
+          XDG_RUNTIME_DIR=$(mktemp -d /tmp/jacket-flatpak.XXXXXX)
+          xvfb-run -a -s '-screen 0 1280x900x24' dbus-run-session -- bash scripts/test-flatpak.sh \
+            "target/linux-installers/assets/jacket-$version-x86_64.flatpak" "$version" "$executable_sha" \
+            "$RUNNER_TEMP/jacket-flatpak-evidence"
       - name: Build the RPM with Fedora tooling
         run: |
           docker run --rm -v "$PWD:/workspace:ro" -v "$PWD/target/linux-installers:/output" "$RPM_IMAGE" bash -euc '
@@ -234,7 +248,7 @@ jobs:
           {
             python3 -B scripts/native_installers.py notes --tag "$GITHUB_REF_NAME"
             printf '\n## Install on x86-64 Linux\n\n'
-            printf 'Use the DEB for Ubuntu or Debian and the RPM for Fedora. See the installation guide for commands, signature verification, and the tested distributions.\n\n'
+            printf 'Use the Flatpak bundle on a Flatpak-enabled desktop, the DEB on Ubuntu or Debian, or the RPM on Fedora. See the installation guide for commands, signature verification, and the tested distributions.\n\n'
             printf '[Linux installation guide](https://github.com/%s/blob/%s/docs/linux-preview.md)\n\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA"
             gpg --batch --with-colons --show-keys target/linux-installers/assets/jacket-rpm-signing-key.asc |
               awk -F: '$1 == "fpr" && !seen++ {print "Jacket RPM signing key fingerprint `" $10 "`."}'

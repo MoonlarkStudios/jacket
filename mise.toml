@@ -96,7 +96,7 @@ description = "Verify native packaging, dependency boundaries and tool checks"
 run = [
   "python scripts/native_tests.py",
   "python scripts/native_installers.py version",
-  "shellcheck scripts/sign-jacket-rpm.sh scripts/test-linux-installers.sh",
+  "shellcheck scripts/sign-jacket-rpm.sh scripts/test-flatpak.sh scripts/test-linux-installers.sh",
   "python scripts/sync-branding.py --check",
   "python scripts/test-tool-bundling.py",
   "node --test .github/scripts/pr-title.test.mjs",
@@ -166,6 +166,10 @@ run = "python scripts/native_installers.py deb"
 [tasks."installers:rpm"]
 description = "Build the RPM from the staged payload on Fedora"
 run = "python scripts/native_installers.py rpm"
+
+[tasks."installers:flatpak"]
+description = "Build a Flatpak bundle from the staged Linux payload"
+run = "python scripts/native_installers.py flatpak"
 
 [tasks."installers:seal"]
 description = "Write final checksums for the complete Linux asset set"
