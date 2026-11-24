@@ -90,10 +90,12 @@ jobs:
         run: |
           export FLATPAK_USER_DIR="$RUNNER_TEMP/jacket-flatpak-installation"
           flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-          flatpak install --user --noninteractive flathub org.freedesktop.Platform//26.08
+          flatpak install --user --noninteractive flathub org.freedesktop.Platform//26.08 org.freedesktop.Sdk//26.08
           mise run installers:flatpak
           version=$(mise exec -- python scripts/native_installers.py version)
           executable_sha=$(jq -er .executableSha256 target/linux-installers/assets/build.json)
+          export XDG_RUNTIME_DIR
+          XDG_RUNTIME_DIR=$(mktemp -d /tmp/jacket-flatpak.XXXXXX)
           xvfb-run -a -s '-screen 0 1280x900x24' dbus-run-session -- bash scripts/test-flatpak.sh \
             "target/linux-installers/assets/jacket-$version-x86_64.flatpak" "$version" "$executable_sha" \
             "$RUNNER_TEMP/jacket-flatpak-evidence"

@@ -58,7 +58,7 @@ mise run installers:deb
 mise run installers:flatpak
 ```
 
-Flatpak assembly uses `flatpak` and the Freedesktop 26.08 Platform runtime.
+Flatpak assembly uses `flatpak` and the Freedesktop 26.08 Platform and SDK.
 
 Run the RPM assembly task on x86-64 Fedora with `rpm-build` installed, using
 the same checkout and staged `target/linux-installers` directory.
