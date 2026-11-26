@@ -1,12 +1,18 @@
 use super::catalog::{action, card};
-use super::components;
-use crate::app::{result_id, song_album_id, App, CatalogAction as Action, Message};
+use super::catalog_grid::{self, AlbumGridSize};
+use super::{catalog_song_menu, components};
+use crate::app::{result_id, App, CatalogAction as Action, Message, Thumbnail};
 use crate::icons::{self, Icon};
-use crate::style;
-use iced::widget::{button, column, container, grid, image, row, sensor, space, text};
-use iced::{Alignment, ContentFit, Element, Length};
+use crate::style::{self, CatalogSurface};
+use iced::widget::{button, column, container, image, row, rule, sensor, space, text};
+use iced::{border, Alignment, ContentFit, Element, Length, Padding};
 use jacket_desktop::catalog::SearchKind;
-use jacket_desktop::youtube_music::{Album, SearchHit, SearchItem as YouTubeItem};
+use jacket_desktop::youtube_music::{Album, SearchHit, SearchItem as YouTubeItem, Song};
+
+const CARD_BORDER_INSET: f32 = 1.0;
+const CARD_TEXT_INSET: f32 = 8.0;
+const ARTIST_TILE_WIDTH: f32 = 104.0;
+const ARTIST_TILE_SPACING: f32 = 10.0;
 
 pub(super) fn filters(app: &App) -> Element<'_, Message> {
     let p = app.presentation();
@@ -27,7 +33,7 @@ pub(super) fn filters(app: &App) -> Element<'_, Message> {
         .into()
 }
 
-pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
+pub(super) fn view(app: &App, compact: bool, width: f32) -> Element<'_, Message> {
     let p = app.presentation();
     let catalog = &app.catalog;
     let artist_page = catalog.artist();
@@ -44,7 +50,10 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
         }
     }
 
-    let mut body = column![].spacing(22);
+    let compact_results = compact && artist_page.is_none();
+    let section_spacing = if compact_results { 16 } else { 22 };
+    let heading_spacing = if compact_results { 8 } else { 9 };
+    let mut body = column![].spacing(section_spacing);
     if let Some(page) = artist_page {
         body = body
             .push(action(
@@ -59,10 +68,7 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
                 row![
                     thumbnail(
                         app,
-                        page.artist
-                            .artwork_url
-                            .as_deref()
-                            .and_then(|url| catalog.media.get(url)),
+                        catalog.media.portrait(page.artist.artwork_url.as_deref()),
                         Some(&page.artist.name),
                         if compact { 66.0 } else { 90.0 },
                     ),
@@ -100,18 +106,19 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
         return body.into();
     }
 
+    let album_grid = AlbumGridSize::for_width(width);
     if let (None, Some(kind)) = (artist_page, catalog.filter) {
-        return result_group(app, kind, hits.iter(), compact);
+        return result_group(app, kind, hits.iter(), album_grid);
     }
 
     let featured = catalog.featured();
     if let Some(hit) = featured {
         body = body.push(
             column![
-                text("Top result").size(17).font(style::semibold()),
-                result_row(app, &hit.item, true),
+                text("Top result").size(18).font(style::semibold()),
+                result_row(app, &hit.item, Some(if compact { 72.0 } else { 88.0 })),
             ]
-            .spacing(8),
+            .spacing(heading_spacing),
         );
     }
     let order = if artist_page.is_some() {
@@ -119,7 +126,6 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
     } else {
         catalog.result_order()
     };
-    let album_columns = if compact { 3 } else { 4 };
     for kind in order {
         let group = hits
             .iter()
@@ -152,7 +158,7 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
                 false,
             ));
         }
-        if artist_releases && (has_more_releases || group.len() > album_columns) {
+        if artist_releases && (has_more_releases || group.len() > album_grid.columns) {
             heading = heading.push(action(
                 app,
                 "artist-releases",
@@ -166,83 +172,204 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
                 false,
             ));
         }
-        let limit = match (artist_page.is_some(), kind) {
-            (true, SearchKind::Albums) if !catalog.show_all_artist_releases() => album_columns,
-            (true, _) => group.len(),
-            (false, SearchKind::Albums) => album_columns,
-            (false, _) if compact => 2,
-            (false, _) => 3,
+        let results = if artist_page.is_none() && kind == SearchKind::Artists {
+            artist_preview(app, group.into_iter(), width)
+        } else {
+            let limit = match (artist_page.is_some(), kind) {
+                (true, SearchKind::Albums) if !catalog.show_all_artist_releases() => {
+                    album_grid.columns
+                }
+                (true, _) => group.len(),
+                (false, SearchKind::Albums) => album_grid.columns,
+                (false, _) if compact => 2,
+                (false, _) => 3,
+            };
+            result_group(app, kind, group.into_iter().take(limit), album_grid)
         };
-        body = body.push(
-            column![
-                heading,
-                result_group(app, kind, group.into_iter().take(limit), compact)
-            ]
-            .spacing(9),
-        );
+        body = body.push(column![heading, results].spacing(heading_spacing));
     }
     body.into()
+}
+
+fn artist_preview<'a>(
+    app: &'a App,
+    hits: impl Iterator<Item = &'a SearchHit>,
+    width: f32,
+) -> Element<'a, Message> {
+    let p = app.presentation();
+    let capacity =
+        ((width + ARTIST_TILE_SPACING) / (ARTIST_TILE_WIDTH + ARTIST_TILE_SPACING)) as usize;
+    let artists = hits.filter_map(|hit| match &hit.item {
+        YouTubeItem::Artist(artist) => Some(artist),
+        _ => None,
+    });
+    row(artists.take(capacity.max(1)).map(|artist| {
+        let portrait = app.catalog.media.portrait(artist.artwork_url.as_deref());
+        let tile = column![
+            thumbnail(app, portrait, Some(&artist.name), 76.0),
+            text(&artist.name)
+                .size(13)
+                .width(Length::Fill)
+                .align_x(Alignment::Center),
+        ]
+        .spacing(7)
+        .align_x(Alignment::Center)
+        .width(Length::Fill);
+        super::focus_button::wrap_inset(
+            result_id(SearchKind::Artists, &artist.id),
+            button(tile)
+                .width(ARTIST_TILE_WIDTH)
+                .padding(6)
+                .style(p.catalog_result(CatalogSurface::Flat)),
+            (!app.busy() && !app.catalog.confirm_replace).then(|| {
+                Message::Catalog(Action::OpenResult(SearchKind::Artists, artist.id.clone()))
+            }),
+            p.colors.accent,
+            p.colors.background,
+        )
+    }))
+    .spacing(ARTIST_TILE_SPACING)
+    .into()
 }
 
 fn result_group<'a>(
     app: &'a App,
     kind: SearchKind,
     hits: impl Iterator<Item = &'a SearchHit>,
-    compact: bool,
+    album_grid: AlbumGridSize,
 ) -> Element<'a, Message> {
-    if kind == SearchKind::Albums {
-        grid(hits.filter_map(|hit| match &hit.item {
-            YouTubeItem::Album(album) => Some(album_card(app, album, compact)),
-            _ => None,
-        }))
-        .columns(if compact { 3 } else { 4 })
-        .height(Length::Shrink)
-        .spacing(10)
-        .into()
-    } else {
-        column(hits.map(|hit| result_row(app, &hit.item, false)))
+    match kind {
+        SearchKind::Albums => {
+            let cards = hits.filter_map(|hit| match &hit.item {
+                YouTubeItem::Album(album) => Some(album_card(app, album, album_grid.card_width)),
+                _ => None,
+            });
+            catalog_grid::albums(cards, album_grid.columns)
+        }
+        SearchKind::Songs => song_list(app, hits),
+        SearchKind::Artists => column(hits.map(|hit| result_row(app, &hit.item, None)))
             .spacing(8)
-            .into()
+            .into(),
     }
 }
 
-fn album_card<'a>(app: &'a App, album: &'a Album, compact: bool) -> Element<'a, Message> {
+fn song_list<'a>(app: &'a App, hits: impl Iterator<Item = &'a SearchHit>) -> Element<'a, Message> {
     let p = app.presentation();
-    let cover = album
-        .artwork_url
-        .as_deref()
-        .and_then(|url| app.catalog.media.get(url));
+    let songs = hits.filter_map(|hit| match &hit.item {
+        YouTubeItem::Song(song) => Some(song),
+        _ => None,
+    });
+    let mut list = column![].width(Length::Fill);
+    for (index, song) in songs.enumerate() {
+        if index > 0 {
+            list = list.push(rule::horizontal(1).style(p.line()));
+        }
+        list = list.push(song_row(app, song, None));
+    }
+    list.into()
+}
+
+fn song_row<'a>(
+    app: &'a App,
+    song: &'a Song,
+    featured_artwork_edge: Option<f32>,
+) -> Element<'a, Message> {
+    let p = app.presentation();
+    let featured = featured_artwork_edge.is_some();
+    let cover = app.catalog.media.cover(song.artwork_url.as_deref());
+    let subtitle = [
+        if featured { "Song" } else { "" },
+        song.artist.as_str(),
+        song.album.as_str(),
+    ]
+    .into_iter()
+    .filter(|part| !part.is_empty())
+    .collect::<Vec<_>>()
+    .join(" · ");
+    let mut labels = column![text(&song.title)
+        .size(if featured { 20 } else { 15 })
+        .font(style::semibold())]
+    .spacing(4)
+    .width(Length::Fill);
+    if !subtitle.is_empty() {
+        labels = labels.push(text(subtitle).size(12).color(p.colors.text_muted));
+    }
+    let duration = song
+        .duration
+        .map_or_else(String::new, |seconds| components::duration(seconds as f64));
+    let content = row![
+        thumbnail(app, cover, None, featured_artwork_edge.unwrap_or(40.0)),
+        labels,
+        text(duration)
+            .size(12)
+            .color(p.colors.text_muted)
+            .align_x(Alignment::End)
+            .wrapping(text::Wrapping::None),
+    ]
+    .spacing(10)
+    .align_y(Alignment::Center);
+    let surface = if featured {
+        CatalogSurface::Card
+    } else {
+        CatalogSurface::Flat
+    };
+    let select_song = super::focus_button::wrap_inset(
+        result_id(SearchKind::Songs, &song.id),
+        button(content)
+            .padding([8, 10])
+            .width(Length::Fill)
+            .style(p.catalog_result(surface)),
+        (!app.busy() && !app.catalog.confirm_replace)
+            .then(|| Message::Catalog(Action::OpenResult(SearchKind::Songs, song.id.clone()))),
+        p.colors.accent,
+        p.colors.background,
+    );
+    row![select_song, catalog_song_menu::view(app, &song.id)]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .into()
+}
+
+fn album_card<'a>(app: &'a App, album: &'a Album, card_width: f32) -> Element<'a, Message> {
+    let p = app.presentation();
+    let cover = app.catalog.media.cover(album.artwork_url.as_deref());
     let detail = album.year.map_or_else(
         || album.kind.clone(),
         |year| format!("{year} · {}", album.kind),
     );
-    let content = column![
-        container(thumbnail(
-            app,
-            cover,
-            None,
-            if compact { 124.0 } else { 164.0 }
-        ))
-        .center_x(Length::Fill),
-        column![
-            text(&album.title).size(14).font(style::semibold()),
-            text(&album.artist).size(12).color(p.colors.text_muted),
-            text(detail).size(12).color(p.colors.text_muted),
-        ]
-        .spacing(4)
+    let cover_edge = (card_width - 2.0 * CARD_BORDER_INSET).max(0.0);
+    let body = column![
+        thumbnail_with_radius(app, cover, None, cover_edge, border::top(4.0)),
+        container(
+            column![
+                text(&album.title).size(14).font(style::semibold()),
+                text(&album.artist).size(12).color(p.colors.text_muted),
+            ]
+            .spacing(4),
+        )
+        .padding([0.0, CARD_TEXT_INSET])
         .width(Length::Fill),
     ]
     .spacing(8)
     .width(Length::Fill);
-    let card = super::focus_button::wrap(
+    let footer = container(text(detail).size(12).color(p.colors.text_muted)).padding(Padding {
+        left: CARD_TEXT_INSET,
+        right: CARD_TEXT_INSET,
+        bottom: CARD_TEXT_INSET,
+        ..Padding::ZERO
+    });
+    // The album grid stretches this column and positions its footer.
+    let content = column![body, footer].spacing(4).width(Length::Fill);
+    let card = super::focus_button::wrap_inset(
         result_id(SearchKind::Albums, &album.id),
         button(content)
             .width(Length::Fill)
-            .padding(9)
-            .style(p.secondary()),
+            .padding(CARD_BORDER_INSET)
+            .style(p.catalog_result(CatalogSurface::Card)),
         (!app.busy() && !app.catalog.confirm_replace)
             .then(|| Message::Catalog(Action::OpenResult(SearchKind::Albums, album.id.clone()))),
         p.colors.accent,
+        p.colors.background,
     );
     if let Some(url) = album
         .artwork_url
@@ -268,7 +395,12 @@ fn album_card<'a>(app: &'a App, album: &'a Album, compact: bool) -> Element<'a, 
     }
 }
 
-fn result_row<'a>(app: &'a App, item: &YouTubeItem, featured: bool) -> Element<'a, Message> {
+fn result_row<'a>(
+    app: &'a App,
+    item: &'a YouTubeItem,
+    featured_artwork_edge: Option<f32>,
+) -> Element<'a, Message> {
+    let featured = featured_artwork_edge.is_some();
     let (title, details, artist) = match item {
         YouTubeItem::Artist(artist) => (
             &artist.name,
@@ -284,91 +416,80 @@ fn result_row<'a>(app: &'a App, item: &YouTubeItem, featured: bool) -> Element<'
             ],
             None,
         ),
-        YouTubeItem::Song(song) => (
-            &song.title,
-            [
-                song.artist.clone(),
-                song.album.clone(),
-                song.duration
-                    .map_or_else(String::new, |seconds| components::duration(seconds as f64)),
-            ],
-            None,
-        ),
+        YouTubeItem::Song(song) => return song_row(app, song, featured_artwork_edge),
     };
     let details = details
         .into_iter()
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
         .join(" · ");
-    let subtitle = if featured && matches!(item, YouTubeItem::Song(_)) {
-        format!("Song · {details}")
+    let artwork = if artist.is_some() {
+        app.catalog.media.portrait(item.artwork_url())
     } else {
-        details
+        app.catalog.media.cover(item.artwork_url())
     };
-    let result = card(
+    card(
         app,
         result_id(item.kind(), item.id()),
-        title.clone(),
-        subtitle,
+        text(title).size(if featured { 20 } else { 15 }),
+        details,
         Some(thumbnail(
             app,
-            item.artwork_url()
-                .and_then(|url| app.catalog.media.get(url)),
+            artwork,
             artist,
-            if featured { 56.0 } else { 40.0 },
+            featured_artwork_edge.unwrap_or(40.0),
         )),
         Action::OpenResult(item.kind(), item.id().into()),
-    );
-    if let YouTubeItem::Song(song) = item {
-        row![
-            result,
-            action(
-                app,
-                song_album_id(&song.id),
-                "View album",
-                Action::OpenSongAlbum(song.id.clone()),
-                !app.busy() && !app.catalog.confirm_replace,
-                false,
-            ),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .into()
-    } else {
-        result
-    }
+    )
 }
 
 pub(super) fn thumbnail(
     app: &App,
-    picture: Option<&image::Handle>,
+    picture: Thumbnail<'_>,
     artist: Option<&str>,
     edge: f32,
 ) -> Element<'static, Message> {
-    let p = app.presentation();
     let radius = if artist.is_some() { edge / 2.0 } else { 5.0 };
-    if let Some(handle) = picture {
-        return image(handle.clone())
-            .width(edge)
-            .height(edge)
-            .content_fit(ContentFit::Cover)
-            .border_radius(radius)
-            .into();
-    }
-    let initial = artist.and_then(|name| name.chars().find(|c| c.is_alphanumeric()));
-    let placeholder = match initial {
-        Some(letter) => text(letter.to_uppercase().collect::<String>())
-            .size(edge * 0.44)
-            .font(style::semibold())
-            .color(p.colors.accent)
-            .into(),
-        None => icons::view(Icon::Music, p.colors.accent, edge * 0.46),
+    thumbnail_with_radius(app, picture, artist, edge, border::radius(radius))
+}
+
+fn thumbnail_with_radius(
+    app: &App,
+    picture: Thumbnail<'_>,
+    artist: Option<&str>,
+    edge: f32,
+    radius: border::Radius,
+) -> Element<'static, Message> {
+    let p = app.presentation();
+    let content: Element<'static, Message> = match picture {
+        Thumbnail::Ready(handle) => {
+            let picture = image(handle.clone())
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .content_fit(ContentFit::Cover);
+            if artist.is_some() {
+                picture.into()
+            } else {
+                picture.border_radius(radius).into()
+            }
+        }
+        Thumbnail::Loading => space().into(),
+        Thumbnail::Missing => {
+            match artist.and_then(|name| name.chars().find(|c| c.is_alphanumeric())) {
+                Some(letter) => text(letter.to_uppercase().collect::<String>())
+                    .size(edge * 0.44)
+                    .font(style::semibold())
+                    .color(p.colors.accent)
+                    .into(),
+                None => icons::view(Icon::Music, p.colors.text_muted, edge * 0.40),
+            }
+        }
     };
-    container(placeholder)
+    container(content)
         .center(edge)
         .style(move |_| {
-            let mut surface = p.panel();
-            surface.border.radius = radius.into();
+            let mut surface = p.surface(p.colors.raised);
+            surface.border.radius = radius;
             surface
         })
         .into()

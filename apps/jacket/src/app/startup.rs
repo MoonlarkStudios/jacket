@@ -207,6 +207,7 @@ impl App {
                     Some(
                         scenario @ ("catalog"
                         | "catalog-results"
+                        | "catalog-results-loading"
                         | "catalog-artist"
                         | "catalog-album"
                         | "catalog-editions"

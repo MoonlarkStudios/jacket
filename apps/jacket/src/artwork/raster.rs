@@ -1,4 +1,5 @@
 //! Prepare artwork for its physical display size on a blocking worker.
+use super::ThumbnailShape;
 use iced::widget::image::Handle;
 use image::imageops::FilterType;
 use image::{GenericImageView, ImageBuffer, Rgba, RgbaImage};
@@ -31,7 +32,7 @@ impl Raster {
     /// Decode once with explicit encoded, dimension and allocation bounds.
     pub fn decode(bytes: &[u8], scale: f32) -> Result<Self, String> {
         let rgba = decode_rgba(bytes, MAX_DIMENSION)?;
-        let source = fit_handle(rgba, SOURCE_EDGE);
+        let source = to_handle(fit(rgba, SOURCE_EDGE));
         Ok(Self::prepare(source, normalized_scale(scale)))
     }
 
@@ -136,7 +137,7 @@ impl Raster {
 }
 
 /// Catalog cards use square artwork, including providers' wide artist photos.
-pub(crate) fn thumbnail(bytes: &[u8]) -> Result<Handle, String> {
+pub(crate) fn thumbnail(bytes: &[u8], shape: ThumbnailShape) -> Result<Handle, String> {
     let rgba = decode_rgba(bytes, 1024)?;
     let (width, height) = rgba.dimensions();
     let edge = width.min(height);
@@ -146,7 +147,18 @@ pub(crate) fn thumbnail(bytes: &[u8]) -> Result<Handle, String> {
         image::imageops::crop_imm(&rgba, (width - edge) / 2, (height - edge) / 2, edge, edge)
             .to_image()
     };
-    Ok(fit_handle(square, 250))
+    let mut thumbnail = fit(square, 250);
+    if shape == ThumbnailShape::Circle {
+        // The software renderer draws raster images without a rounded border.
+        let radius = thumbnail.width() as f32 / 2.0;
+        for (x, y, pixel) in thumbnail.enumerate_pixels_mut() {
+            let dx = x as f32 + 0.5 - radius;
+            let dy = y as f32 + 0.5 - radius;
+            let coverage = (radius + 0.5 - dx.hypot(dy)).clamp(0.0, 1.0);
+            pixel.0[3] = (f32::from(pixel.0[3]) * coverage).round() as u8;
+        }
+    }
+    Ok(to_handle(thumbnail))
 }
 
 fn decode_rgba(bytes: &[u8], max_edge: u32) -> Result<RgbaImage, String> {
@@ -177,12 +189,12 @@ fn decode_rgba(bytes: &[u8], max_edge: u32) -> Result<RgbaImage, String> {
     Ok(decoded.into_rgba8())
 }
 
-fn fit_handle(rgba: RgbaImage, edge: u32) -> Handle {
+fn fit(rgba: RgbaImage, edge: u32) -> RgbaImage {
     let (width, height) = fit_dimensions(rgba.width(), rgba.height(), edge, edge);
     if rgba.dimensions() == (width, height) {
-        to_handle(rgba)
+        rgba
     } else {
-        to_handle(resize(&rgba, width, height))
+        resize(&rgba, width, height)
     }
 }
 
@@ -260,7 +272,9 @@ fn resize(image: &impl GenericImageView<Pixel = Rgba<u8>>, width: u32, height: u
 
 #[cfg(test)]
 mod tests {
-    use super::{normalized_scale, Raster, COVER_EDGES, MAX_ENCODED_BYTES};
+    use super::{
+        normalized_scale, thumbnail, Raster, ThumbnailShape, COVER_EDGES, MAX_ENCODED_BYTES,
+    };
     use iced::widget::image::Handle;
     use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
     use std::io::Cursor;
@@ -285,6 +299,25 @@ mod tests {
             Handle::Rgba { pixels, .. } => pixels.as_ref(),
             _ => panic!("prepared images must be decoded pixels"),
         }
+    }
+
+    #[test]
+    fn portraits_crop_to_a_circle_without_changing_square_thumbnails() {
+        let bytes = encoded(RgbaImage::from_pixel(120, 80, Rgba([51, 102, 153, 200])));
+        let portrait = thumbnail(&bytes, ThumbnailShape::Circle).expect("portrait");
+        let square = thumbnail(&bytes, ThumbnailShape::Square).expect("square cover");
+
+        assert_eq!(dimensions(&portrait), (80, 80));
+        assert_eq!(dimensions(&square), (80, 80));
+        assert_eq!(pixels(&portrait)[3], 0);
+        assert_eq!(pixels(&square)[3], 200);
+        assert_eq!(
+            &pixels(&portrait)[(40 * 80 + 40) * 4..][..4],
+            &[51, 102, 153, 200]
+        );
+        assert!(pixels(&portrait)
+            .chunks_exact(4)
+            .any(|pixel| (1..200).contains(&pixel[3])));
     }
 
     #[test]

@@ -9,6 +9,12 @@ pub struct Presentation {
     pub derived: Derived,
 }
 
+#[derive(Clone, Copy)]
+pub enum CatalogSurface {
+    Card,
+    Flat,
+}
+
 pub fn semibold() -> Font {
     Font {
         weight: iced::font::Weight::Semibold,
@@ -51,6 +57,35 @@ impl Presentation {
             let mut style = rule::default(theme);
             style.color = self.colors.border;
             style
+        }
+    }
+
+    pub fn catalog_result(
+        self,
+        surface: CatalogSurface,
+    ) -> impl Fn(&Theme, button::Status) -> button::Style {
+        let (base, resting, border_width) = match surface {
+            CatalogSurface::Card => (self.colors.panel, Some(self.colors.panel), 1.0),
+            CatalogSurface::Flat => (self.colors.background, None, 0.0),
+        };
+        move |_, status| button::Style {
+            background: match status {
+                button::Status::Hovered => Some(theme::blend(self.colors.text, base, 0.075)),
+                button::Status::Pressed => Some(theme::blend(self.colors.text, base, 0.12)),
+                _ => resting,
+            }
+            .map(Background::Color),
+            text_color: if status == button::Status::Disabled {
+                self.derived.disabled
+            } else {
+                self.colors.text
+            },
+            border: Border {
+                color: self.colors.border,
+                width: border_width,
+                radius: 5.0.into(),
+            },
+            ..button::Style::default()
         }
     }
 

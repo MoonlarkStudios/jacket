@@ -1,6 +1,8 @@
 //! Native workspace, inspectors, and modal composition.
 mod catalog;
+mod catalog_grid;
 mod catalog_search;
+mod catalog_song_menu;
 mod collection_tools;
 mod components;
 mod cover_controls;

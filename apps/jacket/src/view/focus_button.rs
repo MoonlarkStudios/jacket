@@ -12,6 +12,25 @@ pub fn wrap<'a>(
     action: Option<Message>,
     ring: Color,
 ) -> Element<'a, Message> {
+    wrap_with_ring(id, button, action, Ring::Outside(ring))
+}
+
+pub(super) fn wrap_inset<'a>(
+    id: impl Into<Id>,
+    button: Button<'a, Message>,
+    action: Option<Message>,
+    color: Color,
+    backdrop: Color,
+) -> Element<'a, Message> {
+    wrap_with_ring(id, button, action, Ring::Inset { color, backdrop })
+}
+
+fn wrap_with_ring<'a>(
+    id: impl Into<Id>,
+    button: Button<'a, Message>,
+    action: Option<Message>,
+    ring: Ring,
+) -> Element<'a, Message> {
     Element::new(FocusButton {
         id: id.into(),
         child: button.on_press_maybe(action.clone()).into(),
@@ -24,7 +43,43 @@ struct FocusButton<'a> {
     id: Id,
     child: Element<'a, Message>,
     action: Option<Message>,
-    ring: Color,
+    ring: Ring,
+}
+
+enum Ring {
+    Outside(Color),
+    Inset { color: Color, backdrop: Color },
+}
+
+impl Ring {
+    fn draw(&self, renderer: &mut Renderer, bounds: Rectangle, viewport: &Rectangle) {
+        let outline = |renderer: &mut Renderer, bounds, color, width, radius: f32| {
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds,
+                    border: Border {
+                        color,
+                        width,
+                        radius: radius.into(),
+                    },
+                    ..renderer::Quad::default()
+                },
+                Color::TRANSPARENT,
+            );
+        };
+        match *self {
+            Self::Outside(color) => outline(renderer, bounds.expand(3.0), color, 2.0, 7.0),
+            Self::Inset { color, backdrop } => {
+                if let Some(visible) = bounds.intersection(viewport) {
+                    // A separate layer keeps the ring above full-width artwork.
+                    renderer.with_layer(visible, |renderer| {
+                        outline(renderer, bounds.shrink(1.0), backdrop, 4.0, 4.0);
+                        outline(renderer, bounds.shrink(2.0), color, 2.0, 3.0);
+                    });
+                }
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -187,18 +242,7 @@ impl Widget<Message, Theme, Renderer> for FocusButton<'_> {
             viewport,
         );
         if self.action.is_some() && tree.state.downcast_ref::<State>().focused {
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: layout.bounds().expand(3),
-                    border: Border {
-                        color: self.ring,
-                        width: 2.0,
-                        radius: 7.0.into(),
-                    },
-                    ..renderer::Quad::default()
-                },
-                Color::TRANSPARENT,
-            );
+            self.ring.draw(renderer, layout.bounds(), viewport);
         }
     }
 
