@@ -57,8 +57,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
         column![
             row![
                 text(match review.preferences.output_kind {
-                    OutputKind::File => "Save As filename",
-                    OutputKind::Folder if app.is_album_folder() => "Save As folder name",
+                    OutputKind::File => "Custom filename",
+                    OutputKind::Folder if app.is_album_folder() => "Custom folder name",
                     OutputKind::Folder => "Folder name",
                     OutputKind::Zip => "ZIP filename",
                 })

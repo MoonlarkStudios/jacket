@@ -42,7 +42,7 @@ impl App {
 
     pub fn can_preview(&self) -> bool {
         !self.busy()
-            && !self.catalog.visible
+            && (!self.catalog.visible || self.reviewing_catalog_album())
             && !self.panel.review_tool()
             && self.review.as_ref().is_some_and(|review| {
                 let uses_shared_cover = matches!(
@@ -75,6 +75,7 @@ impl App {
     }
     pub fn busy(&self) -> bool {
         self.job.is_some()
+            || self.catalog_job.is_some()
             || self.dialog_open
             || self.loading
             || self.close_after_job
@@ -179,12 +180,24 @@ impl App {
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        if self.downloads.is_open() {
+            match message {
+                Message::PrimaryAction | Message::Save | Message::SaveAs | Message::Preview => {
+                    return Task::none();
+                }
+                Message::FocusSource | Message::OpenPanel(_) => {
+                    self.downloads.dismiss();
+                }
+                _ => {}
+            }
+        }
         match message {
             Message::Booted(result) => {
                 self.loading = false;
                 match result {
                     Ok(boot) => {
                         self.recovery = boot.recovery;
+                        self.downloads.items = boot.downloads;
                         self.appearance = boot.appearance;
                         self.appearance_valid = boot.appearance_valid;
                         self.music_folder = boot.music_folder;
@@ -236,6 +249,10 @@ impl App {
                 }
             }
             Message::Tick => return self.tick(),
+            Message::Downloads(action) => return self.update_downloads(action),
+            Message::DownloadQueued(identity, result) => {
+                return self.download_queued(identity, result)
+            }
             Message::Catalog(action) => return self.update_catalog(action),
             Message::CatalogThumbnail { url, shape, image } => {
                 self.catalog.media.complete(url, shape, image);
@@ -245,7 +262,9 @@ impl App {
             }
             Message::PrimaryAction => {
                 return match self.panel {
-                    Panel::Workspace if self.catalog.visible => Task::none(),
+                    Panel::Workspace if self.catalog.visible && !self.reviewing_catalog_album() => {
+                        Task::none()
+                    }
                     Panel::Workspace if self.result.is_some() => self.update(Message::OpenOutput),
                     Panel::Workspace | Panel::Preview if self.can_export() => {
                         self.update(Message::Save)
@@ -266,7 +285,9 @@ impl App {
                 crate::platform::window_ready();
                 return Task::batch([
                     self.load_owned_artwork(),
-                    if self.catalog.visible && self.catalog.search_home() {
+                    if self.downloads.is_open() {
+                        iced::widget::operation::focus(self.downloads.initial_focus())
+                    } else if self.catalog.visible && self.catalog.search_home() {
                         iced::widget::operation::focus("album-search")
                     } else {
                         Task::none()
@@ -377,10 +398,16 @@ impl App {
                 }
             }
             Message::Toggle(index, selected) if !self.busy() => {
-                return self.change_review(|review| review.select(index, selected))
+                return self
+                    .change_review(|review| review.select(index, selected))
+                    .chain(iced::widget::operation::focus(format!(
+                        "review-select-track-{index}"
+                    )));
             }
             Message::SelectAll(selected) if !self.busy() => {
-                return self.change_review(|review| review.select_all(selected))
+                return self
+                    .change_review(|review| review.select_all(selected))
+                    .chain(iced::widget::operation::focus("review-select-all"));
             }
             Message::OpenEditor(kind) if !self.busy() && !self.panel.review_tool() => {
                 if let Some(review) = &self.review {
@@ -607,6 +634,7 @@ impl App {
             }
             Message::Preview
                 if !self.busy()
+                    && (!self.catalog.visible || self.reviewing_catalog_album())
                     && self.result.is_none()
                     && matches!(self.panel, Panel::Workspace | Panel::Options) =>
             {
@@ -660,54 +688,6 @@ impl App {
                         plan,
                         super::destination::ExportDestination::Picked(destination),
                     );
-                }
-            }
-            Message::ExportSaved(plan, destination, identity, result) => {
-                self.dialog_open = false;
-                self.notice = None;
-                if self.close_after_job {
-                    return self.close();
-                }
-                match result {
-                    Ok(true)
-                        if self
-                            .review
-                            .as_ref()
-                            .is_some_and(|review| review.identity() == identity) =>
-                    {
-                        self.save_failed = false;
-                        if let Some(desktop) = &self.desktop {
-                            use super::destination::ExportDestination;
-                            let recording = super::receipt::Recording::from_plan(self, &plan);
-                            let job = match destination {
-                                ExportDestination::Picked(path) => {
-                                    desktop.export(*plan, path, Some(identity))
-                                }
-                                ExportDestination::Organized(output) => {
-                                    desktop.export_organized(*plan, &output, Some(identity))
-                                }
-                            };
-                            if job.is_ok() {
-                                self.export_recording = Some(recording);
-                                self.pending_plan = None;
-                                self.panel = Panel::Workspace;
-                            }
-                            self.admit(job);
-                        }
-                    }
-                    Ok(_) => {
-                        self.error = Some(
-                            "The saved review changed. Preview your files again before exporting."
-                                .into(),
-                        )
-                    }
-                    Err(error) => {
-                        self.save_failed = true;
-                        self.pending_plan = Some(*plan);
-                        self.error = Some(format!(
-                            "Your review could not be saved before export: {error}"
-                        ));
-                    }
                 }
             }
             Message::OpenMusicFolder | Message::PickMusicFolder
@@ -794,11 +774,11 @@ impl App {
                 }
             }
             Message::Cancel => {
-                if let Some(job) = &self.job {
+                if self.catalog_job.is_some() {
+                    self.cancel_catalog();
+                } else if let Some(job) = &self.job {
                     job.cancel();
-                    if self.catalog.pending.is_some() {
-                        self.catalog.cancelling = true;
-                    } else if let Some(intake) = &mut self.intake {
+                    if let Some(intake) = &mut self.intake {
                         intake.cancelling = true;
                     } else {
                         self.notice = Some(
@@ -913,7 +893,10 @@ impl App {
             },
             Message::CloseRequested(id) => {
                 self.close_window = Some(id);
-                if self.job.is_some() {
+                if self.job.is_some()
+                    || self.catalog_job.is_some()
+                    || self.downloads.active().is_some()
+                {
                     self.panel = Panel::Close;
                 } else {
                     return self.close();
@@ -922,11 +905,11 @@ impl App {
             Message::ConfirmClose => {
                 self.close_after_job = true;
                 self.panel = Panel::Workspace;
+                self.cancel_catalog();
+                self.cancel_download();
                 if let Some(job) = &self.job {
                     job.cancel();
-                    if self.catalog.pending.is_some() {
-                        self.catalog.cancelling = true;
-                    } else if let Some(intake) = &mut self.intake {
+                    if let Some(intake) = &mut self.intake {
                         intake.cancelling = true;
                     }
                 } else {
@@ -1059,12 +1042,18 @@ impl App {
             }
             Message::FocusNext | Message::FocusPrevious => {
                 self.catalog.dismiss_song_menu();
-                let focus = if matches!(message, Message::FocusNext) {
+                let forward = matches!(message, Message::FocusNext);
+                if self.downloads.is_open() && self.panel == Panel::Workspace {
+                    return super::downloads::focus_next(forward);
+                }
+                let focus = if forward {
                     iced::widget::operation::focus_next()
                 } else {
                     iced::widget::operation::focus_previous()
                 };
-                return if self.catalog.visible && self.panel == Panel::Workspace {
+                return if self.catalog.visible && self.catalog.album().is_some() {
+                    focus.chain(super::catalog_focus::reveal_in("track-list"))
+                } else if self.catalog.visible && self.panel == Panel::Workspace {
                     focus.chain(super::catalog_focus::reveal())
                 } else {
                     focus
@@ -1425,6 +1414,7 @@ impl App {
             Message::Opened(Err(error)) => self.error = Some(error),
             Message::FocusSource if !self.busy() && self.panel == Panel::Workspace => {
                 self.catalog.dismiss_song_menu();
+                self.park_catalog_album();
                 self.catalog.visible = false;
                 return iced::widget::operation::focus("source-url");
             }
@@ -1432,6 +1422,7 @@ impl App {
                 if matches!(message, Message::Escape)
                     || self.panel.review_tool()
                     || self.panel == Panel::Crop
+                    || self.downloads.is_open()
                     || self.catalog.visible =>
             {
                 if self.panel == Panel::TrackOrder && self.track_position.is_some() {
@@ -1441,6 +1432,8 @@ impl App {
                     return self.update(Message::ClosePanel);
                 } else if self.catalog.dismiss_song_menu() {
                     return Task::none();
+                } else if self.downloads.is_open() {
+                    return self.update_downloads(super::DownloadAction::Close);
                 } else if self.catalog.pending.is_some() {
                     return self.update_catalog(super::CatalogAction::Cancel);
                 } else if self.job.is_some() {

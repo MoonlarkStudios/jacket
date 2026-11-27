@@ -1,4 +1,4 @@
-//! Add Tab and keyboard activation to a stock iced button.
+//! Add Tab and keyboard activation to native controls.
 use crate::app::Message;
 use iced::advanced::widget::{operation, tree, Id, Operation, Tree};
 use iced::advanced::{layout, mouse, renderer, Clipboard, Layout, Renderer as _, Shell, Widget};
@@ -31,9 +31,28 @@ fn wrap_with_ring<'a>(
     action: Option<Message>,
     ring: Ring,
 ) -> Element<'a, Message> {
+    let child = button.on_press_maybe(action.clone()).into();
+    wrap_element(id, child, action, ring)
+}
+
+pub(crate) fn wrap_control<'a>(
+    id: impl Into<Id>,
+    child: Element<'a, Message>,
+    action: Option<Message>,
+    ring: Color,
+) -> Element<'a, Message> {
+    wrap_element(id, child, action, Ring::Outside(ring))
+}
+
+fn wrap_element<'a>(
+    id: impl Into<Id>,
+    child: Element<'a, Message>,
+    action: Option<Message>,
+    ring: Ring,
+) -> Element<'a, Message> {
     Element::new(FocusButton {
         id: id.into(),
-        child: button.on_press_maybe(action.clone()).into(),
+        child,
         action,
         ring,
     })

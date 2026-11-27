@@ -6,7 +6,17 @@ pub(crate) const CATALOG_SCROLL_ID: &str = "album-browser";
 const FOCUS_MARGIN: f32 = 4.0;
 
 pub(super) fn reveal() -> Task<Message> {
-    operate(RevealFocused::default()).discard()
+    reveal_in(CATALOG_SCROLL_ID)
+}
+
+pub(super) fn reveal_in(id: &'static str) -> Task<Message> {
+    operate(RevealFocused {
+        id,
+        viewport: None,
+        next_viewport: None,
+        scroll_by: 0.0,
+    })
+    .discard()
 }
 
 #[derive(Clone, Copy)]
@@ -29,8 +39,8 @@ impl Viewport {
     }
 }
 
-#[derive(Default)]
 struct RevealFocused {
+    id: &'static str,
     viewport: Option<Viewport>,
     next_viewport: Option<Viewport>,
     scroll_by: f32,
@@ -45,7 +55,7 @@ impl Operation for RevealFocused {
         translation: Vector,
         _state: &mut dyn operation::Scrollable,
     ) {
-        if id == Some(&Id::new(CATALOG_SCROLL_ID)) {
+        if id == Some(&Id::new(self.id)) {
             self.next_viewport = Some(Viewport {
                 bounds,
                 scroll_y: translation.y,
@@ -76,7 +86,7 @@ impl Operation for RevealFocused {
             return operation::Outcome::None;
         }
         operation::Outcome::Chain(Box::new(operation::scrollable::scroll_by(
-            Id::new(CATALOG_SCROLL_ID),
+            Id::new(self.id),
             operation::scrollable::AbsoluteOffset {
                 x: 0.0,
                 y: self.scroll_by,

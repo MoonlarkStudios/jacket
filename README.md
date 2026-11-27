@@ -48,8 +48,8 @@ Search YouTube Music for artists, albums, or songs as you type. Press Ctrl+K
 (Command+K on macOS) to return to search, or Down to focus the first result.
 Open an artist to browse their releases and top songs.
 
-Choose an album to see its artwork, edition, and track list. Select **Review download**
-to choose tracks and edit tags before saving. You can also open a song directly
+Choose an album to see its artwork, edition, and tracks. Select **Review & queue**
+to choose tracks and edit tags on the same release page. You can also open a song directly
 from search or paste a YouTube link. **View album** on a song opens its linked edition.
 Select a credited artist on an album to browse their catalog. Back returns to the
 previous page and restores your filter, scroll position, and focused result.
@@ -64,30 +64,36 @@ counts where YouTube Music supplies them.
    follows each playlist occurrence, so repeated songs remain distinct.
 3. Choose the format, output type and artwork behavior. Preview the effective tags
    and filenames before saving.
-4. Save to your music folder or choose a location in the native dialog. Progress
-   and Cancel remain available while audio tools run in a background worker.
+4. Select **Queue download** to use your music folder or choose a location in the
+   native dialog. Continue browsing while Jacket downloads one item at a time.
+
+The header’s **Downloads** dropdown shows recent activity and quick controls.
+Select **Open Downloads** for the full queue, including destinations and failure
+details. The queue is retained across restarts.
+Review interrupted items before retrying them.
 
 A single song can be saved as an audio file. Folder and ZIP outputs include tagged
 tracks, optional artwork, a relative M3U playlist and a provenance manifest.
 Existing destination files are preserved; name collisions produce numbered copies.
 Unfinished reviews and interrupted exports are retained locally for restart.
-Successful exports clear their associated working state after publication.
+Queued items keep the track selection, settings, and destination from review.
 
 Choose **Set up a music folder…** to save songs and albums under a root you pick
 in the native folder dialog. The default rule is `{{album_artist}}/{{album}}/{{song}}`.
-**Save** puts songs and album folder exports in the same library directory when
+**Queue download** puts songs and album folder exports in the same library directory when
 their album tags match. The album preview shows existing recordings, tracks to
 add, and any filenames that need a numbered copy. Jacket keeps existing audio
 and sidecar files. Edit the rule in **Settings → Music folder**, or use
-**Save As…** for a one-off location.
+**Queue As…** for a one-off location.
 Jacket shows the resolved path before saving and adds the extension for the
 output codec. A blank album skips its folder, and `{{album_artist}}` uses the
 track artist when the album artist is blank. A resumed export keeps its original
 destination.
 
-Use Ctrl/Cmd+L to focus the source, Ctrl/Cmd+S to preview files, and Ctrl/Cmd+,
-to open settings. Ctrl/Cmd+Shift+S opens Save As for a song or album. Escape closes
-an editor or cancels the active operation.
+Use Ctrl/Cmd+L to focus the source, Ctrl/Cmd+S to confirm the current review, and
+Ctrl/Cmd+, to open settings. Ctrl/Cmd+Shift+S opens **Queue As…** for a song or album.
+Escape closes an editor or returns from either Downloads view. Cancel downloads
+from the queue.
 
 | Format | Behavior |
 | --- | --- |

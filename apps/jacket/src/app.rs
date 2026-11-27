@@ -6,6 +6,7 @@ mod catalog_media;
 mod controller;
 mod destination;
 mod destination_dialog;
+mod downloads;
 mod intake;
 mod jobs;
 mod lifecycle;
@@ -22,6 +23,8 @@ pub use catalog::{
 };
 pub(crate) use catalog_focus::CATALOG_SCROLL_ID;
 pub use catalog_media::Thumbnail;
+pub use downloads::DownloadAction;
+pub(crate) use downloads::{DownloadSurface, DOWNLOADS_LIST_ID, DOWNLOADS_PANEL_ID};
 pub use intake::SourceKind;
 pub use receipt::Receipt;
 pub use state::{App, Message, Panel, ProfileChoice};

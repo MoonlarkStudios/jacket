@@ -33,33 +33,51 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
     if let Some(receipt) = &app.result {
         return super::receipt::view(app, receipt, compact);
     }
-    let p = app.presentation();
     let content: Element<'_, Message> = if let Some(review) = &app.review {
         let left: Element<'_, Message> = if review.is_song() {
             super::song::view(app, compact)
         } else {
             collection(app, compact)
         };
-        let mut split = row![left].height(Length::Fill);
-        if !compact && app.panel.review_tool() {
-            let (inspector, width, padding) = match app.panel {
-                Panel::CollectionEditor => (collection_tools::editor(app, false), 384, 0),
-                Panel::TrackOrder => (collection_tools::order(app, false), 284, 20),
-                _ => unreachable!("song editor has its own workspace"),
-            };
-            split = split.push(rule::vertical(1).style(p.line())).push(
-                container(inspector)
-                    .width(width)
-                    .padding(padding)
-                    .height(Length::Fill)
-                    .style(move |_| p.surface(p.colors.panel)),
-            );
-        }
-        split.into()
+        with_review_tools(app, compact, left)
     } else {
         empty_workspace(app)
     };
-    let footer: Element<'_, Message> = match app.panel {
+    column![content, review_footer(app, compact)]
+        .height(Length::Fill)
+        .into()
+}
+
+pub(super) fn with_review_tools<'a>(
+    app: &'a App,
+    compact: bool,
+    content: Element<'a, Message>,
+) -> Element<'a, Message> {
+    if compact || !matches!(app.panel, Panel::CollectionEditor | Panel::TrackOrder) {
+        return content;
+    }
+    let p = app.presentation();
+    let (inspector, width, padding) = if app.panel == Panel::CollectionEditor {
+        (collection_tools::editor(app, false), 384, 0)
+    } else {
+        (collection_tools::order(app, false), 284, 20)
+    };
+    row![
+        content,
+        rule::vertical(1).style(p.line()),
+        container(inspector)
+            .width(width)
+            .padding(padding)
+            .height(Length::Fill)
+            .style(move |_| p.surface(p.colors.panel)),
+    ]
+    .height(Length::Fill)
+    .into()
+}
+
+pub(super) fn review_footer(app: &App, compact: bool) -> Element<'_, Message> {
+    let p = app.presentation();
+    match app.panel {
         Panel::CollectionEditor if compact => column![
             rule::horizontal(1).style(p.line()),
             collection_tools::editor(app, true)
@@ -72,17 +90,23 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
             .align_y(Alignment::Center)
             .style(move |_| p.surface(p.colors.panel))
             .into(),
-        Panel::Workspace if app.review.is_some() => column![
-            rule::horizontal(1).style(p.line()),
-            container(super::destination::save_bar(app, compact))
+        Panel::Workspace if app.review.is_some() => {
+            let mut bar = container(super::destination::save_bar(app, compact))
                 .padding(if compact { [8, 16] } else { [10, 20] })
-                .width(Length::Fill)
-                .style(move |_| p.surface(p.colors.panel))
-        ]
-        .into(),
+                .width(Length::Fill);
+            if app.reviewing_catalog_album() {
+                bar = bar.max_width(super::catalog::ALBUM_PAGE_WIDTH);
+            }
+            column![
+                rule::horizontal(1).style(p.line()),
+                container(bar)
+                    .center_x(Length::Fill)
+                    .style(move |_| p.surface(p.colors.panel)),
+            ]
+            .into()
+        }
         _ => space().into(),
-    };
-    column![content, footer].height(Length::Fill).into()
+    }
 }
 
 fn collection(app: &App, compact: bool) -> Element<'_, Message> {

@@ -3,12 +3,14 @@ use crate::app::{App, Message, Panel};
 use crate::editor::Kind;
 use crate::theme;
 use crate::view::focus_button;
+use audio_engine::Inspection;
 use iced::widget::text::Wrapping;
 use iced::widget::{
     button, checkbox, column, container, keyed, responsive, row, scrollable, sensor, space, text,
     tooltip,
 };
 use iced::{Alignment, Element, Length};
+use jacket_core::Review;
 use std::borrow::Cow;
 use std::ops::Range;
 
@@ -39,47 +41,74 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
     let Some(review) = &app.review else {
         return space().into();
     };
+    table(app, &review.inspection, Some(review), compact)
+}
+
+pub fn album_preview<'a>(
+    app: &'a App,
+    inspection: &'a Inspection,
+    compact: bool,
+) -> Element<'a, Message> {
+    table(app, inspection, None, compact)
+}
+
+fn table<'a>(
+    app: &'a App,
+    inspection: &'a Inspection,
+    review: Option<&'a Review>,
+    compact: bool,
+) -> Element<'a, Message> {
     let p = app.presentation();
-    let arranging = app.panel == Panel::TrackOrder;
-    let enabled = !app.busy() && app.panel == Panel::Workspace;
-    let count = review.inspection.tracks.len();
-    let all_selected = count > 0 && review.selected.len() == count;
-    let mut toolbar = row![
-        checkbox(all_selected)
-            .size(14)
-            .label("Select all")
-            .text_size(12)
-            .on_toggle_maybe((enabled && count > 0).then_some(Message::SelectAll)),
-        text(format!("{} selected", review.selected.len()))
-            .size(12)
-            .color(p.colors.text_muted),
-        space::horizontal(),
-        focus_button::wrap(
-            "collection-edit-selected",
-            button(text("Edit selected").size(12))
-                .padding([5, 8])
-                .style(p.quiet()),
-            (enabled && !review.selected.is_empty()).then_some(Message::OpenEditor(Kind::Bulk)),
-            p.colors.accent,
-        ),
-        focus_button::wrap(
-            "open-track-order",
-            button(text("Track order…").size(12))
-                .padding([5, 8])
-                .style(p.secondary()),
-            (enabled && count > 1).then_some(Message::OpenPanel(Panel::TrackOrder)),
-            p.colors.accent,
-        ),
-    ]
-    .spacing(12)
-    .align_y(Alignment::Center);
-    if review.can_undo_bulk() && !arranging {
-        toolbar = toolbar.push(
-            button(text("Undo edit").size(12))
-                .padding([5, 8])
-                .on_press_maybe(enabled.then_some(Message::UndoBulk))
-                .style(p.quiet()),
-        );
+    let arranging = review.is_some() && app.panel == Panel::TrackOrder;
+    let enabled = review.is_some() && !app.busy() && app.panel == Panel::Workspace;
+    let show_time = !compact || (app.catalog.visible && app.catalog.album().is_some());
+    let count = inspection.tracks.len();
+    let mut toolbar = row![text("Track list").size(14).font(crate::style::semibold())];
+    if let Some(review) = review {
+        let all_selected = count > 0 && review.selected.len() == count;
+        toolbar = row![
+            focus_button::wrap_control(
+                "review-select-all",
+                checkbox(all_selected)
+                    .size(14)
+                    .label("Select all")
+                    .text_size(12)
+                    .on_toggle_maybe((enabled && count > 0).then_some(Message::SelectAll))
+                    .into(),
+                (enabled && count > 0).then_some(Message::SelectAll(!all_selected)),
+                p.colors.accent,
+            ),
+            text(format!("{} selected", review.selected.len()))
+                .size(12)
+                .color(p.colors.text_muted),
+            space::horizontal(),
+            focus_button::wrap(
+                "collection-edit-selected",
+                button(text("Edit selected").size(12))
+                    .padding([5, 8])
+                    .style(p.quiet()),
+                (enabled && !review.selected.is_empty()).then_some(Message::OpenEditor(Kind::Bulk)),
+                p.colors.accent,
+            ),
+            focus_button::wrap(
+                "open-track-order",
+                button(text("Track order…").size(12))
+                    .padding([5, 8])
+                    .style(p.secondary()),
+                (enabled && count > 1).then_some(Message::OpenPanel(Panel::TrackOrder)),
+                p.colors.accent,
+            ),
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center);
+        if review.can_undo_bulk() && !arranging {
+            toolbar = toolbar.push(
+                button(text("Undo edit").size(12))
+                    .padding([5, 8])
+                    .on_press_maybe(enabled.then_some(Message::UndoBulk))
+                    .style(p.quiet()),
+            );
+        }
     }
     if arranging {
         toolbar = row![
@@ -116,9 +145,10 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
         .spacing(10)
         .align_y(Alignment::Center);
         if !compact {
-            headings = headings
-                .push(text("Artist").size(10).width(artist_width))
-                .push(text("Time").size(10).width(42));
+            headings = headings.push(text("Artist").size(10).width(artist_width));
+        }
+        if show_time {
+            headings = headings.push(text("Time").size(10).width(42));
         }
         headings = headings.push(space().width(if arranging { 124 } else { 40 }));
         let header = container(headings)
@@ -139,7 +169,7 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
         }
         for index in range.clone() {
             // A source ID may repeat; each ordered occurrence owns its controls.
-            let track = &review.inspection.tracks[index];
+            let track = &inspection.tracks[index];
             let number = if arranging {
                 format!("{:02}", index + 1)
             } else {
@@ -169,12 +199,24 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
             } else {
                 title.into()
             };
+            let selected = review.is_some_and(|review| review.selected.contains(&index));
+            let selection: Element<'_, Message> = if review.is_some() {
+                focus_button::wrap_control(
+                    format!("review-select-track-{index}"),
+                    checkbox(selected)
+                        .size(14)
+                        .on_toggle_maybe(
+                            enabled.then_some(move |selected| Message::Toggle(index, selected)),
+                        )
+                        .into(),
+                    enabled.then_some(Message::Toggle(index, !selected)),
+                    p.colors.accent,
+                )
+            } else {
+                space().width(14).into()
+            };
             let mut line = row![
-                checkbox(review.selected.contains(&index))
-                    .size(14)
-                    .on_toggle_maybe(
-                        enabled.then_some(move |selected| Message::Toggle(index, selected))
-                    ),
+                selection,
                 container(
                     text(number)
                         .size(11)
@@ -189,34 +231,35 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
             .spacing(10)
             .align_y(Alignment::Center);
             if !compact {
+                line = line.push(
+                    container(
+                        text(single_line(&track.metadata.artist))
+                            .size(12)
+                            .width(artist_width)
+                            .wrapping(Wrapping::None)
+                            .color(p.colors.text_muted),
+                    )
+                    .width(artist_width)
+                    .clip(true),
+                );
+            }
+            if show_time {
                 let duration = track
                     .duration
                     .filter(|duration| duration.is_finite() && *duration >= 0.0)
                     .map(|duration| format!("{}:{:02}", duration as u64 / 60, duration as u64 % 60))
                     .unwrap_or_else(|| "—".into());
-                line = line
-                    .push(
-                        container(
-                            text(single_line(&track.metadata.artist))
-                                .size(12)
-                                .width(artist_width)
-                                .wrapping(Wrapping::None)
-                                .color(p.colors.text_muted),
-                        )
-                        .width(artist_width)
-                        .clip(true),
+                line = line.push(
+                    container(
+                        text(duration)
+                            .size(11)
+                            .width(42)
+                            .wrapping(Wrapping::None)
+                            .color(p.colors.text_muted),
                     )
-                    .push(
-                        container(
-                            text(duration)
-                                .size(11)
-                                .width(42)
-                                .wrapping(Wrapping::None)
-                                .color(p.colors.text_muted),
-                        )
-                        .width(42)
-                        .clip(true),
-                    );
+                    .width(42)
+                    .clip(true),
+                );
             }
             line = if arranging {
                 line.push(
@@ -236,7 +279,7 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
                     ]
                     .spacing(6),
                 )
-            } else {
+            } else if review.is_some() {
                 line.push(focus_button::wrap(
                     edit_id(index),
                     button(
@@ -253,8 +296,9 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
                     enabled.then_some(Message::OpenEditor(Kind::Track(index))),
                     p.colors.accent,
                 ))
+            } else {
+                line.push(space().width(40))
             };
-            let selected = review.selected.contains(&index);
             let active =
                 editor_track == Some(index) || (arranging && app.arranged_track == Some(index));
             let row_surface = container(line)
@@ -312,10 +356,16 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
             .into()
     })
     .height(Length::Fill);
-    column![container(toolbar).padding([0, 12]), viewport]
-        .spacing(8)
-        .height(Length::Fill)
-        .into()
+    column![
+        container(toolbar)
+            .padding([0, 12])
+            .height(28)
+            .align_y(Alignment::Center),
+        viewport
+    ]
+    .spacing(8)
+    .height(Length::Fill)
+    .into()
 }
 
 fn move_button(app: &App, index: usize, count: usize, up: bool) -> Element<'_, Message> {

@@ -3,6 +3,7 @@ use crate::auth_session::{self, Control, Keychain};
 use crate::browser_sessions::{self, Catalog, Locations};
 use crate::catalog::SearchRequest;
 use crate::downloader_updates::{self, Channel, Preferences};
+use crate::downloads;
 use crate::export_completion;
 use crate::recovery::{self, Recovery};
 use crate::reviews::{self, CompletionIdentity, ReviewDraft};
@@ -23,8 +24,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const IDENTIFIER: &str = "com.moonlark.audio-dl";
 static NEXT_OPERATION: AtomicU64 = AtomicU64::new(1);
 
-#[derive(PartialEq, Eq)]
-struct PublishedExport {
+#[derive(serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+pub(crate) struct PublishedExport {
     #[cfg(unix)]
     device: u64,
     #[cfg(unix)]
@@ -35,7 +36,7 @@ struct PublishedExport {
 }
 
 impl PublishedExport {
-    fn read(path: &Path, kind: OutputKind) -> Result<Self, String> {
+    pub(crate) fn read(path: &Path, kind: OutputKind) -> Result<Self, String> {
         let unavailable = "This export is no longer available at the saved location.";
         let metadata = path.symlink_metadata().map_err(|_| unavailable)?;
         let expected_type = if kind == OutputKind::Folder {
@@ -82,6 +83,9 @@ struct Services {
     reviews: reviews::Store,
     session: Control,
     admission: Admission,
+    catalog_admission: Admission,
+    download_admission: Admission,
+    download_claim: Mutex<Option<String>>,
     youtube_music: Option<YouTubeMusicRuntime>,
     exported: Mutex<HashMap<PathBuf, PublishedExport>>,
 }
@@ -103,7 +107,7 @@ fn operation_id() -> String {
         .unwrap_or_default()
         .as_millis();
     format!(
-        "job-{timestamp}-{}",
+        "job-{timestamp:013}-{:020}",
         NEXT_OPERATION.fetch_add(1, Ordering::Relaxed)
     )
 }
@@ -211,6 +215,9 @@ impl Desktop {
             reviews: reviews::Store::default(),
             session: Control::default(),
             admission: Arc::new(Mutex::new(None)),
+            catalog_admission: Arc::new(Mutex::new(None)),
+            download_admission: Arc::new(Mutex::new(None)),
+            download_claim: Mutex::new(None),
             youtube_music,
             exported: Mutex::new(HashMap::new()),
         })))
@@ -237,7 +244,7 @@ impl Desktop {
     fn artwork_root(&self) -> PathBuf {
         self.0.data.join("review-library/artwork")
     }
-    fn jobs_root(&self) -> PathBuf {
+    pub(crate) fn jobs_root(&self) -> PathBuf {
         self.0.cache.join("jobs")
     }
     fn updates_root(&self) -> PathBuf {
@@ -270,6 +277,19 @@ impl Desktop {
         export_completion::reconcile(&self.0.reviews, &self.review_root(), &self.jobs_root())?;
         self.0.reviews.load(&self.review_root())
     }
+    pub fn read_review(&self) -> Result<Option<ReviewDraft>, String> {
+        self.0.reviews.load(&self.review_root())
+    }
+
+    pub fn retire_queued_review(&self, identity: &CompletionIdentity) -> Result<bool, String> {
+        self.0
+            .reviews
+            .complete_export(&self.review_root(), identity)
+    }
+
+    pub(crate) fn download_claim(&self) -> &Mutex<Option<String>> {
+        &self.0.download_claim
+    }
     pub fn save_review(&self, draft: ReviewDraft) -> Result<bool, String> {
         self.0.reviews.save(&self.review_root(), draft)
     }
@@ -289,6 +309,10 @@ impl Desktop {
         let _lease = Lease::acquire(&self.0.admission)?;
         let mut retained =
             recovery::artwork_asset_ids(&self.jobs_root()).map_err(|error| error.to_string())?;
+        retained.extend(
+            recovery::artwork_asset_ids(&self.downloads_root())
+                .map_err(|error| error.to_string())?,
+        );
         if let Some(review) = self.0.reviews.load(&self.review_root())? {
             if let Some(id) = review.preferences.shared_artwork_asset {
                 retained.insert(id);
@@ -375,9 +399,11 @@ impl Desktop {
         &self,
         run: impl FnOnce(&Cancellation) -> Result<crate::CatalogEvent, String> + Send + 'static,
     ) -> Result<Job, String> {
-        Job::spawn(operation_id(), &self.0.admission, move |cancel, _| {
-            run(cancel).map(Event::Catalog)
-        })
+        Job::spawn(
+            operation_id(),
+            &self.0.catalog_admission,
+            move |cancel, _| run(cancel).map(Event::Catalog),
+        )
     }
 
     pub fn inspect(&self, url: String, auth: AuthOptions) -> Result<Job, String> {
@@ -406,11 +432,11 @@ impl Desktop {
     ) -> Result<Job, String> {
         let desktop = self.clone();
         Job::spawn(operation_id(), &self.0.admission, move |cancel, events| {
-            let _guard = desktop
-                .0
-                .session
-                .serial
-                .lock()
+            let _guard = auth
+                .managed_session
+                .is_some()
+                .then(|| desktop.0.session.serial.lock())
+                .transpose()
                 .map_err(|_| "Session state is unavailable.")?;
             cancel.check().map_err(|error| error.to_string())?;
             let auth = desktop.resolve_auth(&auth)?;
@@ -449,17 +475,8 @@ impl Desktop {
         organized: Option<&audio_engine::OrganizedOutput>,
         identity: Option<CompletionIdentity>,
     ) -> Result<Job, String> {
-        let destination = destination
-            .to_str()
-            .ok_or("The destination needs a Unicode path.")?
-            .to_owned();
-        let mut record = Recovery::new(operation_id(), plan, destination);
-        if let Some(organized) = organized {
-            record.music_root = Some(organized.root().to_owned());
-            record.music_album_stems = organized.album_stems().map(<[_]>::to_vec);
-        }
-        record.review_identity = identity;
-        self.export_record(record, false)
+        let record = Self::export_recipe(plan, destination, organized, identity)?;
+        self.export_record(record, false, None)
     }
 
     pub fn resume(&self, record: Recovery) -> Result<Job, String> {
@@ -469,10 +486,34 @@ impl Desktop {
         if record.plan.auth.managed_session.is_some() {
             return Err("Reconnect your session and start a new export.".into());
         }
-        self.export_record(record, true)
+        self.export_record(record, true, None)
     }
 
-    fn export_record(&self, mut record: Recovery, resume: bool) -> Result<Job, String> {
+    pub(crate) fn export_recipe(
+        plan: ExportPlan,
+        destination: &Path,
+        organized: Option<&audio_engine::OrganizedOutput>,
+        identity: Option<CompletionIdentity>,
+    ) -> Result<Recovery, String> {
+        if plan.tracks.is_empty() {
+            return Err("Select at least one track.".into());
+        }
+        let destination = destination
+            .to_str()
+            .ok_or("The destination needs a Unicode path.")?;
+        let mut record = Recovery::new(operation_id(), plan, destination.to_owned());
+        if let Some(organized) = organized {
+            record.music_root = Some(organized.root().to_owned());
+            record.music_album_stems = organized.album_stems().map(<[_]>::to_vec);
+        }
+        record.review_identity = identity;
+        Self::export_paths(&record)?;
+        Ok(record)
+    }
+
+    fn export_paths(
+        record: &Recovery,
+    ) -> Result<(PathBuf, Option<audio_engine::OrganizedOutput>), String> {
         if !recovery::valid_job_id(&record.job_id) {
             return Err("Invalid download identifier.".into());
         }
@@ -502,69 +543,134 @@ impl Desktop {
             validate_destination(&record.plan, &output)?;
             None
         };
+        Ok((output, organized))
+    }
+
+    pub(crate) fn export_record(
+        &self,
+        mut record: Recovery,
+        resume: bool,
+        download: Option<downloads::Claim>,
+    ) -> Result<Job, String> {
+        let queued = download.is_some();
+        // Recheck paths immediately before a worker starts, even for a queued recipe.
+        let paths = if queued {
+            Self::export_paths(&record)
+        } else {
+            Ok(Self::export_paths(&record)?)
+        };
         let desktop = self.clone();
         Job::spawn(
             record.job_id.clone(),
-            &self.0.admission,
+            if queued {
+                &self.0.download_admission
+            } else {
+                &self.0.admission
+            },
             move |cancel, events| {
-                let _guard = desktop
-                    .0
-                    .session
-                    .serial
-                    .lock()
-                    .map_err(|_| "Session state is unavailable.")?;
-                let mut plan = record.plan.clone();
-                plan.auth = desktop.resolve_auth(&plan.auth)?;
-                plan.shared_artwork_path = None;
-                if matches!(plan.artwork_mode, audio_engine::ArtworkMode::Shared) {
-                    if let Some(id) = &plan.shared_artwork_asset {
-                        plan.shared_artwork_path =
-                            Some(artwork_assets::resolve(&desktop.artwork_root(), id)?);
-                    }
+                let _claim = download;
+                let work_root = if queued {
+                    desktop.download_cache_root()
+                } else {
+                    desktop.jobs_root()
+                };
+                let workdir = if queued {
+                    recovery::private_directory(&work_root)
+                        .and_then(|()| recovery::job_directory(&work_root, &record.job_id))
+                } else {
+                    recovery::job_directory(&work_root, &record.job_id)
+                };
+                let record_dir = if queued {
+                    recovery::job_directory(&desktop.downloads_root(), &record.job_id)
+                } else {
+                    workdir
+                        .as_ref()
+                        .map(Clone::clone)
+                        .map_err(|error| std::io::Error::other(error.to_string()))
                 }
-                let tools = desktop.tools()?;
-                let workdir = recovery::job_directory(&desktop.jobs_root(), &record.job_id)
-                    .map_err(|error| error.to_string())?;
-                record.save(&workdir).map_err(|error| error.to_string())?;
-                let outcome = (|| {
-                    cancel.check()?;
-                    let handoff =
-                        auth_session::materialize(&desktop.session_root(), &Keychain, &plan.auth)
-                            .map_err(audio_engine::EngineError::Invalid)?;
-                    if let Some(handoff) = &handoff {
-                        plan.auth = handoff.auth.clone();
-                    }
-                    let emit = |progress: audio_engine::ProgressEvent| {
-                        record.progress = progress.clone();
-                        let _ = record.save_checkpoint(&workdir);
-                        // Progress is replaceable; a slow UI must never block file publication.
-                        let _ = events.try_send(Event::Progress(progress));
-                    };
-                    let result = match &organized {
-                        Some(organized) if organized.album_stems().is_some() => {
-                            let save_album = if resume {
-                                audio_engine::resume_organized_album
-                            } else {
-                                audio_engine::export_organized_album
-                            };
-                            save_album(&tools, &plan, organized, &workdir, cancel, emit)
-                        }
-                        Some(organized) => audio_engine::export_organized_file(
-                            &tools, &plan, organized, &workdir, cancel, emit,
-                        ),
-                        None => audio_engine::export_collection(
-                            &tools, &plan, &output, &workdir, cancel, emit,
-                        ),
-                    };
-                    if result.is_ok() {
-                        if let Some(handoff) = handoff {
-                            let _ = handoff.persist(&desktop.session_root(), &Keychain);
+                .map_err(|error| error.to_string())?;
+                if queued {
+                    record.progress.stage = "starting".into();
+                    record.error = None;
+                    record
+                        .save(&record_dir)
+                        .map_err(|error| error.to_string())?;
+                }
+                let outcome = (|| -> Result<ExportResult, String> {
+                    let (output, organized) = paths?;
+                    let workdir = workdir.as_ref().map_err(|error| error.to_string())?;
+                    let _guard = (!queued || record.plan.auth.managed_session.is_some())
+                        .then(|| desktop.0.session.serial.lock())
+                        .transpose()
+                        .map_err(|_| "Session state is unavailable.")?;
+                    let mut plan = record.plan.clone();
+                    plan.auth = desktop.resolve_auth(&plan.auth)?;
+                    plan.shared_artwork_path = None;
+                    if matches!(plan.artwork_mode, audio_engine::ArtworkMode::Shared) {
+                        if let Some(id) = &plan.shared_artwork_asset {
+                            plan.shared_artwork_path =
+                                Some(artwork_assets::resolve(&desktop.artwork_root(), id)?);
                         }
                     }
+                    let tools = desktop.tools()?;
+                    if !queued {
+                        record
+                            .save(&record_dir)
+                            .map_err(|error| error.to_string())?;
+                    } else {
+                        recovery::private_directory(workdir).map_err(|error| error.to_string())?;
+                    }
+                    let result = (|| {
+                        cancel.check()?;
+                        let handoff = auth_session::materialize(
+                            &desktop.session_root(),
+                            &Keychain,
+                            &plan.auth,
+                        )
+                        .map_err(audio_engine::EngineError::Invalid)?;
+                        if let Some(handoff) = &handoff {
+                            plan.auth = handoff.auth.clone();
+                        }
+                        let emit = |progress: audio_engine::ProgressEvent| {
+                            record.progress = progress.clone();
+                            let _ = record.save_checkpoint(&record_dir);
+                            // Progress is replaceable; a slow UI must never block file publication.
+                            let _ = events.try_send(Event::Progress(progress));
+                        };
+                        let result = match &organized {
+                            Some(organized) if organized.album_stems().is_some() => {
+                                let save_album = if resume {
+                                    audio_engine::resume_organized_album
+                                } else {
+                                    audio_engine::export_organized_album
+                                };
+                                save_album(&tools, &plan, organized, workdir, cancel, emit)
+                            }
+                            Some(organized) => audio_engine::export_organized_file(
+                                &tools, &plan, organized, workdir, cancel, emit,
+                            ),
+                            None => audio_engine::export_collection(
+                                &tools, &plan, &output, workdir, cancel, emit,
+                            ),
+                        };
+                        if result.is_ok() {
+                            if let Some(handoff) = handoff {
+                                let _ = handoff.persist(&desktop.session_root(), &Keychain);
+                            }
+                        }
+                        result
+                    })()
+                    .map_err(|error: audio_engine::EngineError| error.to_string());
                     result
                 })();
                 match outcome {
                     Ok(mut result) => {
+                        let workdir = workdir.expect("publication requires its work directory");
+                        if queued {
+                            let can_reveal =
+                                downloads::finish(&record_dir, &workdir, &mut record, &mut result);
+                            return Ok(Event::DownloadExported { result, can_reveal });
+                        }
                         export_completion::finish(
                             &desktop.0.reviews,
                             &desktop.review_root(),
@@ -577,17 +683,19 @@ impl Desktop {
                         }
                         Ok(Event::Exported(result))
                     }
-                    Err(error) => {
-                        record.progress.stage =
-                            if matches!(error, audio_engine::EngineError::Cancelled) {
-                                "cancelled"
-                            } else {
-                                "failed"
-                            }
-                            .into();
-                        let message = error.to_string();
+                    Err(message) => {
+                        record.progress.stage = if cancel.check().is_err() {
+                            "cancelled"
+                        } else {
+                            "failed"
+                        }
+                        .into();
                         record.error = Some(message.clone());
-                        let checkpoint = record.save_checkpoint(&workdir);
+                        let checkpoint = if queued || record_dir.is_dir() {
+                            record.save_checkpoint(&record_dir)
+                        } else {
+                            Ok(())
+                        };
                         Err(if checkpoint.is_err() {
                             format!("{message} The recovery checkpoint could not be saved; downloaded media remains in the local cache.")
                         } else {
@@ -736,15 +844,19 @@ impl Desktop {
     /// Only paths actually published by this process may be opened as exports.
     pub fn reveal_export(&self, result: &ExportResult) -> Result<(), String> {
         let path = Path::new(&result.output_path);
-        self.authorize_export(path)?;
+        let kind = self.authorize_export(path)?;
+        self.reveal_published(path, kind)
+    }
+
+    pub(crate) fn reveal_published(&self, path: &Path, kind: OutputKind) -> Result<(), String> {
         #[cfg(target_os = "macos")]
-        let status = if path.is_dir() {
+        let status = if kind == OutputKind::Folder {
             Command::new("open").arg(path).status()
         } else {
             Command::new("open").arg("-R").arg(path).status()
         };
         #[cfg(target_os = "windows")]
-        let status = if path.is_dir() {
+        let status = if kind == OutputKind::Folder {
             Command::new("explorer").arg(path).status()
         } else {
             Command::new("explorer")
@@ -752,7 +864,7 @@ impl Desktop {
                 .status()
         };
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-        let status = open_command(if path.is_dir() {
+        let status = open_command(if kind == OutputKind::Folder {
             path
         } else {
             path.parent().ok_or("The export folder is unavailable.")?
@@ -783,7 +895,7 @@ impl Desktop {
         }
         Ok(())
     }
-    fn remember_export(&self, result: &ExportResult) -> Result<(), String> {
+    pub(crate) fn remember_export(&self, result: &ExportResult) -> Result<(), String> {
         let path = Path::new(&result.output_path);
         let published = PublishedExport::read(path, result.output_kind)?;
         self.0
@@ -870,6 +982,33 @@ mod tests {
             root.join("home"),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn catalog_admission_is_available_while_a_download_owns_its_worker() {
+        let root = tempfile::tempdir().unwrap();
+        let desktop = desktop(root.path());
+        let _download = super::Lease::acquire(&desktop.0.download_admission).unwrap();
+        let mut job = desktop
+            .catalog_job(|_| {
+                Ok(crate::CatalogEvent::Results {
+                    filter: None,
+                    hits: Vec::new(),
+                })
+            })
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if let Some(event) = job.poll() {
+                assert!(matches!(
+                    event,
+                    Event::Catalog(crate::CatalogEvent::Results { .. })
+                ));
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
     }
 
     #[test]

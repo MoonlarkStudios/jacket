@@ -56,11 +56,9 @@ pub(super) fn view(app: &App, compact: bool, width: f32) -> Element<'_, Message>
     let mut body = column![].spacing(section_spacing);
     if let Some(page) = artist_page {
         body = body
-            .push(action(
+            .push(super::catalog::navigation(
                 app,
                 "artist-back",
-                catalog.back_label(),
-                Action::Back,
                 !app.busy() && !catalog.confirm_replace,
                 false,
             ))

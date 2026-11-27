@@ -28,6 +28,10 @@ pub enum Event {
     Progress(ProgressEvent),
     Inspected(Inspection),
     Exported(ExportResult),
+    DownloadExported {
+        result: ExportResult,
+        can_reveal: bool,
+    },
     AccessChecked(AccessCheck),
     Downloader(Status),
     Session(auth_session::Status),

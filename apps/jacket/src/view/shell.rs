@@ -1,10 +1,10 @@
-use super::{components, destination, options, preferences, preview, workspace};
-use crate::app::{App, Message, Panel, SourceKind};
+use super::{components, destination, downloads, options, preferences, preview, workspace};
+use crate::app::{App, DownloadAction, DownloadSurface, Message, Panel, SourceKind};
 use crate::icons::{self, Icon};
 use crate::style;
 use iced::widget::{
-    button, column, container, progress_bar, responsive, row, rule, scrollable, space, svg, text,
-    text_input, tooltip,
+    button, column, container, mouse_area, opaque, progress_bar, responsive, row, rule, scrollable,
+    space, stack, svg, text, text_input, tooltip,
 };
 use iced::{Alignment, Element, Length};
 use jacket_core::{SourceIntent, SourceLink};
@@ -17,8 +17,17 @@ fn view_at(app: &App, size: iced::Size) -> Element<'_, Message> {
     let compact = size.width < 900.0;
     let p = app.presentation();
     let content: Element<'_, Message> =
-        if app.panel == Panel::Workspace || app.panel.review_tool() {
-            let show_catalog = app.catalog.visible && app.panel == Panel::Workspace;
+        if app.downloads.surface == DownloadSurface::Page && app.panel == Panel::Workspace {
+            column![
+                header(app, compact),
+                rule::horizontal(1).style(p.line()),
+                downloads::page(app, compact)
+            ]
+            .height(Length::Fill)
+            .into()
+        } else if app.panel == Panel::Workspace || app.panel.review_tool() {
+            let show_catalog = app.catalog.visible
+                && (app.panel == Panel::Workspace || app.reviewing_catalog_album());
             let mut body = column![header(app, compact), rule::horizontal(1).style(p.line())]
                 .spacing(0)
                 .height(Length::Fill);
@@ -70,13 +79,39 @@ fn view_at(app: &App, size: iced::Size) -> Element<'_, Message> {
                     .style(move |_| p.surface(p.colors.panel)),
                 );
             }
-            if show_catalog {
-                body.push(super::catalog::view(app, compact)).into()
+            let workspace: Element<'_, Message> = if show_catalog {
+                super::catalog::view(app, compact)
             } else {
-                body.push(workspace::view(app, compact))
-                    .push(status(app))
+                column![workspace::view(app, compact), status(app)]
+                    .height(Length::Fill)
                     .into()
+            };
+            let mut content = stack![workspace];
+            if app.downloads.surface == DownloadSurface::Dropdown && app.panel == Panel::Workspace {
+                content = content.push(stack![
+                    mouse_area(space().width(Length::Fill).height(Length::Fill))
+                        .on_press(Message::Downloads(DownloadAction::Close)),
+                    container(opaque(downloads::dropdown(app, size.width - 32.0)))
+                        .align_right(Length::Fill)
+                        .padding(iced::Padding {
+                            top: 6.0,
+                            right: 16.0,
+                            ..iced::Padding::ZERO
+                        }),
+                ]);
+            } else if let Some(label) = app
+                .downloads
+                .notice()
+                .filter(|_| app.panel == Panel::Workspace && app.review.is_none())
+            {
+                content = content.push(
+                    container(opaque(downloads::notice(app, label)))
+                        .align_right(Length::Fill)
+                        .align_bottom(Length::Fill)
+                        .padding(12),
+                );
             }
+            body.push(content).into()
         } else {
             let body = panel_body(app, compact);
 
@@ -234,7 +269,7 @@ fn panel_body(app: &App, compact: bool) -> Element<'_, Message> {
 
 fn header(app: &App, compact: bool) -> Element<'_, Message> {
     let p = app.presentation();
-    container(
+    let bar = container(
         row![
             svg(svg::Handle::from_memory(include_bytes!(
                 "../../../../branding/jacket/svg/jacket-mark.svg"
@@ -281,14 +316,21 @@ fn header(app: &App, compact: bool) -> Element<'_, Message> {
                 (!app.panel.review_tool()).then_some(Message::OpenPanel(Panel::Settings))
             )
             .style(p.quiet()),
+            downloads::trigger(app),
         ]
         .spacing(9)
         .align_y(Alignment::Center),
     )
     .padding([9, 16])
     .width(Length::Fill)
-    .style(move |_| p.surface(p.colors.chrome))
-    .into()
+    .style(move |_| p.surface(p.colors.chrome));
+    let area = mouse_area(bar);
+    if app.downloads.surface == DownloadSurface::Dropdown {
+        area.on_press(Message::Downloads(DownloadAction::Close))
+            .into()
+    } else {
+        area.into()
+    }
 }
 
 fn source(app: &App, _compact: bool) -> Element<'_, Message> {

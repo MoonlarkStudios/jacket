@@ -97,12 +97,21 @@ impl Intake {
 
 impl App {
     pub(super) fn finish_inspection(&mut self, inspection: Inspection) -> Task<Message> {
+        self.finish_inspection_at(inspection, 0.0)
+    }
+
+    pub(super) fn finish_inspection_at(
+        &mut self,
+        inspection: Inspection,
+        scroll: f32,
+    ) -> Task<Message> {
         let intake = self.intake.take();
         if intake.as_ref().is_some_and(|intake| intake.cancelling) {
             self.notice = Some("Lookup cancelled.".into());
             return self.focus_after_lookup_stop();
         }
         self.catalog.visible = false;
+        self.catalog.clear_album_review();
         // Keep an explicit song/playlist choice available beside the link.
         if !SourceLink::parse(&self.url).is_ok_and(|link| link.has_playlist_context()) {
             self.url = inspection.source_url.clone();
@@ -111,7 +120,7 @@ impl App {
             inspection,
             self.appearance.default_format.into(),
         ));
-        self.example = false;
+        self.example = self.example && self.desktop.is_none();
         self.example_previous = None;
         self.result = None;
         self.cover = None;
@@ -120,7 +129,7 @@ impl App {
         self.preview_cover = None;
         self.preview_cover_error = None;
         self.crop_source = None;
-        self.track_scroll = 0.0;
+        self.track_scroll = scroll;
         self.track_viewport_height = 0.0;
         self.preview = None;
         self.pending_plan = None;

@@ -76,6 +76,8 @@ impl App {
             desktop: None,
             review: None,
             catalog,
+            downloads: super::downloads::Downloads::default(),
+            catalog_job: None,
             job: None,
             url: String::new(),
             intent: SourceIntent::Song,
@@ -214,6 +216,22 @@ impl App {
                         | "catalog-unavailable"),
                     ) => {
                         app.catalog_snapshot(scenario);
+                    }
+                    Some("catalog-album-review") => {
+                        app.catalog_snapshot("catalog-album");
+                        let _ = app.update(super::Message::Catalog(super::CatalogAction::Review));
+                        app.music_folder = Some(super::destination::MusicFolder {
+                            root: "Music".into(),
+                            rule: Default::default(),
+                        });
+                    }
+                    Some(scenario @ ("catalog-downloads" | "catalog-downloads-page")) => {
+                        app.catalog_snapshot("catalog-results");
+                        app.downloads.example(if scenario == "catalog-downloads" {
+                            super::DownloadSurface::Dropdown
+                        } else {
+                            super::DownloadSurface::Page
+                        });
                     }
                     Some("settings") => app.panel = Panel::Settings,
                     Some("appearance") => app.panel = Panel::Appearance,
