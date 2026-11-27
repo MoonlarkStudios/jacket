@@ -1,6 +1,7 @@
 use super::{catalog_media::CatalogMedia, persistence, App, Message, Panel};
 use audio_engine::Inspection;
 use iced::{widget::operation, Task};
+use jacket_core::SourceLink;
 use jacket_desktop::catalog::{SearchKind, SearchRequest};
 use jacket_desktop::youtube_music::{AlbumEdition, AlbumPage, ArtistPage, SearchHit, SearchItem};
 use jacket_desktop::{CatalogEvent, Job};
@@ -16,14 +17,16 @@ pub enum CatalogAction {
     FocusResult,
     ClearSearch,
     Cancel,
-    PasteLink,
     ReturnToReview,
     Query(String),
+    Submit(String),
     Search,
     Filter(Option<SearchKind>),
     ToggleArtistReleases,
     ArtistReleaseArtwork { id: String, url: Option<String> },
     OpenResult(SearchKind, String),
+    ToggleSongMenu(String),
+    DismissSongMenu,
     OpenSongAlbum(String),
     OpenAlbumArtist(usize),
     ToggleEditions,
@@ -106,6 +109,7 @@ pub struct Catalog {
     pending_origin: Option<BrowsePosition>,
     review_origin: Option<BrowsePosition>,
     song_focus: Option<String>,
+    song_menu: Option<String>,
 }
 
 impl Catalog {
@@ -130,11 +134,32 @@ impl Catalog {
             pending_origin: None,
             review_origin: None,
             song_focus: None,
+            song_menu: None,
         }
     }
 
     pub fn search_home(&self) -> bool {
         matches!(self.page, CatalogPage::Search)
+    }
+
+    pub fn link_input(&self) -> bool {
+        let Some(first) = self.query.split_whitespace().next() else {
+            return false;
+        };
+        let first = first.to_ascii_lowercase();
+        first.contains("://")
+            || first.starts_with("https:")
+            || first.starts_with("http:")
+            || first.starts_with("www.")
+            || matches!(
+                first.split(['/', '?', '#']).next(),
+                Some("youtube.com" | "music.youtube.com" | "m.youtube.com" | "youtu.be")
+            )
+    }
+
+    pub fn search_terms(&self) -> Option<&str> {
+        let query = self.query.trim();
+        (!query.is_empty() && !self.link_input()).then_some(query)
     }
 
     pub fn artist(&self) -> Option<&ArtistPage> {
@@ -217,32 +242,46 @@ impl Catalog {
     pub fn result_order(&self) -> [SearchKind; 3] {
         let mut kinds = SearchKind::ALL;
         let featured = self.featured();
+        let artist_match = featured.is_some_and(|hit| hit.item.kind() == SearchKind::Artists);
         kinds.sort_by_key(|kind| {
-            self.hits()
+            let rank = self
+                .hits()
                 .iter()
                 .position(|hit| {
                     hit.item.kind() == *kind
                         && featured.is_none_or(|first| first.item.id() != hit.item.id())
                 })
-                .unwrap_or(usize::MAX)
+                .unwrap_or(usize::MAX);
+            (artist_match && *kind != SearchKind::Albums, rank)
         });
         kinds
+    }
+
+    pub fn song_menu_open(&self, id: &str) -> bool {
+        self.song_menu.as_deref() == Some(id)
+    }
+
+    pub(super) fn dismiss_song_menu(&mut self) -> bool {
+        self.song_menu.take().is_some()
     }
 
     fn edit_query(&mut self, query: String, now: Instant) {
         self.query = query;
         self.error = None;
-        let trimmed = self.query.trim();
-        if trimmed.is_empty() {
+        if self.query.trim().is_empty() {
             self.searched.clear();
             self.results.clear();
-            self.queued_action = None;
         }
-        self.search_due = (trimmed != self.searched
-            && trimmed.chars().take(201).count() <= 200
-            && trimmed
+        let Some(terms) = self.search_terms() else {
+            self.queued_action = None;
+            self.search_due = None;
+            return;
+        };
+        self.search_due = (terms != self.searched
+            && terms.chars().take(201).count() <= 200
+            && terms
                 .chars()
-                .filter(|character| character.is_alphanumeric())
+                .filter(|c| c.is_alphanumeric())
                 .take(2)
                 .count()
                 == 2)
@@ -257,6 +296,27 @@ impl App {
                 && !matches!(action, CatalogAction::Browse | CatalogAction::FocusSearch))
         {
             return Task::none();
+        }
+        match &action {
+            CatalogAction::Submit(query) if *query != self.catalog.query => return Task::none(),
+            CatalogAction::ToggleSongMenu(id) => {
+                let was_open = self.catalog.song_menu_open(id);
+                self.catalog.dismiss_song_menu();
+                if !was_open && !self.busy() && self.catalog.result(SearchKind::Songs, id).is_some()
+                {
+                    self.catalog.song_menu = Some(id.clone());
+                }
+                return Task::none();
+            }
+            CatalogAction::DismissSongMenu => {
+                self.catalog.dismiss_song_menu();
+                return Task::none();
+            }
+            CatalogAction::FocusResult if self.catalog.song_menu.is_some() => return Task::none(),
+            CatalogAction::ArtistReleaseArtwork { .. } => {}
+            _ => {
+                self.catalog.dismiss_song_menu();
+            }
         }
         match action {
             CatalogAction::Cancel => {
@@ -275,9 +335,11 @@ impl App {
                 return Task::none();
             }
             CatalogAction::OpenInBrowser => {
-                let query = self.catalog.query.trim().to_owned();
-                if let Some(desktop) = self.desktop.clone() {
-                    if !query.is_empty() && query.chars().count() <= 200 {
+                if let (Some(query), Some(desktop)) =
+                    (self.catalog.search_terms(), self.desktop.clone())
+                {
+                    if query.chars().count() <= 200 {
+                        let query = query.to_owned();
                         return persistence::background(
                             move || desktop.open_youtube_music_search(&query),
                             Message::Opened,
@@ -295,13 +357,16 @@ impl App {
             CatalogAction::Query(query) => {
                 if self.catalog.search_home() && !self.catalog.confirm_replace {
                     self.catalog.edit_query(query, Instant::now());
-                    if self.catalog.searched.is_empty()
+                    if self.catalog.search_terms().is_none()
                         && matches!(self.catalog.pending, Some(CatalogPending::Search))
                     {
                         return self.update(Message::Cancel);
                     }
                 }
                 return Task::none();
+            }
+            CatalogAction::Submit(_) if !self.catalog.link_input() => {
+                return self.update_catalog(CatalogAction::Search);
             }
             CatalogAction::FocusResult => {
                 let catalog = &self.catalog;
@@ -317,6 +382,7 @@ impl App {
                     .or_else(|| catalog.hits().first())
                     .map_or_else(Task::none, |hit| {
                         operation::focus(result_id(hit.item.kind(), hit.item.id()))
+                            .chain(super::catalog_focus::reveal())
                     });
             }
             CatalogAction::FocusSearch if self.catalog.visible && self.catalog.search_home() => {
@@ -325,11 +391,18 @@ impl App {
             _ => {}
         }
         if self.busy() {
-            if matches!(action, CatalogAction::Search)
+            let replaces_search = match action {
+                CatalogAction::Submit(_) => true,
+                CatalogAction::Search => self
+                    .catalog
+                    .search_terms()
+                    .is_some_and(|query| query != self.catalog.searched),
+                _ => false,
+            };
+            if replaces_search
                 && matches!(self.catalog.pending, Some(CatalogPending::Search))
                 && self.catalog.search_home()
-                && !self.catalog.query.trim().is_empty()
-                && self.catalog.query.trim() != self.catalog.searched
+                && !self.catalog.confirm_replace
             {
                 self.catalog.search_due = None;
                 self.catalog.queued_action = Some(action);
@@ -361,13 +434,18 @@ impl App {
                 self.catalog.error = None;
                 return Task::batch([self.catalog_scroll(0.0), operation::focus("album-search")]);
             }
-            CatalogAction::PasteLink => {
-                self.catalog.search_due = None;
-                self.catalog.visible = false;
-                self.catalog.song = None;
-                self.catalog.song_focus = None;
-                self.catalog.confirm_replace = false;
-                return self.update(Message::PasteLink);
+            CatalogAction::Submit(query) => {
+                if self.catalog.search_home() && !self.catalog.confirm_replace {
+                    match SourceLink::parse(&query) {
+                        Ok(link) => {
+                            self.catalog.search_due = None;
+                            self.catalog.song = None;
+                            self.catalog.song_focus = None;
+                            return self.update(Message::Pasted(link.url));
+                        }
+                        Err(error) => self.catalog.error = Some(error),
+                    }
+                }
             }
             CatalogAction::ReturnToReview => {
                 self.catalog.search_due = None;
@@ -385,11 +463,10 @@ impl App {
                 {
                     self.catalog.filter = filter;
                     self.catalog.error = None;
-                    let query = self.catalog.query.trim();
-                    if !query.is_empty()
-                        && (query != self.catalog.searched
-                            || !self.catalog.results.contains_key(&filter))
-                    {
+                    if self.catalog.search_terms().is_some_and(|query| {
+                        query != self.catalog.searched
+                            || !self.catalog.results.contains_key(&filter)
+                    }) {
                         return self.update_catalog(CatalogAction::Search);
                     }
                     return self.catalog_scroll(0.0);
@@ -527,13 +604,12 @@ impl App {
             CatalogAction::Search => {
                 let catalog = &mut self.catalog;
                 catalog.search_due = None;
-                let query = catalog.query.trim().to_owned();
-                if query.is_empty() {
-                    return operation::focus("album-search");
-                }
                 if !catalog.search_home() || catalog.confirm_replace {
                     return Task::none();
                 }
+                let Some(query) = catalog.search_terms().map(str::to_owned) else {
+                    return Task::none();
+                };
                 catalog.song = None;
                 catalog.song_focus = None;
                 if catalog.searched != query {
@@ -600,6 +676,8 @@ impl App {
                 }
             }
             CatalogAction::FocusResult
+            | CatalogAction::ToggleSongMenu(_)
+            | CatalogAction::DismissSongMenu
             | CatalogAction::ClearSearch
             | CatalogAction::Cancel
             | CatalogAction::Query(_)
@@ -635,7 +713,7 @@ impl App {
     fn catalog_scroll(&mut self, offset: f32) -> Task<Message> {
         self.catalog.scroll_y = offset;
         operation::scroll_to(
-            "album-browser",
+            super::CATALOG_SCROLL_ID,
             iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: offset },
         )
     }
@@ -817,24 +895,80 @@ impl App {
                 "Room to breathe (Expanded Edition)",
                 2026,
                 "Album",
+                Some(COVER),
             ),
-            ("MPREb_example2", "The Quiet Between", 2023, "Album"),
-            ("MPREb_example3", "Along the River", 2022, "EP"),
-            ("MPREb_example4", "First Light", 2021, "Single"),
+            (
+                "MPREb_example2",
+                "The Quiet Between",
+                2023,
+                "Album",
+                Some(COVER),
+            ),
+            ("MPREb_example3", "Along the River", 2022, "EP", Some(COVER)),
+            ("MPREb_example4", "First Light", 2021, "Single", Some(COVER)),
+            (
+                "MPREb_example5",
+                "Songs for an Unfinished Map",
+                2020,
+                "Album",
+                None,
+            ),
+            (
+                "MPREb_example6",
+                "A Place Beyond the Pine Trees",
+                2019,
+                "EP",
+                Some(COVER),
+            ),
+            ("MPREb_example7", "Northbound", 2018, "Album", Some(COVER)),
         ];
         let mut hits = releases
-            .map(|(id, title, year, kind)| {
+            .map(|(id, title, year, kind, artwork_url)| {
                 json!({
                     "result_type": "album", "featured": false, "id": id, "title": title,
-                    "artist": "The Paper Trails", "year": year, "kind": kind, "artwork_url": COVER,
+                    "artist": "The Paper Trails", "year": year, "kind": kind, "artwork_url": artwork_url,
                 })
             })
             .to_vec();
-        hits.push(json!({
-            "result_type": "song", "featured": false, "id": "abcdefghijk",
-            "title": "First Light", "artist": "The Paper Trails", "album": "Room to breathe",
-            "album_id": "MPREb_example1", "duration": 192, "available": true, "artwork_url": COVER,
-        }));
+        hits.extend(
+            [
+                (
+                    "abcdefghijk",
+                    "First Light",
+                    "Room to breathe",
+                    "MPREb_example1",
+                    Some(192),
+                ),
+                (
+                    "bcdefghijkl",
+                    "Along the River",
+                    "Along the River",
+                    "MPREb_example3",
+                    Some(725),
+                ),
+                (
+                    "cdefghijklm",
+                    "A Place Beyond the Pine Trees (Live)",
+                    "A Place Beyond the Pine Trees",
+                    "MPREb_example6",
+                    Some(4029),
+                ),
+                (
+                    "defghijklmn",
+                    "Northbound",
+                    "Northbound",
+                    "MPREb_example7",
+                    None,
+                ),
+            ]
+            .map(|(id, title, album, album_id, duration)| {
+                json!({
+                    "result_type": "song", "featured": false, "id": id, "title": title,
+                    "artist": "The Paper Trails", "album": album, "album_id": album_id,
+                    "duration": duration, "available": true, "artwork_url": COVER,
+                })
+            }),
+        );
         let artist = json!({"id": "UCtest000000000000000001", "name": "The Paper Trails"});
         if scenario == "catalog-artist" {
             self.catalog.page = CatalogPage::Artist {
@@ -847,10 +981,40 @@ impl App {
         hits.insert(0, json!({
             "result_type": "artist", "featured": true, "id": artist["id"], "name": artist["name"],
         }));
-        self.catalog.results.insert(
-            None,
-            serde_json::from_value(json!(hits)).expect("fictional search results"),
+        hits.extend(
+            [
+                ("UCtest000000000000000002", "Sofia Mercer", Some(COVER)),
+                ("UCtest000000000000000003", "Northbound Quartet", None),
+                (
+                    "UCtest000000000000000004",
+                    "Maya & the Quiet Orchestra",
+                    None,
+                ),
+                ("UCtest000000000000000005", "Jonah Vale", Some(COVER)),
+                ("UCtest000000000000000006", "River Hall Ensemble", None),
+                ("UCtest000000000000000007", "Milo Grey", None),
+                ("UCtest000000000000000008", "Westline Trio", None),
+            ]
+            .map(|(id, name, artwork_url)| {
+                json!({
+                    "result_type": "artist", "featured": false, "id": id, "name": name,
+                    "artwork_url": artwork_url,
+                })
+            }),
         );
+        let search_hits: Vec<SearchHit> =
+            serde_json::from_value(json!(hits)).expect("fictional search results");
+        for kind in [SearchKind::Artists, SearchKind::Songs] {
+            self.catalog.results.insert(
+                Some(kind),
+                search_hits
+                    .iter()
+                    .filter(|hit| hit.item.kind() == kind)
+                    .cloned()
+                    .collect(),
+            );
+        }
+        self.catalog.results.insert(None, search_hits);
         if matches!(scenario, "catalog-album" | "catalog-editions") {
             let mut album = crate::example::album();
             album.title = releases[0].1.into();
@@ -889,10 +1053,18 @@ impl App {
                 position: self.catalog.position(focus),
             });
         }
-        self.catalog.media.complete(
-            COVER.into(),
-            Some(crate::artwork::example_cover().source().clone()),
-        );
+        if scenario != "catalog-results-loading" {
+            self.catalog.media.complete(
+                COVER.into(),
+                crate::artwork::ThumbnailShape::Square,
+                Some(crate::artwork::example_cover().source().clone()),
+            );
+            self.catalog.media.complete(
+                COVER.into(),
+                crate::artwork::ThumbnailShape::Circle,
+                Some(crate::artwork::example_portrait()),
+            );
+        }
     }
 }
 
@@ -901,11 +1073,50 @@ mod tests {
     use super::{
         artist_credit_id, song_album_id, CatalogAction, CatalogPage, CatalogPending, SEARCH_DELAY,
     };
-    use crate::app::App;
+    use crate::app::{App, Panel};
     use jacket_desktop::catalog::SearchKind;
     use jacket_desktop::youtube_music::AlbumPage;
     use jacket_desktop::CatalogEvent;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_featured_artist_puts_albums_ahead_of_higher_ranked_songs() {
+        let (mut app, _) = App::new();
+        app.catalog_snapshot("catalog-results");
+        let search_hits = app.catalog.results.get_mut(&None).unwrap();
+        let song = search_hits
+            .iter()
+            .position(|hit| hit.item.kind() == SearchKind::Songs)
+            .unwrap();
+        search_hits.swap(1, song);
+
+        assert_eq!(
+            app.catalog.result_order()[..2],
+            [SearchKind::Albums, SearchKind::Songs]
+        );
+
+        let search_hits = app.catalog.results.get_mut(&None).unwrap();
+        search_hits[0].featured = false;
+        assert_eq!(
+            app.catalog.result_order(),
+            [SearchKind::Artists, SearchKind::Songs, SearchKind::Albums]
+        );
+    }
+
+    #[test]
+    fn escape_dismisses_the_song_menu_without_leaving_search_results() {
+        let (mut app, _) = App::new();
+        app.loading = false;
+        app.catalog_snapshot("catalog-results");
+        let id = "abcdefghijk";
+        let _ = app.update_catalog(CatalogAction::ToggleSongMenu(id.into()));
+        assert!(app.catalog.song_menu_open(id));
+
+        let _ = app.update(crate::app::Message::Escape);
+        assert!(!app.catalog.song_menu_open(id));
+        assert_eq!(app.catalog.query, "The Paper Trails");
+        assert!(!app.catalog.hits().is_empty());
+    }
 
     #[test]
     fn album_browsing_previews_every_occurrence_before_opening_review() {
@@ -1174,5 +1385,84 @@ esac
         assert!(app.catalog.searched.is_empty());
         assert!(app.catalog.hits().is_empty());
         assert!(app.catalog.search_due.is_none());
+    }
+
+    #[test]
+    fn submitting_search_terms_skips_the_debounce() {
+        let (mut app, _) = App::new();
+        app.loading = false;
+        app.catalog_snapshot("catalog-results");
+        let _ = app.update_catalog(CatalogAction::Query("AC/DC: Live".into()));
+        assert!(app.catalog.search_due.is_some());
+        assert_eq!(app.catalog.searched, "The Paper Trails");
+
+        let _ = app.update_catalog(CatalogAction::Submit("AC/DC: Live".into()));
+        assert_eq!(app.catalog.searched, "AC/DC: Live");
+        assert!(app.catalog.search_due.is_none());
+    }
+
+    #[test]
+    fn a_shared_link_waits_for_submission_then_opens_the_scope_picker() {
+        let (mut app, _) = App::new();
+        app.loading = false;
+        app.catalog_snapshot("catalog-results");
+        let link = "https://music.youtube.com/watch?v=fixture0001&list=PLSample123456";
+        let _ = app.update_catalog(CatalogAction::Query("Paper Trails live".into()));
+        let _ = app.update_catalog(CatalogAction::Query(link.into()));
+        let _ = app.update_catalog(CatalogAction::Filter(Some(SearchKind::Albums)));
+        let _ = app.update_catalog(CatalogAction::Search);
+        assert!(app.catalog.search_due.is_none());
+        assert_eq!(app.catalog.searched, "The Paper Trails");
+        assert!(app.catalog.visible);
+        assert_ne!(app.url, link);
+
+        let _ = app.update_catalog(CatalogAction::Submit(link.into()));
+        assert_eq!(app.url, link);
+        assert_eq!(app.panel, Panel::Workspace);
+        assert!(!app.catalog.visible);
+        assert!(app.intake.is_none());
+    }
+
+    #[test]
+    fn unsupported_links_stay_in_the_search_field_with_an_error() {
+        let (mut app, _) = App::new();
+        app.loading = false;
+        app.catalog_snapshot("catalog-results");
+
+        for link in ["https://example.com/album", "youtu.be/fixture0001"] {
+            let _ = app.update_catalog(CatalogAction::Query(link.into()));
+            assert!(app.catalog.search_due.is_none());
+            assert!(app.catalog.error.is_none());
+
+            let _ = app.update_catalog(CatalogAction::Submit(link.into()));
+            assert_eq!(app.catalog.query, link);
+            assert!(app.catalog.visible);
+            assert!(app.catalog.error.is_some());
+            assert_eq!(app.catalog.searched, "The Paper Trails");
+        }
+
+        let _ = app.update_catalog(CatalogAction::ClearSearch);
+        assert!(app.catalog.query.is_empty());
+        assert!(app.catalog.error.is_none());
+    }
+
+    #[test]
+    fn a_link_submitted_during_search_does_not_apply_to_later_edits() {
+        let (mut app, _) = App::new();
+        app.catalog_snapshot("catalog-results");
+        app.catalog.pending = Some(CatalogPending::Search);
+        let link = "https://music.youtube.com/watch?v=fixture0001&list=PLSample123456";
+        let _ = app.update_catalog(CatalogAction::Query(link.into()));
+        let _ = app.update_catalog(CatalogAction::Submit(link.into()));
+        let submitted = app.catalog.queued_action.take().expect("queued submission");
+
+        app.catalog.pending = None;
+        app.loading = false;
+        let next_link = "https://music.youtube.com/watch?v=fixture0002&list=PLSample123456";
+        let _ = app.update_catalog(CatalogAction::Query(next_link.into()));
+        let _ = app.update_catalog(submitted);
+        assert_eq!(app.catalog.query, next_link);
+        assert_ne!(app.url, next_link);
+        assert!(app.catalog.visible);
     }
 }

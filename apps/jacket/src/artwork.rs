@@ -6,6 +6,14 @@ use jacket_desktop::Desktop;
 pub use raster::{normalized_scale, Raster};
 use std::sync::OnceLock;
 
+const EXAMPLE_COVER: &[u8] = include_bytes!("../../../assets/examples/room-to-breathe.png");
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum ThumbnailShape {
+    Square,
+    Circle,
+}
+
 /// The review's source image, independent of whether artwork will be exported.
 /// An explicit imported asset never falls back to an unrelated source cover.
 pub fn source_url(review: &Review) -> Option<&str> {
@@ -34,12 +42,16 @@ pub fn preview_url(plan: &ExportPlan) -> Option<&str> {
 pub fn example_cover() -> Raster {
     static COVER: OnceLock<Raster> = OnceLock::new();
     COVER
+        .get_or_init(|| Raster::decode(EXAMPLE_COVER, 1.0).expect("compiled example cover"))
+        .clone()
+}
+
+pub fn example_portrait() -> iced::widget::image::Handle {
+    static PORTRAIT: OnceLock<iced::widget::image::Handle> = OnceLock::new();
+    PORTRAIT
         .get_or_init(|| {
-            Raster::decode(
-                include_bytes!("../../../assets/examples/room-to-breathe.png"),
-                1.0,
-            )
-            .expect("compiled example cover")
+            raster::thumbnail(EXAMPLE_COVER, ThumbnailShape::Circle)
+                .expect("compiled example portrait")
         })
         .clone()
 }
@@ -51,8 +63,12 @@ pub fn preview(desktop: &Desktop, url: &str, scale: f32) -> Result<Raster, Strin
     Raster::decode(&bytes, scale)
 }
 
-pub fn thumbnail(desktop: &Desktop, url: &str) -> Result<iced::widget::image::Handle, String> {
-    raster::thumbnail(&desktop.artwork_thumbnail(url)?)
+pub fn thumbnail(
+    desktop: &Desktop,
+    url: &str,
+    shape: ThumbnailShape,
+) -> Result<iced::widget::image::Handle, String> {
+    raster::thumbnail(&desktop.artwork_thumbnail(url)?, shape)
 }
 
 #[cfg(test)]

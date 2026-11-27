@@ -81,7 +81,11 @@ pub enum Message {
     RetryStartup,
     Booted(Result<Box<Boot>, String>),
     Catalog(CatalogAction),
-    CatalogThumbnail(String, Option<iced::widget::image::Handle>),
+    CatalogThumbnail {
+        url: String,
+        shape: crate::artwork::ThumbnailShape,
+        image: Option<iced::widget::image::Handle>,
+    },
     Url(String),
     Pasted(String),
     Intent(SourceIntent),

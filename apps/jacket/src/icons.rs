@@ -8,6 +8,7 @@ pub enum Icon {
     Settings,
     Palette,
     Link,
+    Search,
     ArrowRight,
     Music,
     Folder,
@@ -17,6 +18,7 @@ pub enum Icon {
     Check,
     Edit,
     Info,
+    MoreVertical,
 }
 
 pub fn view(icon: Icon, color: Color, size: f32) -> Element<'static, Message> {
@@ -30,6 +32,7 @@ pub fn view(icon: Icon, color: Color, size: f32) -> Element<'static, Message> {
         Icon::Link => {
             r#"<path d="m10 13 4-4m-6 6-2 2a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m4 2 2-2a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0" transform="translate(2 0) scale(.9)"/>"#
         }
+        Icon::Search => r#"<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>"#,
         Icon::ArrowRight => r#"<path d="M4 12h16m-6-6 6 6-6 6"/>"#,
         Icon::Music => {
             r#"<path d="M9 18V5l11-2v13M9 8l11-2"/><ellipse cx="6" cy="18" rx="3" ry="2.5"/><ellipse cx="17" cy="16" rx="3" ry="2.5"/>"#
@@ -40,6 +43,7 @@ pub fn view(icon: Icon, color: Color, size: f32) -> Element<'static, Message> {
         Icon::Close => r#"<path d="m6 6 12 12M18 6 6 18"/>"#,
         Icon::Check => r#"<path d="m5 12 4 4L19 6"/>"#,
         Icon::Info => r#"<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v.1"/>"#,
+        Icon::MoreVertical => r#"<path d="M12 5v.01m0 7v.01m0 7v.01" stroke-width="2.8"/>"#,
         Icon::Edit => r#"<path d="m16 3 5 5-12 12-6 1 1-6Z"/><path d="m14 5 5 5"/>"#,
     };
     let color = format!(

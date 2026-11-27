@@ -237,7 +237,9 @@ impl App {
             }
             Message::Tick => return self.tick(),
             Message::Catalog(action) => return self.update_catalog(action),
-            Message::CatalogThumbnail(url, image) => self.catalog.media.complete(url, image),
+            Message::CatalogThumbnail { url, shape, image } => {
+                self.catalog.media.complete(url, shape, image);
+            }
             Message::ThemeShortcut(preset) if self.panel == Panel::Appearance => {
                 return self.update(Message::ThemePreset(preset))
             }
@@ -556,7 +558,8 @@ impl App {
                         ))
                         || panel == self.panel) =>
             {
-                self.panel = panel
+                self.catalog.dismiss_song_menu();
+                self.panel = panel;
             }
             Message::ClosePanel => {
                 if self.dialog_open {
@@ -1054,8 +1057,19 @@ impl App {
                 return iced::clipboard::read()
                     .map(|value| Message::Pasted(value.unwrap_or_default()))
             }
-            Message::FocusNext => return iced::widget::operation::focus_next(),
-            Message::FocusPrevious => return iced::widget::operation::focus_previous(),
+            Message::FocusNext | Message::FocusPrevious => {
+                self.catalog.dismiss_song_menu();
+                let focus = if matches!(message, Message::FocusNext) {
+                    iced::widget::operation::focus_next()
+                } else {
+                    iced::widget::operation::focus_previous()
+                };
+                return if self.catalog.visible && self.panel == Panel::Workspace {
+                    focus.chain(super::catalog_focus::reveal())
+                } else {
+                    focus
+                };
+            }
             Message::DefaultFormat(format) if !self.close_after_job => {
                 self.appearance.default_format = format.into();
                 return self.save_appearance();
@@ -1410,6 +1424,7 @@ impl App {
             }
             Message::Opened(Err(error)) => self.error = Some(error),
             Message::FocusSource if !self.busy() && self.panel == Panel::Workspace => {
+                self.catalog.dismiss_song_menu();
                 self.catalog.visible = false;
                 return iced::widget::operation::focus("source-url");
             }
@@ -1424,6 +1439,8 @@ impl App {
                 }
                 if self.panel != Panel::Workspace {
                     return self.update(Message::ClosePanel);
+                } else if self.catalog.dismiss_song_menu() {
+                    return Task::none();
                 } else if self.catalog.pending.is_some() {
                     return self.update_catalog(super::CatalogAction::Cancel);
                 } else if self.job.is_some() {

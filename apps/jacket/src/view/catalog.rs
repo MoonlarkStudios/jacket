@@ -1,28 +1,54 @@
-use super::{catalog_search, components};
+use super::{catalog_search, components, focus_button};
 use crate::app::{
     artist_credit_id, edition_id, App, CatalogAction as Action, CatalogPending, Message,
+    CATALOG_SCROLL_ID,
 };
 use crate::icons::{self, Icon};
-use crate::style;
+use crate::style::{self, CatalogSurface};
 use audio_engine::Inspection;
-use iced::widget::{button, column, container, row, rule, scrollable, space, text, text_input};
-use iced::{Alignment, Element, Length};
+use iced::widget::{
+    button, column, container, responsive, row, rule, scrollable, space, stack, text, text_input,
+    tooltip, Text,
+};
+use iced::{Alignment, Element, Length, Padding};
+use jacket_core::SourceLink;
 use jacket_desktop::youtube_music::AlbumPage;
+use std::time::Duration;
 
-const CONTENT_WIDTH: f32 = 910.0;
+const BROWSE_WIDTH: f32 = 1280.0;
+const ALBUM_PAGE_WIDTH: f32 = 910.0;
 
 pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
     let p = app.presentation();
     let catalog = &app.catalog;
+    let album = catalog.album();
+    let content_width = if album.is_some() {
+        ALBUM_PAGE_WIDTH
+    } else {
+        BROWSE_WIDTH
+    };
     let edge = if compact { 18 } else { 32 };
+    let compact_search = compact && catalog.search_home();
+    let header_padding = [if compact_search { 12 } else { 20 }, edge];
+    let body_padding = [if compact_search { 14 } else { 18 }, edge];
     let mut layout = column![].height(Length::Fill);
     if catalog.search_home() {
-        layout = layout.push(page_header(app, search_header(app), edge));
-    } else if let Some(album) = catalog.album() {
-        layout = layout.push(page_header(app, album_header(app, album, compact), edge));
+        layout = layout.push(page_header(
+            app,
+            search_header(app, compact_search),
+            header_padding,
+            content_width,
+        ));
+    } else if let Some(album) = album {
+        layout = layout.push(page_header(
+            app,
+            album_header(app, album, compact),
+            header_padding,
+            content_width,
+        ));
     }
 
-    let body = if let Some(album) = catalog.album() {
+    let body = if let Some(album) = album {
         let tracks = album_tracks(app, &album.inspection);
         if catalog.edition_shelf().is_some_and(|shelf| shelf.open) {
             column![other_editions(app), tracks].spacing(24).into()
@@ -30,31 +56,36 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
             tracks
         }
     } else {
-        catalog_search::view(app, compact)
+        responsive(move |size| catalog_search::view(app, compact, size.width))
+            .height(Length::Shrink)
+            .into()
     };
     layout = layout.push(
         scrollable(
             container(
                 container(body)
-                    .padding([18, edge])
+                    .padding(body_padding)
                     .width(Length::Fill)
-                    .max_width(CONTENT_WIDTH),
+                    .max_width(content_width),
             )
             .center_x(Length::Fill),
         )
-        .id("album-browser")
+        .id(CATALOG_SCROLL_ID)
         .on_scroll(|viewport| Message::Catalog(Action::Scrolled(viewport.absolute_offset().y)))
         .height(Length::Fill)
         .width(Length::Fill)
         .style(p.scrollbar())
         .direction(style::scroll_direction()),
     );
-    if catalog.error.is_some() || catalog.pending.is_some() || catalog.confirm_replace {
+    if (catalog.error.is_some() && !(catalog.search_home() && catalog.link_input()))
+        || catalog.pending.is_some()
+        || catalog.confirm_replace
+    {
         layout = layout.push(rule::horizontal(1).style(p.line())).push(
             container(
                 container(status(app))
                     .width(Length::Fill)
-                    .max_width(CONTENT_WIDTH),
+                    .max_width(content_width),
             )
             .padding([10, edge])
             .center_x(Length::Fill)
@@ -64,14 +95,19 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
     layout.into()
 }
 
-fn page_header<'a>(app: &'a App, content: Element<'a, Message>, edge: u16) -> Element<'a, Message> {
+fn page_header<'a>(
+    app: &'a App,
+    content: Element<'a, Message>,
+    padding: [u16; 2],
+    content_width: f32,
+) -> Element<'a, Message> {
     let p = app.presentation();
     column![
         container(
             container(content)
-                .padding([20, edge])
+                .padding(padding)
                 .width(Length::Fill)
-                .max_width(CONTENT_WIDTH)
+                .max_width(content_width)
         )
         .center_x(Length::Fill),
         rule::horizontal(1).style(p.line()),
@@ -79,72 +115,128 @@ fn page_header<'a>(app: &'a App, content: Element<'a, Message>, edge: u16) -> El
     .into()
 }
 
-fn search_header(app: &App) -> Element<'_, Message> {
+fn search_header(app: &App, compact: bool) -> Element<'_, Message> {
+    let catalog = &app.catalog;
+    let mut heading = row![text("Find music")
+        .size(27)
+        .font(style::semibold())
+        .width(Length::Fill)]
+    .spacing(10)
+    .align_y(Alignment::Center);
+    if app.review.is_some() || app.result.is_some() {
+        heading = heading.push(action(
+            app,
+            "return-to-review",
+            "Back to review",
+            Action::ReturnToReview,
+            !app.busy(),
+            false,
+        ));
+    }
+
+    let mut header = column![heading, search_field(app)].spacing(if compact { 10 } else { 14 });
+    if let Some(error) = catalog.error.as_deref().filter(|_| catalog.link_input()) {
+        header = header.push(text(error).size(13).color(app.presentation().colors.danger));
+    }
+    header.push(catalog_search::filters(app)).into()
+}
+
+fn search_field(app: &App) -> Element<'_, Message> {
+    const INSET: f32 = 6.0;
+    const GAP: f32 = 4.0;
+    const CLEAR_WIDTH: f32 = 32.0;
+    const OPEN_WIDTH: f32 = 104.0;
+
     let p = app.presentation();
     let catalog = &app.catalog;
+    let link_input = catalog.link_input();
+    let show_open = link_input && SourceLink::parse(&catalog.query).is_ok();
+    let show_clear = !catalog.query.is_empty();
     let editing = !catalog.confirm_replace
         && !matches!(
             catalog.pending,
             Some(CatalogPending::Artist | CatalogPending::Album | CatalogPending::Song)
         );
-    let can_replace = matches!(catalog.pending, Some(CatalogPending::Search))
-        && catalog.query.trim() != catalog.searched;
-    let can_search = (!app.busy() || can_replace)
-        && editing
-        && app.desktop.is_some()
-        && !catalog.query.trim().is_empty();
-    let search = text_input("Artist, album, or song", &catalog.query)
+    let searching = matches!(catalog.pending, Some(CatalogPending::Search));
+    let search_terms = catalog.search_terms();
+    let can_submit = editing
+        && if link_input {
+            !app.busy() || searching
+        } else {
+            app.desktop.is_some()
+                && search_terms
+                    .is_some_and(|query| !app.busy() || (searching && query != catalog.searched))
+        };
+    let submit = can_submit.then(|| Message::Catalog(Action::Submit(catalog.query.clone())));
+
+    let mut controls = row![].spacing(GAP).align_y(Alignment::Center);
+    let mut right = 13.0;
+    if show_open {
+        controls = controls.push(focus_button::wrap_inset(
+            "open-search-link",
+            button(text("Open link ↵").size(13).width(Length::Fill).center())
+                .width(OPEN_WIDTH)
+                .padding([8, 6])
+                .style(p.primary()),
+            submit.clone(),
+            p.colors.accent,
+            p.colors.background,
+        ));
+        right += OPEN_WIDTH + GAP;
+    }
+    if show_clear {
+        let clear = focus_button::wrap_inset(
+            "clear-music-search",
+            button(icons::view(Icon::Close, p.colors.text_muted, 16.0))
+                .width(CLEAR_WIDTH)
+                .padding(8)
+                .style(p.quiet()),
+            editing.then_some(Message::Catalog(Action::ClearSearch)),
+            p.colors.accent,
+            p.colors.background,
+        );
+        controls = controls.push(
+            tooltip(
+                clear,
+                text("Clear search").size(12),
+                tooltip::Position::Bottom,
+            )
+            .delay(Duration::from_millis(500)),
+        );
+        right += CLEAR_WIDTH;
+    }
+    let input = text_input("Search music or paste a YouTube link", &catalog.query)
         .id("album-search")
         .on_input_maybe(editing.then_some(|query| Message::Catalog(Action::Query(query))))
-        .on_submit_maybe(can_search.then_some(Message::Catalog(Action::Search)))
+        .on_submit_maybe(submit)
         .size(16)
-        .padding([11, 13])
+        .padding(Padding {
+            top: 11.0,
+            bottom: 11.0,
+            left: 38.0,
+            right,
+        })
         .style(p.input());
-    let (id, label, on_press) = if app.review.is_some() || app.result.is_some() {
-        ("return-to-review", "Back to review", Action::ReturnToReview)
-    } else {
-        ("open-link", "Paste a link", Action::PasteLink)
-    };
-
-    column![
+    let adornments = container(
         row![
-            text("Find music")
-                .size(27)
-                .font(style::semibold())
-                .width(Length::Fill),
-            action(app, id, label, on_press, !app.busy(), false),
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center),
-        row![
-            search,
-            if catalog.query.is_empty() {
-                space().into()
-            } else {
-                action(
-                    app,
-                    "clear-music-search",
-                    "Clear",
-                    Action::ClearSearch,
-                    editing,
-                    false,
-                )
-            },
-            action(
-                app,
-                "search-albums",
-                "Search",
-                Action::Search,
-                can_search,
-                true
+            icons::view(
+                if link_input { Icon::Link } else { Icon::Search },
+                p.colors.text_muted,
+                17.0,
             ),
+            space::horizontal(),
+            controls,
         ]
-        .spacing(8)
         .align_y(Alignment::Center),
-        catalog_search::filters(app),
-    ]
-    .spacing(14)
-    .into()
+    )
+    .padding(Padding {
+        left: 13.0,
+        right: INSET,
+        ..Padding::ZERO
+    })
+    .center_y(Length::Fill);
+
+    stack![input, adornments].into()
 }
 
 fn album_header<'a>(app: &'a App, page: &'a AlbumPage, compact: bool) -> Element<'a, Message> {
@@ -168,10 +260,7 @@ fn album_header<'a>(app: &'a App, page: &'a AlbumPage, compact: bool) -> Element
     {
         details.push(components::duration(seconds));
     }
-    let cover = album
-        .artwork_url
-        .as_deref()
-        .and_then(|url| app.catalog.media.get(url));
+    let cover = app.catalog.media.cover(album.artwork_url.as_deref());
 
     column![
         action(
@@ -291,14 +380,11 @@ fn other_editions(app: &App) -> Element<'_, Message> {
                     format!("{count} tracks")
                 });
             }
-            let cover = edition
-                .artwork_url
-                .as_deref()
-                .and_then(|url| app.catalog.media.get(url));
+            let cover = app.catalog.media.cover(edition.artwork_url.as_deref());
             card(
                 app,
                 edition_id(&edition.id),
-                edition.title.clone(),
+                text(&edition.title).size(15),
                 details.join(" · "),
                 Some(catalog_search::thumbnail(app, cover, None, 48.0)),
                 Action::OpenEdition(edition.id.clone()),
@@ -355,14 +441,18 @@ fn status(app: &App) -> Element<'_, Message> {
     let p = app.presentation();
     let catalog = &app.catalog;
     let mut footer = column![].spacing(9);
-    if let Some(error) = &catalog.error {
+    if let Some(error) = catalog
+        .error
+        .as_ref()
+        .filter(|_| !(catalog.search_home() && catalog.link_input()))
+    {
         let mut failure = row![text(error)
             .size(13)
             .color(p.colors.danger)
             .width(Length::Fill)]
         .spacing(10)
         .align_y(Alignment::Center);
-        if catalog.search_home() && !catalog.query.trim().is_empty() && app.desktop.is_some() {
+        if catalog.search_home() && catalog.search_terms().is_some() && app.desktop.is_some() {
             failure = failure.push(action(
                 app,
                 "search-in-browser",
@@ -441,13 +531,13 @@ fn status(app: &App) -> Element<'_, Message> {
 pub(super) fn card<'a>(
     app: &'a App,
     id: String,
-    title: String,
+    title: Text<'a>,
     subtitle: String,
     thumbnail: Option<Element<'a, Message>>,
     select: Action,
 ) -> Element<'a, Message> {
     let p = app.presentation();
-    let mut labels = column![text(title).size(15).font(style::semibold())]
+    let mut labels = column![title.font(style::semibold())]
         .spacing(4)
         .width(Length::Fill);
     if !subtitle.is_empty() {
@@ -457,7 +547,7 @@ pub(super) fn card<'a>(
     if let Some(thumbnail) = thumbnail {
         item = item.push(thumbnail);
     }
-    super::focus_button::wrap(
+    super::focus_button::wrap_inset(
         id,
         button(
             item.push(labels)
@@ -465,9 +555,10 @@ pub(super) fn card<'a>(
         )
         .width(Length::Fill)
         .padding([9, 12])
-        .style(p.secondary()),
+        .style(p.catalog_result(CatalogSurface::Card)),
         (!app.busy() && !app.catalog.confirm_replace).then_some(Message::Catalog(select)),
         p.colors.accent,
+        p.colors.background,
     )
 }
 
