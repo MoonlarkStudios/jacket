@@ -7,6 +7,7 @@ mod collection_tools;
 mod components;
 mod cover_controls;
 mod destination;
+mod downloads;
 pub(crate) mod focus_button;
 mod opening;
 mod options;

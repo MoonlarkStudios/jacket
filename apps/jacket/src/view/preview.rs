@@ -190,7 +190,7 @@ pub fn view(app: &App, compact: bool) -> Element<'_, Message> {
     );
     if album.is_some_and(|album| album.kept() > 0) {
         body = body.push(
-            text("Kept tracks retain their format, tags, and artwork. Use Save As… to apply your settings to every selected track.")
+            text("Kept tracks retain their format, tags, and artwork. Use Queue As… to apply your settings to every selected track.")
                 .size(12)
                 .color(p.colors.text_muted),
         );

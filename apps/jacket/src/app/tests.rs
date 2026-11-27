@@ -1566,7 +1566,7 @@ fn a_catalog_album_replaces_a_review_only_after_confirmation() {
     let _ = app.update(Message::Catalog(CatalogAction::Browse));
     let _ = app.update(Message::Catalog(CatalogAction::Review));
     let _ = app.update(Message::Catalog(CatalogAction::ConfirmReview));
-    assert!(!app.catalog.visible);
+    assert!(app.reviewing_catalog_album());
     let review = app.review.as_ref().unwrap();
     assert_ne!(review.identity(), identity);
     let restored = Review::from_draft(review.draft()).expect("a catalog review can be reopened");
@@ -1579,4 +1579,86 @@ fn a_catalog_album_replaces_a_review_only_after_confirmation() {
     );
     assert_eq!(plan.tracks[0].metadata.release_year, Some(2026));
     assert!(audio_engine::preview_export(&plan).is_ok());
+}
+
+#[test]
+fn queue_acceptance_leaves_the_album_and_its_browsing_history_in_place() {
+    use super::CatalogAction;
+    use audio_engine::AuthOptions;
+    use jacket_desktop::DownloadDestination;
+
+    let (root, desktop) = desktop();
+    let mut app = app(desktop.clone());
+    app.catalog_snapshot("catalog-album");
+    let release = app.catalog.album().unwrap().id.clone();
+    let _ = app.update(Message::Catalog(CatalogAction::Review));
+    app.save_pending = 0;
+    let review = app.review.as_ref().unwrap();
+    let identity = review.identity();
+    let item = desktop
+        .queue_download(
+            review.plan(AuthOptions::default()).unwrap(),
+            DownloadDestination::Picked(root.path().join("album")),
+            identity.clone(),
+        )
+        .unwrap();
+    app.track_scroll = 52.0;
+    let _ = app.update(Message::DownloadQueued(identity, Ok(Box::new(item))));
+    assert!(app.review.is_none());
+    assert_eq!(app.catalog.album().unwrap().id, release);
+    assert_eq!(app.track_scroll, 52.0);
+    assert_eq!(app.downloads.outstanding(), 1);
+    assert!(app.downloads.notice().is_some());
+
+    let _ = app.update(Message::Catalog(CatalogAction::Back));
+    assert!(app.catalog.search_home());
+    assert_eq!(app.catalog.query, "The Paper Trails");
+}
+
+#[test]
+fn downloads_keyboard_shortcuts_cannot_submit_the_underlying_review() {
+    use super::{CatalogAction, DownloadAction};
+    let (_root, desktop) = desktop();
+    let mut app = app(desktop);
+    app.catalog_snapshot("catalog-album");
+    let _ = app.update(Message::Catalog(CatalogAction::Review));
+    app.save_pending = 0;
+    assert!(app.can_export());
+    let _ = app.update(Message::Downloads(DownloadAction::Toggle));
+    for message in [
+        Message::PrimaryAction,
+        Message::Save,
+        Message::SaveAs,
+        Message::Preview,
+    ] {
+        assert_eq!(app.update(message).units(), 0);
+    }
+    assert!(!app.dialog_open);
+    let _ = app.update(Message::Catalog(CatalogAction::FocusSearch));
+    assert!(!app.downloads.is_open());
+    assert!(app.catalog.search_home());
+    assert!(app.review.is_some());
+}
+
+#[test]
+fn downloads_dropdown_and_page_preserve_the_current_album_review() {
+    use super::{CatalogAction, DownloadAction, DownloadSurface};
+    let (_root, desktop) = desktop();
+    let mut app = app(desktop);
+    app.catalog_snapshot("catalog-album");
+    let _ = app.update(Message::Catalog(CatalogAction::Review));
+    let identity = app.review.as_ref().unwrap().identity();
+    app.track_scroll = 52.0;
+
+    let _ = app.update(Message::Downloads(DownloadAction::Toggle));
+    assert_eq!(app.downloads.surface, DownloadSurface::Dropdown);
+    let _ = app.update(Message::Downloads(DownloadAction::OpenPage));
+    assert_eq!(app.downloads.surface, DownloadSurface::Page);
+    let _ = app.update(Message::PrimaryAction);
+    assert!(!app.dialog_open);
+    let _ = app.update(Message::Escape);
+    assert_eq!(app.downloads.surface, DownloadSurface::Closed);
+    assert!(app.reviewing_catalog_album());
+    assert_eq!(app.review.as_ref().unwrap().identity(), identity);
+    assert_eq!(app.track_scroll, 52.0);
 }

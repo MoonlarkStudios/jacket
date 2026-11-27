@@ -5,7 +5,6 @@ use crate::app::{
 };
 use crate::icons::{self, Icon};
 use crate::style::{self, CatalogSurface};
-use audio_engine::Inspection;
 use iced::widget::{
     button, column, container, responsive, row, rule, scrollable, space, stack, text, text_input,
     tooltip, Text,
@@ -16,17 +15,15 @@ use jacket_desktop::youtube_music::AlbumPage;
 use std::time::Duration;
 
 const BROWSE_WIDTH: f32 = 1280.0;
-const ALBUM_PAGE_WIDTH: f32 = 910.0;
+pub(super) const ALBUM_PAGE_WIDTH: f32 = 910.0;
 
 pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
     let p = app.presentation();
     let catalog = &app.catalog;
-    let album = catalog.album();
-    let content_width = if album.is_some() {
-        ALBUM_PAGE_WIDTH
-    } else {
-        BROWSE_WIDTH
-    };
+    if let Some(album) = catalog.album() {
+        return album_view(app, album, compact);
+    }
+    let content_width = BROWSE_WIDTH;
     let edge = if compact { 18 } else { 32 };
     let compact_search = compact && catalog.search_home();
     let header_padding = [if compact_search { 12 } else { 20 }, edge];
@@ -39,27 +36,11 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
             header_padding,
             content_width,
         ));
-    } else if let Some(album) = album {
-        layout = layout.push(page_header(
-            app,
-            album_header(app, album, compact),
-            header_padding,
-            content_width,
-        ));
     }
-
-    let body = if let Some(album) = album {
-        let tracks = album_tracks(app, &album.inspection);
-        if catalog.edition_shelf().is_some_and(|shelf| shelf.open) {
-            column![other_editions(app), tracks].spacing(24).into()
-        } else {
-            tracks
-        }
-    } else {
+    let body: Element<'_, Message> =
         responsive(move |size| catalog_search::view(app, compact, size.width))
             .height(Length::Shrink)
-            .into()
-    };
+            .into();
     layout = layout.push(
         scrollable(
             container(
@@ -93,6 +74,85 @@ pub(super) fn view(app: &App, compact: bool) -> Element<'_, Message> {
         );
     }
     layout.into()
+}
+
+fn album_view<'a>(app: &'a App, album: &'a AlbumPage, compact: bool) -> Element<'a, Message> {
+    let p = app.presentation();
+    let edge = if compact { 18 } else { 26 };
+    let reviewing = app.reviewing_catalog_album();
+    let compact_editor = compact && app.panel == crate::app::Panel::CollectionEditor;
+    let heading = if compact_editor {
+        text(album_title(app, album))
+            .size(14)
+            .font(style::semibold())
+            .into()
+    } else {
+        album_header(app, album, compact)
+    };
+    let header = page_header(
+        app,
+        heading,
+        [
+            if compact_editor {
+                8
+            } else if compact {
+                12
+            } else {
+                16
+            },
+            edge,
+        ],
+        ALBUM_PAGE_WIDTH,
+    );
+    let mut content = column![]
+        .spacing(8)
+        .height(Length::Fill)
+        .width(Length::Fill);
+    if !reviewing {
+        if app.catalog.edition_shelf().is_some_and(|shelf| shelf.open) {
+            content = content.push(
+                container(
+                    scrollable(other_editions(app))
+                        .height(Length::Shrink)
+                        .style(p.scrollbar()),
+                )
+                .max_height(if compact { 130 } else { 180 }),
+            );
+        }
+        if let Some(warning) = album.inspection.warnings.first() {
+            content = content.push(text(warning).size(12).color(p.colors.text_muted));
+        }
+    }
+    let tracks = if reviewing {
+        crate::track_list::view(app, compact)
+    } else {
+        crate::track_list::album_preview(app, &album.inspection, compact)
+    };
+    let body = container(
+        container(content.push(tracks))
+            .padding([8, edge])
+            .max_width(ALBUM_PAGE_WIDTH)
+            .width(Length::Fill),
+    )
+    .center_x(Length::Fill)
+    .height(Length::Fill);
+    let mut view = column![
+        header,
+        super::workspace::with_review_tools(app, compact, body.into())
+    ]
+    .height(Length::Fill);
+    if reviewing {
+        view = view.push(super::workspace::review_footer(app, compact));
+    }
+    if app.catalog.error.is_some() || app.catalog.pending.is_some() || app.catalog.confirm_replace {
+        view = view.push(rule::horizontal(1).style(p.line())).push(
+            container(status(app))
+                .padding([10, edge])
+                .width(Length::Fill)
+                .style(move |_| p.surface(p.colors.panel)),
+        );
+    }
+    view.into()
 }
 
 fn page_header<'a>(
@@ -244,7 +304,8 @@ fn album_header<'a>(app: &'a App, page: &'a AlbumPage, compact: bool) -> Element
     let album = &page.inspection;
     let count = album.tracks.len();
     let mut details = Vec::new();
-    if let Some(year) = album.album_release_year {
+    let review = album_review(app);
+    if let Some(year) = review.map_or(album.album_release_year, |review| review.preferences.year) {
         details.push(year.to_string());
     }
     details.push(if count == 1 {
@@ -260,52 +321,112 @@ fn album_header<'a>(app: &'a App, page: &'a AlbumPage, compact: bool) -> Element
     {
         details.push(components::duration(seconds));
     }
-    let cover = app.catalog.media.cover(album.artwork_url.as_deref());
-
-    column![
-        action(
+    let reviewing = app.reviewing_catalog_album();
+    let idle =
+        app.panel == crate::app::Panel::Workspace && !app.busy() && !app.catalog.confirm_replace;
+    let cover_size = if compact { 106.0 } else { 144.0 };
+    let cover = if reviewing && (app.cover.is_some() || app.source_cover.is_some()) {
+        components::cover(app, cover_size, components::CoverContext::Source)
+    } else {
+        catalog_search::thumbnail(
             app,
-            "album-back",
-            app.catalog.back_label(),
-            Action::Back,
-            !app.busy() && !app.catalog.confirm_replace,
-            false,
-        ),
+            app.catalog.media.cover(album.artwork_url.as_deref()),
+            None,
+            cover_size,
+        )
+    };
+    let actions: Element<'_, Message> = if reviewing {
+        let mut actions = row![
+            focus_button::wrap(
+                "collection-edit-album",
+                button("Edit shared tags")
+                    .padding([7, 10])
+                    .style(p.secondary()),
+                idle.then_some(Message::OpenEditor(crate::editor::Kind::Album)),
+                p.colors.accent,
+            ),
+            super::cover_controls::edit_button(app),
+        ]
+        .spacing(7);
+        if let Some(review) = &app.review {
+            actions = actions.push(focus_button::wrap(
+                "collection-tag-mode",
+                button(
+                    if review.preferences.mode == audio_engine::CollectionMode::Album {
+                        "Use individual tags"
+                    } else {
+                        "Use shared album tags"
+                    },
+                )
+                .padding([7, 10])
+                .style(p.quiet()),
+                idle.then_some(Message::Mode(
+                    if review.preferences.mode == audio_engine::CollectionMode::Album {
+                        crate::settings::ModeChoice::Collection
+                    } else {
+                        crate::settings::ModeChoice::Album
+                    },
+                )),
+                p.colors.accent,
+            ));
+        }
+        if !album.warnings.is_empty() {
+            actions = actions.push(
+                button("Source notes")
+                    .padding([7, 10])
+                    .style(p.quiet())
+                    .on_press_maybe(
+                        idle.then_some(Message::OpenPanel(crate::app::Panel::SourceNotes)),
+                    ),
+            );
+        }
+        actions.wrap().vertical_spacing(6).into()
+    } else {
+        let mut actions = row![
+            action(
+                app,
+                "review-album",
+                "Review & queue",
+                Action::Review,
+                idle,
+                true
+            ),
+            action(
+                app,
+                "toggle-editions",
+                if app.catalog.edition_shelf().is_some_and(|shelf| shelf.open) {
+                    "Hide editions"
+                } else {
+                    "Other editions"
+                },
+                Action::ToggleEditions,
+                idle,
+                false,
+            ),
+        ]
+        .spacing(8);
+        if let Some(status) = app.downloads.status_for(&album.source_url) {
+            actions = actions.push(text(status).size(12).color(p.colors.accent));
+        }
+        actions
+            .align_y(Alignment::Center)
+            .wrap()
+            .vertical_spacing(6)
+            .into()
+    };
+    column![
+        navigation(app, "album-back", idle, reviewing),
         row![
-            catalog_search::thumbnail(app, cover, None, if compact { 112.0 } else { 164.0 }),
+            cover,
             column![
-                text(&album.title)
+                text(album_title(app, page))
                     .size(if compact { 25 } else { 36 })
                     .font(style::semibold()),
                 album_artist_credits(app, page),
                 text(details.join("  ·  "))
                     .size(13)
                     .color(p.colors.text_muted),
-                row![
-                    action(
-                        app,
-                        "review-album",
-                        "Review download",
-                        Action::Review,
-                        !app.busy() && !app.catalog.confirm_replace,
-                        true,
-                    ),
-                    action(
-                        app,
-                        "toggle-editions",
-                        if app.catalog.edition_shelf().is_some_and(|shelf| shelf.open) {
-                            "Hide editions"
-                        } else {
-                            "Other editions"
-                        },
-                        Action::ToggleEditions,
-                        !app.busy() && !app.catalog.confirm_replace,
-                        false,
-                    ),
-                ]
-                .spacing(8)
-                .wrap()
-                .vertical_spacing(6),
+                actions,
             ]
             .spacing(8)
             .width(Length::Fill),
@@ -318,6 +439,20 @@ fn album_header<'a>(app: &'a App, page: &'a AlbumPage, compact: bool) -> Element
 }
 
 fn album_artist_credits<'a>(app: &'a App, page: &'a AlbumPage) -> Element<'a, Message> {
+    if let Some(review) = album_review(app) {
+        return text(&review.preferences.album_artist).size(16).into();
+    }
+    if app.reviewing_catalog_album() {
+        return text(
+            page.artists
+                .iter()
+                .map(|artist| artist.name.as_str())
+                .collect::<Vec<_>>()
+                .join(" & "),
+        )
+        .size(16)
+        .into();
+    }
     if page.artists.is_empty() {
         let artist = page
             .inspection
@@ -351,6 +486,48 @@ fn album_artist_credits<'a>(app: &'a App, page: &'a AlbumPage) -> Element<'a, Me
         }
     }
     credits.wrap().vertical_spacing(2).into()
+}
+
+fn album_review(app: &App) -> Option<&jacket_core::Review> {
+    app.review.as_ref().filter(|review| {
+        app.reviewing_catalog_album()
+            && review.preferences.mode == audio_engine::CollectionMode::Album
+    })
+}
+
+fn album_title<'a>(app: &'a App, page: &'a AlbumPage) -> &'a str {
+    album_review(app)
+        .map(|review| review.preferences.album_title.as_str())
+        .filter(|title| !title.trim().is_empty())
+        .unwrap_or(&page.inspection.title)
+}
+
+pub(super) fn navigation(
+    app: &App,
+    back_id: &'static str,
+    enabled: bool,
+    reviewing: bool,
+) -> Element<'static, Message> {
+    let mut actions = row![action(
+        app,
+        back_id,
+        app.catalog.back_label(),
+        Action::Back,
+        enabled,
+        false
+    )];
+    if !reviewing && !app.catalog.confirm_replace && (app.review.is_some() || app.result.is_some())
+    {
+        actions = actions.push(space::horizontal()).push(action(
+            app,
+            "return-to-review",
+            "Back to review",
+            Action::ReturnToReview,
+            enabled,
+            false,
+        ));
+    }
+    actions.into()
 }
 
 fn other_editions(app: &App) -> Element<'_, Message> {
@@ -392,49 +569,6 @@ fn other_editions(app: &App) -> Element<'_, Message> {
         }));
     }
     section.into()
-}
-
-fn album_tracks<'a>(app: &'a App, album: &'a Inspection) -> Element<'a, Message> {
-    let p = app.presentation();
-    let mut tracks = column![text("Track list").size(18).font(style::semibold())].spacing(8);
-    for warning in &album.warnings {
-        tracks = tracks.push(text(warning).color(p.colors.text_muted).size(13));
-    }
-    tracks
-        .extend(album.tracks.iter().enumerate().map(|(index, track)| {
-            let number = track
-                .metadata
-                .track_number
-                .map_or_else(|| index + 1, |tag| tag as usize);
-            let mut labels = column![text(&track.metadata.title).size(15)]
-                .spacing(3)
-                .width(Length::Fill);
-            if track.metadata.artist != track.metadata.album_artist {
-                labels = labels.push(
-                    text(&track.metadata.artist)
-                        .size(12)
-                        .color(p.colors.text_muted),
-                );
-            }
-            column![
-                rule::horizontal(1).style(p.line()),
-                row![
-                    text(number.to_string())
-                        .size(12)
-                        .color(p.colors.text_muted)
-                        .width(32),
-                    labels,
-                    text(track.duration.map(components::duration).unwrap_or_default())
-                        .size(12)
-                        .color(p.colors.text_muted),
-                ]
-                .padding([8, 5])
-                .spacing(12)
-                .align_y(Alignment::Center),
-            ]
-            .into()
-        }))
-        .into()
 }
 
 fn status(app: &App) -> Element<'_, Message> {

@@ -58,6 +58,10 @@ pub fn valid_job_id(id: &str) -> bool {
 }
 
 impl Recovery {
+    pub fn uses_music_folder(&self) -> bool {
+        self.music_root.is_some()
+    }
+
     pub fn new(job_id: String, plan: ExportPlan, output_path: String) -> Self {
         let total = plan.tracks.len();
         Self {
@@ -140,13 +144,20 @@ fn timestamp() -> u64 {
         .min(u64::MAX as u128) as u64
 }
 
-fn write_record(
+pub(crate) fn write_record(
     workdir: &Path,
     name: &str,
     mut temporary: tempfile::NamedTempFile,
     value: &impl Serialize,
 ) -> std::io::Result<()> {
-    temporary.write_all(&serde_json::to_vec(value)?)?;
+    let encoded = serde_json::to_vec(value)?;
+    if encoded.len() as u64 > MAX_RECORD_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "The download record is too large.",
+        ));
+    }
+    temporary.write_all(&encoded)?;
     temporary.as_file_mut().sync_all()?;
     temporary
         .persist(workdir.join(name))
@@ -154,7 +165,7 @@ fn write_record(
     crate::reviews::sync_directory(workdir)
 }
 
-fn private_directory(path: &Path) -> std::io::Result<()> {
+pub(crate) fn private_directory(path: &Path) -> std::io::Result<()> {
     if path
         .symlink_metadata()
         .is_ok_and(|metadata| metadata.file_type().is_symlink())
@@ -181,7 +192,7 @@ fn private_directory(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn read_record<T: DeserializeOwned>(path: &Path) -> Option<T> {
+pub(crate) fn read_record<T: DeserializeOwned>(path: &Path) -> Option<T> {
     let metadata = path.symlink_metadata().ok()?;
     if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > MAX_RECORD_BYTES
     {
@@ -199,7 +210,7 @@ fn read_record<T: DeserializeOwned>(path: &Path) -> Option<T> {
     serde_json::from_slice(&bytes).ok()
 }
 
-fn load(directory: &Path) -> Option<Recovery> {
+pub(crate) fn load(directory: &Path) -> Option<Recovery> {
     if directory.symlink_metadata().ok()?.file_type().is_symlink() {
         return None;
     }

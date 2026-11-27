@@ -30,7 +30,9 @@ impl App {
                         }
                     }
                 }
-                Event::Catalog(event) => tasks.push(self.catalog_finished(Ok(event))),
+                Event::Catalog(_) | Event::DownloadExported { .. } => {
+                    unreachable!("catalog and Downloads events use their own workers")
+                }
                 Event::Progress(progress) => self.progress = Some(progress),
                 Event::Inspected(inspection) => {
                     tasks.push(self.finish_inspection(inspection));
@@ -39,10 +41,6 @@ impl App {
                     tasks.push(self.finish_export(result));
                 }
                 Event::Failed(error) => {
-                    if self.catalog.pending.is_some() {
-                        tasks.push(self.catalog_finished(Err(error)));
-                        continue;
-                    }
                     if let Some(intake) = self.intake.take() {
                         if intake.cancelling {
                             self.notice = Some("Lookup cancelled.".into());
@@ -91,8 +89,21 @@ impl App {
         if let Some(request) = cover_request {
             tasks.push(self.request_intake_cover(request));
         }
+        let catalog_event = self.catalog_job.as_mut().and_then(Job::poll);
+        if self.catalog_job.as_ref().is_some_and(Job::is_finished) {
+            self.catalog_job = None;
+        }
+        match catalog_event {
+            Some(Event::Catalog(event)) => tasks.push(self.catalog_finished(Ok(event))),
+            Some(Event::Failed(error)) => tasks.push(self.catalog_finished(Err(error))),
+            _ => {}
+        }
+        self.tick_downloads();
         if self.close_after_job
             && self.job.is_none()
+            && self.catalog_job.is_none()
+            && self.downloads.active().is_none()
+            && !self.downloads.writing()
             && !self.dialog_open
             && !self.loading
             && self.save_pending == 0

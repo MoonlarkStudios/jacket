@@ -21,7 +21,8 @@ def capture_cases():
             for panel in ALBUM_PANELS:
                 yield compact, theme, panel or 'review', (['--panel', panel] if panel else [])
             for page in ('catalog', 'catalog-results', 'catalog-results-loading',
-                         'catalog-artist', 'catalog-album',
+                         'catalog-artist', 'catalog-album', 'catalog-album-review',
+                         'catalog-downloads', 'catalog-downloads-page',
                          'catalog-editions', 'catalog-unavailable'):
                 yield compact, theme, page, ['--panel', page]
             for scenario, panels in (

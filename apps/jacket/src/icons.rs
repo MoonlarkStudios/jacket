@@ -10,6 +10,7 @@ pub enum Icon {
     Link,
     Search,
     ArrowRight,
+    Download,
     Music,
     Folder,
     File,
@@ -34,6 +35,7 @@ pub fn view(icon: Icon, color: Color, size: f32) -> Element<'static, Message> {
         }
         Icon::Search => r#"<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>"#,
         Icon::ArrowRight => r#"<path d="M4 12h16m-6-6 6 6-6 6"/>"#,
+        Icon::Download => r#"<path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/>"#,
         Icon::Music => {
             r#"<path d="M9 18V5l11-2v13M9 8l11-2"/><ellipse cx="6" cy="18" rx="3" ry="2.5"/><ellipse cx="17" cy="16" rx="3" ry="2.5"/>"#
         }

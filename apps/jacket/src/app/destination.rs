@@ -4,6 +4,7 @@ use super::{persistence, App, Message, Panel};
 use audio_engine::{CollectionMode, ExportPlan, Metadata, OrganizedOutput, OutputKind};
 use iced::Task;
 use jacket_core::PathRule;
+pub use jacket_desktop::DownloadDestination as ExportDestination;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -28,7 +29,7 @@ impl MusicFolder {
             .chain(paths)
             .map(|path| {
                 if path.parent() != Some(directory) {
-                    return Err("This rule puts album tracks in different folders. Use a shared rule such as {{album_artist}}/{{album}}/{{song}}, or choose Save As….");
+                    return Err("This rule puts album tracks in different folders. Use a shared rule such as {{album_artist}}/{{album}}/{{song}}, or choose Queue As….");
                 }
                 Ok(path.file_name().expect("resolved filename").to_string_lossy().into_owned())
             })
@@ -45,12 +46,6 @@ pub struct MusicFolderEditor {
     pub customize: bool,
     pub(super) direct: bool,
     pub(super) return_to: Panel,
-}
-
-#[derive(Clone)]
-pub enum ExportDestination {
-    Picked(PathBuf),
-    Organized(OrganizedOutput),
 }
 
 impl App {
@@ -362,14 +357,18 @@ impl App {
         let (Some(desktop), Some(review)) = (self.desktop.clone(), &self.review) else {
             return Task::none();
         };
-        let draft = review.draft();
         let identity = review.identity();
+        let queued_identity = identity.clone();
         self.invalidate_album_scan();
         self.dialog_open = true;
-        self.notice = Some("Preparing your export…".into());
+        self.notice = Some("Adding to Downloads…".into());
         persistence::background(
-            move || persistence::persist_review(&desktop, draft),
-            move |result| Message::ExportSaved(Box::new(plan), destination, identity, result),
+            move || {
+                desktop
+                    .queue_download(plan, destination, queued_identity)
+                    .map(Box::new)
+            },
+            move |result| Message::DownloadQueued(identity, result),
         )
     }
 }

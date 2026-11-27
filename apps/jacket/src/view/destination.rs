@@ -72,6 +72,13 @@ pub fn save_bar(app: &App, compact: bool) -> Element<'_, Message> {
     let mut destination = column![readable_path(dest_label, 34, app)]
         .spacing(4)
         .width(Length::Fill);
+    if configured {
+        destination = destination.push(
+            text(format!("{} selected", track_count(review.selected.len())))
+                .size(11)
+                .color(p.colors.text_muted),
+        );
+    }
     if album && configured {
         if let Some((kept, add, renamed)) = counts {
             let mut summary = format!("{kept} already there · {add} to add");
@@ -105,20 +112,9 @@ pub fn save_bar(app: &App, compact: bool) -> Element<'_, Message> {
         ));
     }
     let label = if organized && !configured {
-        "Choose folder…".to_owned()
-    } else if album {
-        match counts {
-            Some((_, 1, _)) => "Add 1 track".into(),
-            Some((_, count, _)) if count > 1 => format!("Add {count} tracks"),
-            _ => "Save album".into(),
-        }
+        "Choose folder…"
     } else {
-        match kind {
-            OutputKind::File => "Save",
-            OutputKind::Folder => "Save folder…",
-            OutputKind::Zip => "Save ZIP…",
-        }
-        .into()
+        "Queue download"
     };
     let mut actions = row![if preview {
         choice(
@@ -142,7 +138,7 @@ pub fn save_bar(app: &App, compact: bool) -> Element<'_, Message> {
     if album && !preview && configured {
         actions = actions.push(choice(
             "preview-files",
-            "Files…".into(),
+            "Preview files".into(),
             Message::Preview,
             app.can_preview(),
             false,
@@ -154,7 +150,7 @@ pub fn save_bar(app: &App, compact: bool) -> Element<'_, Message> {
     if organized {
         actions = actions.push(choice(
             "save-as",
-            "Save As…".into(),
+            "Queue As…".into(),
             Message::SaveAs,
             app.can_export(),
             false,
@@ -162,7 +158,7 @@ pub fn save_bar(app: &App, compact: bool) -> Element<'_, Message> {
     }
     actions = actions.push(choice(
         "save-output",
-        label,
+        label.into(),
         Message::Save,
         app.can_export() && (!album || !configured || counts.is_some()),
         true,

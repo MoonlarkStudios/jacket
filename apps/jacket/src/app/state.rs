@@ -1,5 +1,6 @@
 use super::catalog::{Catalog as AlbumCatalog, CatalogAction};
-use super::destination::{ExportDestination, MusicFolder, MusicFolderEditor};
+use super::destination::{MusicFolder, MusicFolderEditor};
+use super::downloads::{DownloadAction, Downloads};
 use super::intake::{Intake, IntakeCoverRequest};
 use super::receipt::{Receipt, Recording};
 use crate::editor::{self, Editor};
@@ -13,7 +14,7 @@ use jacket_desktop::artwork_assets::Asset;
 use jacket_desktop::browser_sessions::Catalog;
 use jacket_desktop::downloader_updates::{self, Status};
 use jacket_desktop::recovery::Recovery;
-use jacket_desktop::{Desktop, Job};
+use jacket_desktop::{Desktop, Download, Job};
 use std::fmt;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -64,6 +65,7 @@ pub struct Boot {
     pub(super) desktop: Desktop,
     pub(super) draft: Option<jacket_core::ReviewDraft>,
     pub(super) recovery: Option<Recovery>,
+    pub(super) downloads: Vec<Download>,
     pub(super) appearance: Appearance,
     pub(super) appearance_valid: bool,
     pub(super) music_folder: Option<MusicFolder>,
@@ -81,6 +83,7 @@ pub enum Message {
     RetryStartup,
     Booted(Result<Box<Boot>, String>),
     Catalog(CatalogAction),
+    Downloads(DownloadAction),
     CatalogThumbnail {
         url: String,
         shape: crate::artwork::ThumbnailShape,
@@ -127,12 +130,7 @@ pub enum Message {
     ConfirmReset,
     Resume,
     DismissRecovery,
-    ExportSaved(
-        Box<ExportPlan>,
-        ExportDestination,
-        CompletionIdentity,
-        Result<bool, String>,
-    ),
+    DownloadQueued(CompletionIdentity, Result<Box<Download>, String>),
     ReviewDiscarded(Result<bool, String>),
     UndoBulk,
     NumberTracks,
@@ -231,6 +229,8 @@ pub struct App {
     pub desktop: Option<Desktop>,
     pub review: Option<Review>,
     pub catalog: AlbumCatalog,
+    pub downloads: Downloads,
+    pub(super) catalog_job: Option<Job>,
     pub job: Option<Job>,
     pub url: String,
     pub intent: SourceIntent,

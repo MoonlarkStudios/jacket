@@ -30,7 +30,7 @@ pub(super) fn persist_review(desktop: &Desktop, draft: ReviewDraft) -> Result<bo
     if desktop.save_review(draft.clone())? {
         return Ok(true);
     }
-    let stored=desktop.load_review()?.ok_or("This review has already been discarded or exported. Start a new review before saving edits.")?;
+    let stored=desktop.read_review()?.ok_or("This review has already been discarded or exported. Start a new review before saving edits.")?;
     if serde_json::to_vec(&stored).map_err(|error| error.to_string())?
         == serde_json::to_vec(&draft).map_err(|error| error.to_string())?
     {
@@ -42,8 +42,20 @@ pub(super) fn persist_review(desktop: &Desktop, draft: ReviewDraft) -> Result<bo
 
 pub(super) fn load() -> Result<Boot, String> {
     let desktop = Desktop::new()?;
+    let (downloads, download_warning) = match desktop.downloads() {
+        Ok(items) => (items, None),
+        Err(error) => (
+            Vec::new(),
+            Some(format!("Couldn’t read Downloads. {error}")),
+        ),
+    };
+    for item in &downloads {
+        if let Some(identity) = &item.recipe.review_identity {
+            let _ = desktop.retire_queued_review(identity);
+        }
+    }
     let (draft, mut warning) = match desktop.load_review() {
-        Ok(draft) => (draft, None),
+        Ok(draft) => (draft, download_warning),
         Err(error) => (None, Some(error)),
     };
     let (appearance, appearance_valid) = match read_appearance(&desktop) {
@@ -62,6 +74,7 @@ pub(super) fn load() -> Result<Boot, String> {
     };
     Ok(Boot {
         recovery: desktop.pending_export(),
+        downloads,
         downloader_preferences: desktop.downloader_preferences()?,
         desktop,
         draft,
@@ -100,7 +113,7 @@ pub(super) fn read_music_folder(desktop: &Desktop) -> Result<Option<MusicFolder>
         "music folder preferences",
     )
     .map_err(|_| {
-        "Jacket’s music folder setting could not be read. Choose a music folder or use Save As…"
+        "Jacket’s music folder setting could not be read. Choose a music folder or use Queue As…"
     })?;
     if folder
         .as_ref()

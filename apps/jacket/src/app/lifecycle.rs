@@ -56,6 +56,9 @@ impl App {
     pub(super) fn close(&mut self) -> Task<Message> {
         self.close_after_job = true;
         if self.job.is_some()
+            || self.catalog_job.is_some()
+            || self.downloads.active().is_some()
+            || self.downloads.writing()
             || self.dialog_open
             || self.loading
             || self.save_pending > 0
@@ -115,6 +118,7 @@ impl App {
     }
 
     pub(super) fn clear_review(&mut self) {
+        self.catalog.clear_album_review();
         self.editor = None;
         self.collection_editor_anchor = None;
         self.arranged_track = None;

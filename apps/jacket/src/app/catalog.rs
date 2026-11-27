@@ -1,7 +1,7 @@
 use super::{catalog_media::CatalogMedia, persistence, App, Message, Panel};
 use audio_engine::Inspection;
 use iced::{widget::operation, Task};
-use jacket_core::SourceLink;
+use jacket_core::{CompletionIdentity, SourceLink};
 use jacket_desktop::catalog::{SearchKind, SearchRequest};
 use jacket_desktop::youtube_music::{AlbumEdition, AlbumPage, ArtistPage, SearchHit, SearchItem};
 use jacket_desktop::{CatalogEvent, Job};
@@ -89,6 +89,12 @@ struct HistoryEntry {
     position: BrowsePosition,
 }
 
+struct AlbumReview {
+    album_id: String,
+    session_id: String,
+    parked: Option<(CatalogPage, f32)>,
+}
+
 pub struct Catalog {
     pub visible: bool,
     pub query: String,
@@ -108,6 +114,7 @@ pub struct Catalog {
     history: Vec<HistoryEntry>,
     pending_origin: Option<BrowsePosition>,
     review_origin: Option<BrowsePosition>,
+    album_review: Option<AlbumReview>,
     song_focus: Option<String>,
     song_menu: Option<String>,
 }
@@ -133,6 +140,7 @@ impl Catalog {
             history: Vec::new(),
             pending_origin: None,
             review_origin: None,
+            album_review: None,
             song_focus: None,
             song_menu: None,
         }
@@ -186,6 +194,19 @@ impl Catalog {
         }
     }
 
+    pub(super) fn reviewed_album_on_page(&self, identity: &CompletionIdentity) -> bool {
+        self.album_review.as_ref().is_some_and(|review| {
+            review.session_id == identity.session_id
+                && self
+                    .album()
+                    .is_some_and(|album| album.id == review.album_id)
+        })
+    }
+
+    pub(super) fn clear_album_review(&mut self) {
+        self.album_review = None;
+    }
+
     pub fn edition_shelf(&self) -> Option<&EditionShelf> {
         match &self.page {
             CatalogPage::Album(_, shelf) => Some(shelf),
@@ -224,10 +245,14 @@ impl Catalog {
             .map(|hit| hit.item.clone())
     }
 
-    fn position(&self, focus: String) -> BrowsePosition {
+    fn position(&self, focus: String, track_scroll: f32) -> BrowsePosition {
         BrowsePosition {
             filter: self.filter,
-            scroll_y: self.scroll_y,
+            scroll_y: if self.album().is_some() {
+                track_scroll
+            } else {
+                self.scroll_y
+            },
             focus,
         }
     }
@@ -290,7 +315,39 @@ impl Catalog {
 }
 
 impl App {
+    pub fn reviewing_catalog_album(&self) -> bool {
+        self.catalog.visible
+            && self
+                .review
+                .as_ref()
+                .is_some_and(|review| self.catalog.reviewed_album_on_page(&review.identity()))
+    }
+
+    pub(super) fn park_catalog_album(&mut self) {
+        if self.reviewing_catalog_album() {
+            let page = std::mem::replace(&mut self.catalog.page, CatalogPage::Search);
+            if let Some(review) = &mut self.catalog.album_review {
+                review.parked = Some((page, self.track_scroll));
+            }
+        }
+    }
+
+    pub(super) fn cancel_catalog(&mut self) {
+        if let Some(job) = &self.catalog_job {
+            self.catalog.cancelling = true;
+            job.cancel();
+        }
+    }
+
     pub(super) fn update_catalog(&mut self, action: CatalogAction) -> Task<Message> {
+        if self.downloads.is_open() && matches!(action, CatalogAction::FocusSearch) {
+            self.downloads.dismiss();
+            let focus = self.update_catalog(action);
+            return Task::batch([focus, self.restore_discovery_scroll()]);
+        }
+        if self.downloads.is_open() && matches!(action, CatalogAction::FocusResult) {
+            return Task::none();
+        }
         if self.panel != Panel::Workspace
             || (!self.catalog.visible
                 && !matches!(action, CatalogAction::Browse | CatalogAction::FocusSearch))
@@ -322,7 +379,8 @@ impl App {
             CatalogAction::Cancel => {
                 self.catalog.search_due = None;
                 self.catalog.queued_action = None;
-                return self.update(Message::Cancel);
+                self.cancel_catalog();
+                return Task::none();
             }
             CatalogAction::Scrolled(offset) => {
                 self.catalog.scroll_y = offset;
@@ -423,6 +481,7 @@ impl App {
                 ]);
             }
             CatalogAction::FocusSearch => {
+                self.park_catalog_album();
                 self.catalog.visible = true;
                 self.catalog.page = CatalogPage::Search;
                 self.catalog.media.clear_release_artwork();
@@ -449,12 +508,24 @@ impl App {
             }
             CatalogAction::ReturnToReview => {
                 self.catalog.search_due = None;
-                self.catalog.visible = false;
                 self.catalog.song = None;
-                if let Some(focus) = self.catalog.song_focus.take() {
-                    self.catalog.review_origin = Some(self.catalog.position(focus));
-                }
                 self.catalog.confirm_replace = false;
+                if let (Some(review), Some(album)) = (&self.review, &mut self.catalog.album_review)
+                {
+                    if review.identity().session_id == album.session_id {
+                        if let Some((page, scroll)) = album.parked.take() {
+                            let origin = self
+                                .catalog
+                                .position("return-to-review".into(), self.track_scroll);
+                            return self.finish_navigation(page, Some(origin), Some(scroll));
+                        }
+                    }
+                }
+                self.catalog.visible = false;
+                if let Some(focus) = self.catalog.song_focus.take() {
+                    self.catalog.review_origin =
+                        Some(self.catalog.position(focus, self.track_scroll));
+                }
             }
             CatalogAction::Filter(filter) => {
                 if self.catalog.search_home()
@@ -639,13 +710,25 @@ impl App {
                     return operation::focus(focus);
                 }
                 if let Some(previous) = self.catalog.history.pop() {
+                    self.park_catalog_album();
                     self.catalog.page = previous.page;
                     self.catalog.media.clear_release_artwork();
                     return self.restore_catalog_position(previous.position);
                 }
+                if !self.catalog.search_home() {
+                    self.park_catalog_album();
+                    self.catalog.page = CatalogPage::Search;
+                    return Task::batch([
+                        self.catalog_scroll(0.0),
+                        operation::focus("album-search"),
+                    ]);
+                }
                 return self.update_catalog(CatalogAction::ClearSearch);
             }
             CatalogAction::Review | CatalogAction::ConfirmReview => {
+                if self.reviewing_catalog_album() {
+                    return Task::none();
+                }
                 if self.catalog.song.is_none() && self.catalog.album().is_none() {
                     return Task::none();
                 }
@@ -657,6 +740,11 @@ impl App {
                     self.catalog.confirm_replace = true;
                     return operation::focus("keep-current-review");
                 }
+                let album_id = if self.catalog.song.is_none() {
+                    self.catalog.album().map(|album| album.id.clone())
+                } else {
+                    None
+                };
                 let inspection = self
                     .catalog
                     .song
@@ -669,10 +757,27 @@ impl App {
                         .song_focus
                         .take()
                         .unwrap_or_else(|| self.catalog.page.initial_focus().into());
-                    self.catalog.review_origin = Some(self.catalog.position(focus));
+                    self.catalog.review_origin = album_id
+                        .is_none()
+                        .then(|| self.catalog.position(focus, self.track_scroll));
                     self.catalog.confirm_replace = false;
                     self.url.clone_from(&inspection.source_url);
-                    return self.finish_inspection(inspection);
+                    let scroll = if album_id.is_some() {
+                        self.track_scroll
+                    } else {
+                        0.0
+                    };
+                    let admitted = self.finish_inspection_at(inspection, scroll);
+                    if let (Some(album_id), Some(review)) = (album_id, &self.review) {
+                        self.catalog.album_review = Some(AlbumReview {
+                            album_id,
+                            session_id: review.identity().session_id,
+                            parked: None,
+                        });
+                        self.catalog.visible = true;
+                        return admitted.chain(operation::focus("review-select-all"));
+                    }
+                    return admitted;
                 }
             }
             CatalogAction::FocusResult
@@ -712,18 +817,44 @@ impl App {
 
     fn catalog_scroll(&mut self, offset: f32) -> Task<Message> {
         self.catalog.scroll_y = offset;
+        self.restore_catalog_scroll()
+    }
+
+    fn restore_catalog_scroll(&self) -> Task<Message> {
         operation::scroll_to(
             super::CATALOG_SCROLL_ID,
-            iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: offset },
+            iced::widget::scrollable::AbsoluteOffset {
+                x: 0.0,
+                y: self.catalog.scroll_y,
+            },
         )
+    }
+
+    pub(super) fn restore_discovery_scroll(&self) -> Task<Message> {
+        if self.catalog.visible && self.catalog.album().is_none() {
+            self.restore_catalog_scroll()
+        } else {
+            self.restore_scroll()
+        }
     }
 
     fn restore_catalog_position(&mut self, position: BrowsePosition) -> Task<Message> {
         self.catalog.filter = position.filter;
-        Task::batch([
-            self.catalog_scroll(position.scroll_y),
-            operation::focus(position.focus),
-        ])
+        let scroll = if self.catalog.album().is_some() {
+            self.track_scroll = position.scroll_y;
+            self.restore_scroll()
+        } else {
+            self.catalog_scroll(position.scroll_y)
+        };
+        let focus = if position.focus == "return-to-review"
+            && self.review.is_none()
+            && self.result.is_none()
+        {
+            self.catalog.page.initial_focus().to_owned()
+        } else {
+            position.focus
+        };
+        Task::batch([scroll, operation::focus(focus)])
     }
 
     fn start_navigation(
@@ -734,7 +865,7 @@ impl App {
     ) {
         if job.is_ok() {
             self.catalog.song_focus = None;
-            self.catalog.pending_origin = Some(self.catalog.position(focus));
+            self.catalog.pending_origin = Some(self.catalog.position(focus, self.track_scroll));
         }
         self.start_catalog(pending, job);
     }
@@ -743,6 +874,7 @@ impl App {
         &mut self,
         page: CatalogPage,
         origin: Option<BrowsePosition>,
+        track_scroll: Option<f32>,
     ) -> Task<Message> {
         let initial_focus = page.initial_focus();
         let previous = std::mem::replace(&mut self.catalog.page, page);
@@ -753,7 +885,27 @@ impl App {
                 position,
             });
         }
-        Task::batch([self.catalog_scroll(0.0), operation::focus(initial_focus)])
+        let (scroll, focus) = if self.reviewing_catalog_album() {
+            let parked = self
+                .catalog
+                .album_review
+                .as_mut()
+                .and_then(|album| album.parked.take());
+            (
+                track_scroll
+                    .or_else(|| parked.map(|(_, scroll)| scroll))
+                    .unwrap_or(0.0),
+                "review-select-all",
+            )
+        } else {
+            (0.0, initial_focus)
+        };
+        self.track_scroll = scroll;
+        Task::batch([
+            self.catalog_scroll(0.0),
+            self.restore_scroll(),
+            operation::focus(focus),
+        ])
     }
 
     fn start_catalog(&mut self, pending: CatalogPending, job: Result<Job, String>) {
@@ -762,7 +914,7 @@ impl App {
             Ok(job) => {
                 self.catalog.pending = Some(pending);
                 self.catalog.cancelling = false;
-                self.job = Some(job);
+                self.catalog_job = Some(job);
             }
             Err(error) => self.catalog.error = Some(error),
         }
@@ -810,6 +962,7 @@ impl App {
                         expanded_hits: None,
                     },
                     origin,
+                    None,
                 );
             }
             Ok(CatalogEvent::ArtistReleases(hits)) => {
@@ -825,7 +978,7 @@ impl App {
                 }
             }
             Ok(CatalogEvent::Album(album)) => {
-                return self.finish_navigation(CatalogPage::album(album), origin);
+                return self.finish_navigation(CatalogPage::album(album), origin, None);
             }
             Ok(CatalogEvent::Editions(rows)) => {
                 if let CatalogPage::Album(_, shelf) = &mut self.catalog.page {
@@ -1050,7 +1203,7 @@ impl App {
         if let Some(focus) = focus {
             self.catalog.history.push(HistoryEntry {
                 page: CatalogPage::Search,
-                position: self.catalog.position(focus),
+                position: self.catalog.position(focus, self.track_scroll),
             });
         }
         if scenario != "catalog-results-loading" {
@@ -1138,15 +1291,26 @@ mod tests {
         assert!(app.catalog.visible);
         assert_eq!(app.catalog.album().unwrap().inspection.tracks.len(), 20);
 
+        app.track_scroll = 104.0;
         let _ = app.update_catalog(CatalogAction::Review);
         let review = app.review.as_ref().unwrap();
-        assert!(!app.catalog.visible);
+        assert!(app.reviewing_catalog_album());
+        assert_eq!(app.track_scroll, 104.0);
         assert_eq!(
             review.inspection.title,
             "Room to breathe (Expanded Edition)"
         );
         assert_eq!(review.inspection.tracks.len(), 20);
         assert_eq!(review.selected.len(), 20);
+        let identity = review.identity();
+
+        let _ = app.update_catalog(CatalogAction::Back);
+        assert!(app.catalog.search_home());
+        assert!(!app.can_export());
+        let _ = app.update_catalog(CatalogAction::ReturnToReview);
+        assert!(app.reviewing_catalog_album());
+        assert_eq!(app.review.as_ref().unwrap().identity(), identity);
+        assert_eq!(app.track_scroll, 104.0);
     }
 
     #[test]
@@ -1162,21 +1326,23 @@ mod tests {
         app.catalog.filter = Some(SearchKind::Songs);
         app.catalog.scroll_y = 74.0;
         let song_link = song_album_id("abcdefghijk");
-        app.catalog.pending_origin = Some(app.catalog.position(song_link.clone()));
+        app.catalog.pending_origin =
+            Some(app.catalog.position(song_link.clone(), app.track_scroll));
         let _ = app.catalog_finished(Ok(CatalogEvent::Album(Box::new(album))));
         assert_eq!(app.catalog.back_label(), "Back to results");
         assert_eq!(app.catalog.scroll_y, 0.0);
         assert_eq!(app.catalog.history[0].position.focus, song_link);
 
-        app.catalog.scroll_y = 128.0;
+        app.track_scroll = 128.0;
         let credit_link = artist_credit_id(0);
-        app.catalog.pending_origin = Some(app.catalog.position(credit_link.clone()));
+        app.catalog.pending_origin =
+            Some(app.catalog.position(credit_link.clone(), app.track_scroll));
         let _ = app.catalog_finished(Ok(CatalogEvent::Artist(artist)));
         assert_eq!(app.catalog.back_label(), "Back to album");
         assert_eq!(app.catalog.history[1].position.focus, credit_link);
         let _ = app.update_catalog(CatalogAction::Back);
         assert!(app.catalog.album().is_some());
-        assert_eq!(app.catalog.scroll_y, 128.0);
+        assert_eq!(app.track_scroll, 128.0);
 
         let _ = app.update_catalog(CatalogAction::Back);
         assert!(matches!(app.catalog.page, CatalogPage::Search));
@@ -1246,7 +1412,7 @@ esac
         );
         let finish_job = |app: &mut App| {
             let deadline = Instant::now() + Duration::from_secs(5);
-            while app.job.is_some() {
+            while app.catalog_job.is_some() {
                 assert!(
                     Instant::now() < deadline,
                     "catalog fixture did not complete"
@@ -1328,7 +1494,8 @@ esac
         let album = app.catalog.album().unwrap().clone();
         let history = app.catalog.history.len();
         app.catalog.pending = Some(CatalogPending::Album);
-        app.catalog.pending_origin = Some(app.catalog.position(artist_credit_id(0)));
+        app.catalog.pending_origin =
+            Some(app.catalog.position(artist_credit_id(0), app.track_scroll));
         app.catalog.cancelling = true;
 
         let _ = app.catalog_finished(Ok(CatalogEvent::Album(Box::new(album))));
